@@ -242,6 +242,84 @@ class AppTheme {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     ),
+
+    // FloatingActionButton Theme
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: AppColors.primaryPurple,
+      foregroundColor: AppColors.white,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
+    ),
+
+    // Switch Theme
+    switchTheme: SwitchThemeData(
+      thumbColor: MaterialStateProperty.resolveWith<Color>(
+        (Set<MaterialState> states) {
+          if (states.contains(MaterialState.selected)) {
+            return AppColors.white;
+          }
+          return AppColors.lightNeutral400;
+        },
+      ),
+      trackColor: MaterialStateProperty.resolveWith<Color>(
+        (Set<MaterialState> states) {
+          if (states.contains(MaterialState.selected)) {
+            return AppColors.primaryPurple;
+          }
+          return AppColors.lightNeutral300;
+        },
+      ),
+    ),
+
+    // Checkbox Theme
+    checkboxTheme: CheckboxThemeData(
+      fillColor: MaterialStateProperty.resolveWith<Color>(
+        (Set<MaterialState> states) {
+          if (states.contains(MaterialState.selected)) {
+            return AppColors.primaryPurple;
+          }
+          return AppColors.lightNeutral300;
+        },
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+    ),
+
+    // Radio Theme
+    radioTheme: RadioThemeData(
+      fillColor: MaterialStateProperty.resolveWith<Color>(
+        (Set<MaterialState> states) {
+          if (states.contains(MaterialState.selected)) {
+            return AppColors.primaryPurple;
+          }
+          return AppColors.lightNeutral400;
+        },
+      ),
+    ),
+
+    // Slider Theme
+    sliderTheme: const SliderThemeData(
+      activeTrackColor: AppColors.primaryPurple,
+      inactiveTrackColor: AppColors.lightNeutral300,
+      thumbColor: AppColors.primaryPurple,
+      overlayColor: Color(0x1A6B4CE6),
+    ),
+
+    // ProgressIndicator Theme
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: AppColors.primaryPurple,
+      linearTrackColor: AppColors.lightNeutral200,
+      circularTrackColor: AppColors.lightNeutral200,
+    ),
+
+    // SnackBar Theme
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: AppColors.lightNeutral800,
+      contentTextStyle: bodyMedium.copyWith(color: AppColors.white),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      behavior: SnackBarBehavior.floating,
+    ),
   );
 
   // Dark Theme
@@ -282,6 +360,88 @@ class AppTheme {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       color: AppColors.darkCard,
       shadowColor: AppColors.shadowDark,
+    ),
+
+    // Elevated Button Theme
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        backgroundColor: AppColors.primaryPurple,
+        foregroundColor: AppColors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: buttonMedium,
+      ),
+    ),
+
+    // Outlined Button Theme
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        foregroundColor: AppColors.primaryPurple,
+        side: const BorderSide(color: AppColors.primaryPurple),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: buttonMedium,
+      ),
+    ),
+
+    // Input Decoration Theme
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: AppColors.darkSurface,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: AppColors.lightNeutral700),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: AppColors.lightNeutral700),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: AppColors.primaryPurple, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      labelStyle: bodyMedium.copyWith(color: AppColors.lightNeutral400),
+      hintStyle: bodyMedium.copyWith(color: AppColors.lightNeutral600),
+    ),
+
+    // Bottom Navigation Bar Theme
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.darkCard,
+      selectedItemColor: AppColors.primaryPurple,
+      unselectedItemColor: AppColors.lightNeutral500,
+      selectedLabelStyle: labelMedium,
+      unselectedLabelStyle: labelMedium,
+      type: BottomNavigationBarType.fixed,
+      elevation: 8,
+    ),
+
+    // Dialog Theme
+    dialogTheme: DialogThemeData(
+      backgroundColor: AppColors.darkCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 8,
+      titleTextStyle: headlineMedium.copyWith(color: AppColors.white),
+      contentTextStyle: bodyMedium.copyWith(color: AppColors.lightNeutral300),
+    ),
+
+    // FloatingActionButton Theme
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: AppColors.primaryPurple,
+      foregroundColor: AppColors.white,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
+    ),
+
+    // SnackBar Theme
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: AppColors.darkCard,
+      contentTextStyle: bodyMedium.copyWith(color: AppColors.white),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      behavior: SnackBarBehavior.floating,
     ),
   );
 }

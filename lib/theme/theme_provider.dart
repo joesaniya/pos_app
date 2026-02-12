@@ -6,6 +6,7 @@ class ThemeProvider with ChangeNotifier {
 
   ThemeMode get themeMode => _themeMode;
   bool get isDarkMode => _themeMode == ThemeMode.dark;
+  bool get isLightMode => _themeMode == ThemeMode.light;
 
   ThemeProvider() {
     _loadThemeMode();
@@ -37,6 +38,20 @@ class ThemeProvider with ChangeNotifier {
     await _saveThemeMode();
   }
 
+  /// Set light theme
+  Future<void> setLightTheme() async {
+    _themeMode = ThemeMode.light;
+    notifyListeners();
+    await _saveThemeMode();
+  }
+
+  /// Set dark theme
+  Future<void> setDarkTheme() async {
+    _themeMode = ThemeMode.dark;
+    notifyListeners();
+    await _saveThemeMode();
+  }
+
   /// Save theme mode to shared preferences
   Future<void> _saveThemeMode() async {
     try {
@@ -44,6 +59,18 @@ class ThemeProvider with ChangeNotifier {
       await prefs.setBool('isDarkMode', _themeMode == ThemeMode.dark);
     } catch (e) {
       debugPrint('Error saving theme mode: $e');
+    }
+  }
+
+  /// Clear saved theme preference
+  Future<void> clearThemePreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('isDarkMode');
+      _themeMode = ThemeMode.light;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing theme preference: $e');
     }
   }
 }

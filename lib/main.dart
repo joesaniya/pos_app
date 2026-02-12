@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/common_provider.dart';
+import 'package:pos_app/screens/dashboard_screen1.dart';
 import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
@@ -54,7 +55,8 @@ class MyApp extends StatelessWidget {
                     child: child!,
                   );
                 },
-                home: LoginScreen(),
+                // home: LoginScreen(),
+                home: DashboardScreen(),
                 // home: const SplashScreen(),
               );
             },

@@ -1,0 +1,25 @@
+import 'package:pos_app/providers/onboard_provider.dart';
+import 'package:pos_app/providers/order_provider.dart';
+import 'package:pos_app/providers/splash_provider.dart';
+import 'package:pos_app/providers/table_provider.dart';
+import 'package:pos_app/theme/theme_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
+
+class ProviderHelperClass {
+  static ProviderHelperClass? _instance;
+
+  static ProviderHelperClass get instance {
+    _instance ??= ProviderHelperClass();
+    return _instance!;
+  }
+
+  List<SingleChildWidget> providerLists = [
+    // ChangeNotifierProvider(create: (context) => SplashProvider(context)),
+    ChangeNotifierProvider(create: (_) => SplashProvider()),
+    ChangeNotifierProvider(create: (_) => ThemeProvider()),
+    ChangeNotifierProvider(create: (_) => OnboardingProvider()), 
+    ChangeNotifierProvider(create: (_) => TableProvider()),
+    ChangeNotifierProvider(create: (_) => OrderProvider()),
+  ];
+}

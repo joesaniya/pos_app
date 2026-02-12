@@ -1,156 +1,113 @@
-import 'package:flutter/foundation.dart';
-import '../models/menu_item.dart';
+import 'package:flutter/material.dart';
+import 'package:pos_app/models/inventory_item.dart';
 
-class OrderProvider with ChangeNotifier {
-  final List<MenuItem> _menuItems = [
-    MenuItem(
-      id: '1',
-      name: 'Double Cheese Margherita',
-      category: 'Pizza',
-      price: 268,
-      image:
-          'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=400',
-      rating: 4.5,
-      reviews: 388,
-      description:
-          'Enjoy an abundance of rich cheese, Mozzarella loaded along with fresh vegetables',
-      isVeg: true,
-    ),
-    MenuItem(
-      id: '2',
-      name: 'Classic Burger',
-      category: 'Burgers',
-      price: 199,
-      image:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400',
-      rating: 4.2,
-      reviews: 256,
-      description:
-          'Juicy beef patty with fresh lettuce, tomatoes, and special sauce',
-      isVeg: false,
-    ),
-    MenuItem(
-      id: '3',
-      name: 'Pepperoni Pizza',
-      category: 'Pizza',
-      price: 299,
-      image:
-          'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400',
-      rating: 4.7,
-      reviews: 512,
-      description:
-          'Classic pepperoni pizza with extra cheese and Italian herbs',
-      isVeg: false,
-    ),
-    MenuItem(
-      id: '4',
-      name: 'Coca Cola',
-      category: 'Beverages',
-      price: 50,
-      image: 'https://images.unsplash.com/photo-1554866585-cd94860890b7?w=400',
-      rating: 4.0,
-      reviews: 180,
-      description: 'Chilled Coca Cola 330ml',
-      isVeg: true,
-    ),
-    MenuItem(
-      id: '5',
-      name: 'Grilled Chicken',
-      category: 'Chicken',
-      price: 350,
-      image:
-          'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?w=400',
-      rating: 4.6,
-      reviews: 420,
-      description: 'Tender grilled chicken with herbs and spices',
-      isVeg: false,
-    ),
-    MenuItem(
-      id: '6',
-      name: 'Veggie Supreme Pizza',
-      category: 'Pizza',
-      price: 280,
-      image:
-          'https://images.unsplash.com/photo-1571997478779-2adcbbe9ab2f?w=400',
-      rating: 4.3,
-      reviews: 310,
-      description: 'Loaded with fresh vegetables and premium mozzarella',
-      isVeg: true,
-    ),
-  ];
 
-  final List<CartItem> _cartItems = [];
-  String _selectedCategory = 'All';
+class OrdersProvider extends ChangeNotifier {
+  List<Order> _orders = [];
+  String _searchQuery = '';
+  OrderStatus? _filterStatus;
 
-  List<MenuItem> get menuItems {
-    if (_selectedCategory == 'All') {
-      return _menuItems;
-    }
-    return _menuItems
-        .where((item) => item.category == _selectedCategory)
-        .toList();
+  List<Order> get orders => _getFilteredOrders();
+  String get searchQuery => _searchQuery;
+  OrderStatus? get filterStatus => _filterStatus;
+
+  OrdersProvider() {
+    _initializeOrders();
   }
 
-  List<CartItem> get cartItems => _cartItems;
-  String get selectedCategory => _selectedCategory;
-
-  int get cartItemCount =>
-      _cartItems.fold(0, (sum, item) => sum + item.quantity);
-
-  double get cartTotal =>
-      _cartItems.fold(0, (sum, item) => sum + item.totalPrice);
-
-  List<String> get categories => [
-    'All',
-    'Pizza',
-    'Beverages',
-    'Burgers',
-    'Chicken',
-  ];
-
-  void setCategory(String category) {
-    _selectedCategory = category;
+  void _initializeOrders() {
+    _orders = [
+      Order(
+        id: 'ORD001',
+        tableNumber: '1',
+        items: [],
+        orderTime: DateTime.now().subtract(const Duration(minutes: 15)),
+        status: OrderStatus.preparing,
+        customerName: 'John Doe',
+      ),
+      Order(
+        id: 'ORD002',
+        tableNumber: '3',
+        items: [],
+        orderTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        status: OrderStatus.ready,
+      ),
+      Order(
+        id: 'ORD003',
+        tableNumber: '5',
+        items: [],
+        orderTime: DateTime.now().subtract(const Duration(minutes: 45)),
+        status: OrderStatus.pending,
+        customerName: 'Sarah Smith',
+      ),
+      Order(
+        id: 'ORD004',
+        tableNumber: '7',
+        items: [],
+        orderTime: DateTime.now().subtract(const Duration(hours: 1)),
+        status: OrderStatus.preparing,
+      ),
+      Order(
+        id: 'ORD005',
+        tableNumber: '12',
+        items: [],
+        orderTime: DateTime.now().subtract(const Duration(hours: 2)),
+        status: OrderStatus.pending,
+        customerName: 'Mike Johnson',
+      ),
+    ];
     notifyListeners();
   }
 
-  void addToCart(MenuItem item) {
-    final existingIndex = _cartItems.indexWhere(
-      (cartItem) => cartItem.menuItem.id == item.id,
-    );
+  List<Order> _getFilteredOrders() {
+    var filtered = _orders;
 
-    if (existingIndex != -1) {
-      _cartItems[existingIndex].quantity++;
-    } else {
-      _cartItems.add(CartItem(menuItem: item));
+    // Filter by status
+    if (_filterStatus != null) {
+      filtered = filtered.where((order) => order.status == _filterStatus).toList();
     }
+
+    // Filter by search query
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((order) {
+        return order.id.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+               order.tableNumber.contains(_searchQuery) ||
+               (order.customerName?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
+      }).toList();
+    }
+
+    return filtered;
+  }
+
+  void setSearchQuery(String query) {
+    _searchQuery = query;
     notifyListeners();
   }
 
-  void removeFromCart(MenuItem item) {
-    final existingIndex = _cartItems.indexWhere(
-      (cartItem) => cartItem.menuItem.id == item.id,
-    );
+  void setFilterStatus(OrderStatus? status) {
+    _filterStatus = status;
+    notifyListeners();
+  }
 
-    if (existingIndex != -1) {
-      if (_cartItems[existingIndex].quantity > 1) {
-        _cartItems[existingIndex].quantity--;
-      } else {
-        _cartItems.removeAt(existingIndex);
-      }
+  void updateOrderStatus(String orderId, OrderStatus newStatus) {
+    final index = _orders.indexWhere((order) => order.id == orderId);
+    if (index != -1) {
+      _orders[index].status = newStatus;
       notifyListeners();
     }
   }
 
-  void clearCart() {
-    _cartItems.clear();
+  void addOrder(Order order) {
+    _orders.insert(0, order);
     notifyListeners();
   }
 
-  int getItemQuantity(MenuItem item) {
-    final cartItem = _cartItems.firstWhere(
-      (cartItem) => cartItem.menuItem.id == item.id,
-      orElse: () => CartItem(menuItem: item, quantity: 0),
-    );
-    return cartItem.quantity;
+  void deleteOrder(String orderId) {
+    _orders.removeWhere((order) => order.id == orderId);
+    notifyListeners();
+  }
+
+  int getOrderCountByStatus(OrderStatus status) {
+    return _orders.where((order) => order.status == status).length;
   }
 }

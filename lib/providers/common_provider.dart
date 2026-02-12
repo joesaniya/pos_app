@@ -1,3 +1,4 @@
+import 'package:pos_app/providers/auth_provider.dart';
 import 'package:pos_app/providers/onboard_provider.dart';
 import 'package:pos_app/providers/order_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
@@ -18,7 +19,8 @@ class ProviderHelperClass {
     // ChangeNotifierProvider(create: (context) => SplashProvider(context)),
     ChangeNotifierProvider(create: (_) => SplashProvider()),
     ChangeNotifierProvider(create: (_) => ThemeProvider()),
-    ChangeNotifierProvider(create: (_) => OnboardingProvider()), 
+    ChangeNotifierProvider(create: (_) => OnboardingProvider()),
+    ChangeNotifierProvider(create: (_) => AuthProvider()),
     ChangeNotifierProvider(create: (_) => TableProvider()),
     ChangeNotifierProvider(create: (_) => OrderProvider()),
   ];

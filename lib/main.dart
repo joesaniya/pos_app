@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/common_provider.dart';
-import 'package:pos_app/screens/auth_screens.dart';
+import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -55,7 +54,7 @@ class MyApp extends StatelessWidget {
                     child: child!,
                   );
                 },
-                home: AuthScreen(),
+                home: LoginScreen(),
                 // home: const SplashScreen(),
               );
             },

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/screens/dashboard_screen.dart';
+import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/onboarding_screen.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_colors.dart';
@@ -84,8 +85,7 @@ class _SplashScreenState extends State<SplashScreen>
     } else if (splashProvider.isLoggedIn) {
       _navigateToHome();
     } else {
-      _navigateToHome();
-      // _navigateToLogin();
+      _navigateToLogin();
     }
   }
 
@@ -99,11 +99,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToLogin() {
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (context) =>
-            const Scaffold(body: Center(child: Text('Login Screen'))),
-        // Replace with: builder: (context) => const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
     );
   }
 

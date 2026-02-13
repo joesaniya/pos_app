@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/models/onboard_data.dart';
 import 'package:pos_app/providers/onboard_provider.dart';
+import 'package:pos_app/screens/login_screen.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -192,13 +193,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
-        pageBuilder: (_, animation, __) => FadeTransition(
-          opacity: animation,
-          child: const Scaffold(
-            body: Center(child: Text('Login Screen')),
-            // Replace with: child: const LoginScreen(),
-          ),
-        ),
+        pageBuilder: (_, animation, __) =>
+            FadeTransition(opacity: animation, child: LoginScreen()),
         transitionDuration: const Duration(milliseconds: 500),
       ),
     );

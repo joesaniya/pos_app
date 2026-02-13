@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/onboarding_screen.dart';
+import 'package:pos_app/screens/page_switcher.dart';
 import 'package:pos_app/screens/res_pos.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_colors.dart';
@@ -106,7 +107,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToHome() {
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const MainScreen()),
+      MaterialPageRoute(builder: (context) => const PageSwitcher()),
     );
   }
 

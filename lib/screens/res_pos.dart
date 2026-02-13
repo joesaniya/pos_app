@@ -1,4 +1,4 @@
-import 'package:fl_chart/fl_chart.dart';
+/*correctimport 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import 'dart:math' as math;
@@ -2504,7 +2504,7 @@ class InventoryScreen extends StatelessWidget {
     );
   }
 }
-
+correct*/
 
 /*class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);

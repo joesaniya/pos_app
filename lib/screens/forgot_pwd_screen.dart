@@ -338,7 +338,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
               const TextSpan(text: 'We\'ve sent a verification code to\n'),
               TextSpan(
                 text: _emailController.text.trim(),
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.primaryPurple,
                   fontWeight: FontWeight.w600,
                 ),

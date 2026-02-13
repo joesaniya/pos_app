@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/common_provider.dart';
 import 'package:pos_app/screens/login_screen.dart';
-import 'package:pos_app/screens/res_pos.dart';
+import 'package:pos_app/screens/page_switcher.dart';
+
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,7 +57,7 @@ class MyApp extends StatelessWidget {
                   );
                 },
                 // home: LoginScreen(),
-                home: const MainScreen(),
+                home: const PageSwitcher(),
                 // home: const SplashScreen(),
               );
             },

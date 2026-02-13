@@ -1349,17 +1349,42 @@ class TablesScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: GridView.builder(
-                padding: EdgeInsets.all(size.width * 0.04),
-                physics: const BouncingScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.1,
-                ),
-                itemCount: tables.length,
-                itemBuilder: (context, index) => _buildTableCard(tables[index]),
+              child: Builder(
+                builder: (context) {
+                  final size = MediaQuery.of(context).size;
+                  final width = size.width;
+
+                  int crossAxisCount = 2;
+                  double aspectRatio = 1.0;
+
+                  if (width > 1200) {
+                    crossAxisCount = 5;
+                    aspectRatio = 1.25;
+                  } else if (width > 900) {
+                    crossAxisCount = 4;
+                    aspectRatio = 1.2;
+                  } else if (width > 600) {
+                    crossAxisCount = 3;
+                    aspectRatio = 1.1;
+                  } else {
+                    crossAxisCount = 2;
+                    aspectRatio = 1.0;
+                  }
+
+                  return GridView.builder(
+                    padding: EdgeInsets.all(width * 0.04),
+                    physics: const BouncingScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      crossAxisSpacing: width * 0.03,
+                      mainAxisSpacing: width * 0.03,
+                      childAspectRatio: aspectRatio,
+                    ),
+                    itemCount: tables.length,
+                    itemBuilder: (context, index) =>
+                        _buildTableCard(context, tables[index]),
+                  );
+                },
               ),
             ),
           ],
@@ -1387,7 +1412,10 @@ class TablesScreen extends StatelessWidget {
     ],
   );
 
-  Widget _buildTableCard(Map<String, dynamic> table) {
+  Widget _buildTableCard(BuildContext context, Map<String, dynamic> table) {
+    final size = MediaQuery.of(context).size;
+    final width = size.width;
+
     Color getStatusColor(String status) {
       switch (status) {
         case 'active':
@@ -1402,7 +1430,7 @@ class TablesScreen extends StatelessWidget {
     final color = getStatusColor(table['status']);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(width * 0.025),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1411,40 +1439,82 @@ class TablesScreen extends StatelessWidget {
           BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
         ],
       ),
+
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.table_restaurant, color: color, size: 32),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            table['id'],
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            table['status'].toString().toUpperCase(),
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: color,
+          /// Icon
+          Flexible(
+            child: Container(
+              padding: EdgeInsets.all(width * 0.03),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.table_restaurant,
+                color: color,
+                size: width * 0.07,
+              ),
             ),
           ),
+
+          SizedBox(height: width * 0.02),
+
+          /// Table ID
+          Flexible(
+            child: Text(
+              table['id'],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: width * 0.045,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+
+          /// Status
+          Flexible(
+            child: Text(
+              table['status'].toString().toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: width * 0.028,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+
+          /// Active details
           if (table['status'] == 'active') ...[
-            const SizedBox(height: 8),
-            Text(
-              '\$${table['amount'].toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            SizedBox(height: width * 0.015),
+
+            Flexible(
+              child: Text(
+                '\$${table['amount'].toStringAsFixed(2)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: width * 0.035,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
-            Text(
-              table['time'],
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+
+            Flexible(
+              child: Text(
+                table['time'],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: width * 0.025,
+                  color: Colors.grey[600],
+                ),
+              ),
             ),
           ],
         ],

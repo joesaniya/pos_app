@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/auth_provider.dart';
 import 'package:pos_app/screens/forgot_pwd_screen.dart';
+import 'package:pos_app/screens/page_switcher.dart';
 import 'package:pos_app/screens/signup_screen.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
 import 'package:pos_app/screens/widgets/auth_divider_widget.dart';
@@ -120,8 +121,19 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (mounted) {
       if (success) {
-        // TODO: Navigate to home screen
-        ScaffoldMessenger.of(context).showSnackBar(
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                const PageSwitcher(),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+            transitionDuration: const Duration(milliseconds: 400),
+          ),
+        );
+        /* ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Login successful!'),
             backgroundColor: AppColors.success,
@@ -131,6 +143,23 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         );
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                const PageSwitcher(),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  return ScaleTransition(
+                    scale: Tween(begin: 0.9, end: 1.0).animate(
+                      CurvedAnimation(parent: animation, curve: Curves.easeOut),
+                    ),
+                    child: FadeTransition(opacity: animation, child: child),
+                  );
+                },
+            transitionDuration: const Duration(milliseconds: 450),
+          ),
+        );*/
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

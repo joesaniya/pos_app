@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/auth_provider.dart';
+import 'package:pos_app/screens/page_switcher.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
 import 'package:pos_app/screens/widgets/auth_backbtn_widget.dart';
 import 'package:pos_app/screens/widgets/auth_divider_widget.dart';
@@ -136,6 +137,17 @@ class _SignupScreenState extends State<SignupScreen>
             ? 'Account created successfully!'
             : 'Signup failed. Please try again.',
         success ? AppColors.success : AppColors.error,
+      );
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const PageSwitcher(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 400),
+        ),
       );
     }
   }

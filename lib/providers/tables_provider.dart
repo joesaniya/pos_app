@@ -1,100 +1,136 @@
 import 'package:flutter/material.dart';
-
-class TableModel {
-  final String id;
-  final String status;
-  final int orders;
-  final double amount;
-  final String time;
-
-  TableModel({
-    required this.id,
-    required this.status,
-    required this.orders,
-    required this.amount,
-    required this.time,
-  });
-}
+import 'package:pos_app/models/table_modal.dart';
 
 class TablesProvider extends ChangeNotifier {
+  String _selectedFilter = 'All';
+  final List<String> filters = ['All', 'Available', 'Occupied', 'Reserved'];
+
   final List<TableModel> _tables = [
     TableModel(
-      id: 'T1',
-      status: 'active',
-      orders: 3,
-      amount: 145.50,
-      time: '25 min',
+      tableNumber: 1,
+      capacity: 4,
+      status: TableStatus.occupied,
+      orderId: '#4523',
+      customerName: 'John Doe',
+      orderTotal: 1250.00,
+      occupiedTime: DateTime.now().subtract(const Duration(minutes: 45)),
+      section: 'Main Hall',
     ),
     TableModel(
-      id: 'T2',
-      status: 'vacant',
-      orders: 0,
-      amount: 0.0,
-      time: '0 min',
+      tableNumber: 2,
+      capacity: 2,
+      status: TableStatus.available,
+      section: 'Main Hall',
     ),
     TableModel(
-      id: 'T3',
-      status: 'active',
-      orders: 2,
-      amount: 89.00,
-      time: '15 min',
+      tableNumber: 3,
+      capacity: 6,
+      status: TableStatus.reserved,
+      customerName: 'Mike Johnson',
+      reservationTime: DateTime.now().add(const Duration(hours: 1)),
+      section: 'Main Hall',
     ),
     TableModel(
-      id: 'T4',
-      status: 'reserved',
-      orders: 0,
-      amount: 0.0,
-      time: '0 min',
+      tableNumber: 4,
+      capacity: 4,
+      status: TableStatus.occupied,
+      orderId: '#4522',
+      customerName: 'Jane Smith',
+      orderTotal: 2100.00,
+      occupiedTime: DateTime.now().subtract(const Duration(minutes: 30)),
+      section: 'Garden',
     ),
     TableModel(
-      id: 'T5',
-      status: 'active',
-      orders: 5,
-      amount: 234.75,
-      time: '42 min',
+      tableNumber: 5,
+      capacity: 8,
+      status: TableStatus.available,
+      section: 'Garden',
     ),
     TableModel(
-      id: 'T6',
-      status: 'vacant',
-      orders: 0,
-      amount: 0.0,
-      time: '0 min',
+      tableNumber: 6,
+      capacity: 2,
+      status: TableStatus.occupied,
+      orderId: '#4521',
+      customerName: 'Sarah Wilson',
+      orderTotal: 850.00,
+      occupiedTime: DateTime.now().subtract(const Duration(minutes: 20)),
+      section: 'Patio',
     ),
     TableModel(
-      id: 'T7',
-      status: 'active',
-      orders: 1,
-      amount: 45.00,
-      time: '8 min',
+      tableNumber: 7,
+      capacity: 4,
+      status: TableStatus.available,
+      section: 'Patio',
     ),
     TableModel(
-      id: 'T8',
-      status: 'vacant',
-      orders: 0,
-      amount: 0.0,
-      time: '0 min',
+      tableNumber: 8,
+      capacity: 6,
+      status: TableStatus.reserved,
+      customerName: 'David Brown',
+      reservationTime: DateTime.now().add(const Duration(hours: 2)),
+      section: 'Private',
     ),
   ];
 
-  List<TableModel> get tables => _tables;
+  String get selectedFilter => _selectedFilter;
+  List<TableModel> get allTables => _tables;
 
-  int getTableCountByStatus(String status) {
-    return _tables.where((table) => table.status == status).length;
+  List<TableModel> get filteredTables {
+    if (_selectedFilter == 'All') return _tables;
+    return _tables.where((table) {
+      switch (_selectedFilter) {
+        case 'Available':
+          return table.status == TableStatus.available;
+        case 'Occupied':
+          return table.status == TableStatus.occupied;
+        case 'Reserved':
+          return table.status == TableStatus.reserved;
+        default:
+          return true;
+      }
+    }).toList();
   }
 
-  int get activeTablesCount => getTableCountByStatus('active');
-  int get reservedTablesCount => getTableCountByStatus('reserved');
-  int get vacantTablesCount => getTableCountByStatus('vacant');
+  int get availableCount =>
+      _tables.where((t) => t.status == TableStatus.available).length;
+  int get occupiedCount =>
+      _tables.where((t) => t.status == TableStatus.occupied).length;
+  int get reservedCount =>
+      _tables.where((t) => t.status == TableStatus.reserved).length;
 
-  void updateTableStatus(String tableId, String newStatus) {
-    final index = _tables.indexWhere((table) => table.id == tableId);
+  double get totalRevenue =>
+      _tables.fold(0, (sum, t) => sum + (t.orderTotal ?? 0));
+
+  void setFilter(String filter) {
+    _selectedFilter = filter;
+    notifyListeners();
+  }
+
+  void clearTable(int tableNumber) {
+    final index = _tables.indexWhere((t) => t.tableNumber == tableNumber);
     if (index != -1) {
       _tables[index] = TableModel(
-        id: _tables[index].id,
-        status: newStatus,
-        orders: _tables[index].orders,
-        amount: _tables[index].amount,
-        time: _tables[index].time,
+        tableNumber: _tables[index].tableNumber,
+        capacity: _tables[index].capacity,
+        status: TableStatus.available,
+        section: _tables[index].section,
+      );
+      notifyListeners();
+    }
+  }
+
+  void assignTable(int tableNumber, String customerName) {
+    final index = _tables.indexWhere((t) => t.tableNumber == tableNumber);
+    if (index != -1) {
+      _tables[index] = TableModel(
+        tableNumber: _tables[index].tableNumber,
+        capacity: _tables[index].capacity,
+        status: TableStatus.occupied,
+        customerName: customerName,
+        orderId: '#${DateTime.now().millisecondsSinceEpoch % 10000}',
+        orderTotal: 0,
+        occupiedTime: DateTime.now(),
+        section: _tables[index].section,
       );
       notifyListeners();
     }

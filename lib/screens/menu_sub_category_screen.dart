@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pos_app/models/menu_filter_modal.dart';
 import 'package:pos_app/screens/menu_item_detail_screen.dart';
+import 'package:pos_app/screens/widgets/menu_filter_sheet_widget.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/models/menu_item.dart';
 import 'package:pos_app/providers/menu_provider.dart';
 import 'package:pos_app/screens/utils/app_sizes.dart';
 import 'package:pos_app/screens/utils/responsive_utils.dart';
+import 'package:pos_app/screens/widgets/filter_widgets.dart';
 import 'package:pos_app/theme/app_colors.dart';
-import 'package:pos_app/theme/app_theme.dart';
 
 class MenuSubcategoryScreen extends StatefulWidget {
   final MenuCategory category;
@@ -26,19 +28,38 @@ class MenuSubcategoryScreen extends StatefulWidget {
 class _MenuSubcategoryScreenState extends State<MenuSubcategoryScreen> {
   String _selectedSub = 'All';
   String _searchQuery = '';
+  MenuFilterModel _filter = const MenuFilterModel();
   final TextEditingController _searchCtrl = TextEditingController();
 
   List<MenuItem> _filtered(List<MenuItem> items) {
-    if (_searchQuery.isEmpty) return items;
-    final q = _searchQuery.toLowerCase();
-    return items
-        .where(
-          (i) =>
-              i.name.toLowerCase().contains(q) ||
-              i.description.toLowerCase().contains(q) ||
-              i.subcategory.toLowerCase().contains(q),
-        )
-        .toList();
+    // First apply text search
+    List<MenuItem> result = items;
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      result = result
+          .where(
+            (i) =>
+                i.name.toLowerCase().contains(q) ||
+                i.description.toLowerCase().contains(q) ||
+                i.subcategory.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    // Then apply filter model (includes sort)
+    return _filter.apply(result);
+  }
+
+  Future<void> _openFilterSheet(
+    BuildContext context,
+    List<MenuItem> currentItems,
+  ) async {
+    final result = await showMenuFilterSheet(
+      context: context,
+      current: _filter,
+      accentColor: widget.gradientColors.first,
+      totalItems: currentItems.length,
+    );
+    if (result != null) setState(() => _filter = result);
   }
 
   @override
@@ -92,12 +113,14 @@ class _MenuSubcategoryScreenState extends State<MenuSubcategoryScreen> {
                 subcategories: widget.category.subcategories,
                 selectedSub: _selectedSub,
                 searchCtrl: _searchCtrl,
+                filterActiveCount: _filter.activeCount,
                 onSubSelected: (s) => setState(() {
                   _selectedSub = s;
                   _searchQuery = '';
                   _searchCtrl.clear();
                 }),
                 onSearchChanged: (q) => setState(() => _searchQuery = q),
+                onFilterTap: () => _openFilterSheet(context, baseItems),
               ),
 
               // ══════════════════════════════════════════════
@@ -117,7 +140,10 @@ class _MenuSubcategoryScreenState extends State<MenuSubcategoryScreen> {
                     // Grid / empty
                     items.isEmpty
                         ? SliverFillRemaining(
-                            child: _EmptyState(searchQuery: _searchQuery),
+                            child: _EmptyState(
+                              searchQuery: _searchQuery,
+                              filterCount: _filter.activeCount,
+                            ),
                           )
                         : SliverPadding(
                             padding: EdgeInsets.fromLTRB(
@@ -333,16 +359,20 @@ class _SearchAndChipsBar extends StatelessWidget {
   final List<String> subcategories;
   final String selectedSub;
   final TextEditingController searchCtrl;
+  final int filterActiveCount;
   final ValueChanged<String> onSubSelected;
   final ValueChanged<String> onSearchChanged;
+  final VoidCallback onFilterTap;
 
   const _SearchAndChipsBar({
     required this.primaryColor,
     required this.subcategories,
     required this.selectedSub,
     required this.searchCtrl,
+    required this.filterActiveCount,
     required this.onSubSelected,
     required this.onSearchChanged,
+    required this.onFilterTap,
   });
 
   @override
@@ -352,52 +382,68 @@ class _SearchAndChipsBar extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Search field
+          // Search field + filter button
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-            child: SizedBox(
-              height: 44,
-              child: TextField(
-                controller: searchCtrl,
-                onChanged: onSearchChanged,
-                style: const TextStyle(fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Search items...',
-                  hintStyle: const TextStyle(
-                    color: Color(0xFFAAAAAA),
-                    fontSize: 13,
-                  ),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: primaryColor,
-                    size: 20,
-                  ),
-                  suffixIcon: searchCtrl.text.isNotEmpty
-                      ? GestureDetector(
-                          onTap: () {
-                            searchCtrl.clear();
-                            onSearchChanged('');
-                          },
-                          child: const Icon(
-                            Icons.close_rounded,
-                            size: 18,
-                            color: Color(0xFFAAAAAA),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: TextField(
+                      controller: searchCtrl,
+                      onChanged: onSearchChanged,
+                      style: const TextStyle(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Search items...',
+                        hintStyle: const TextStyle(
+                          color: Color(0xFFAAAAAA),
+                          fontSize: 13,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: primaryColor,
+                          size: 20,
+                        ),
+                        suffixIcon: searchCtrl.text.isNotEmpty
+                            ? GestureDetector(
+                                onTap: () {
+                                  searchCtrl.clear();
+                                  onSearchChanged('');
+                                },
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  size: 18,
+                                  color: Color(0xFFAAAAAA),
+                                ),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: const Color(0xFFF4F4F4),
+                        contentPadding: EdgeInsets.zero,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: primaryColor,
+                            width: 1.5,
                           ),
-                        )
-                      : null,
-                  filled: true,
-                  fillColor: const Color(0xFFF4F4F4),
-                  contentPadding: EdgeInsets.zero,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: primaryColor, width: 1.5),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                // Filter badge button from reusable widget
+                FilterBadge(
+                  count: filterActiveCount,
+                  color: primaryColor,
+                  onTap: onFilterTap,
+                ),
+              ],
             ),
           ),
 
@@ -559,29 +605,40 @@ class _Stat extends StatelessWidget {
 // ═════════════════════════════════════════════════════════════════════════════
 class _EmptyState extends StatelessWidget {
   final String searchQuery;
-  const _EmptyState({required this.searchQuery});
+  final int filterCount;
+  const _EmptyState({required this.searchQuery, this.filterCount = 0});
 
   @override
   Widget build(BuildContext context) {
+    final hasFilter = filterCount > 0;
+    final hasSearch = searchQuery.isNotEmpty;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            searchQuery.isNotEmpty
-                ? Icons.search_off_rounded
-                : Icons.restaurant_outlined,
+            hasSearch ? Icons.search_off_rounded : Icons.tune_rounded,
             size: 60,
             color: Colors.grey.shade300,
           ),
           const SizedBox(height: 14),
           Text(
-            searchQuery.isNotEmpty
+            hasSearch
                 ? 'No results for "$searchQuery"'
+                : hasFilter
+                ? 'No items match your filters'
                 : 'No items in this category',
             style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
             textAlign: TextAlign.center,
           ),
+          if (hasFilter) ...[
+            const SizedBox(height: 6),
+            Text(
+              '$filterCount active filter${filterCount > 1 ? 's' : ''} — try adjusting them',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );

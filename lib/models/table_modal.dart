@@ -67,3 +67,4 @@ class TableModel {
   }
 }
 
+// MenuCategory has been moved to models/menu_item.dart

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:pos_app/models/menu_category.dart';
 import '../models/menu_item.dart';
+
 
 class MenuProvider extends ChangeNotifier {
   String _selectedCategory = 'All';

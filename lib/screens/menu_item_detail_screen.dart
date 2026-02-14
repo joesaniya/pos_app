@@ -77,7 +77,11 @@ class MenuItemDetailScreen extends StatelessWidget {
         child: CircleAvatar(
           backgroundColor: Colors.white.withOpacity(0.2),
           child: IconButton(
-            icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 18),
+            icon: const Icon(
+              Icons.arrow_back_ios,
+              color: Colors.white,
+              size: 18,
+            ),
             onPressed: () => Navigator.pop(context),
           ),
         ),
@@ -88,7 +92,11 @@ class MenuItemDetailScreen extends StatelessWidget {
           child: CircleAvatar(
             backgroundColor: Colors.white.withOpacity(0.2),
             child: IconButton(
-              icon: const Icon(Icons.favorite_border, color: Colors.white, size: 18),
+              icon: const Icon(
+                Icons.favorite_border,
+                color: Colors.white,
+                size: 18,
+              ),
               onPressed: () {},
             ),
           ),
@@ -109,12 +117,7 @@ class MenuItemDetailScreen extends StatelessWidget {
               ),
             ),
             // Large emoji
-            Center(
-              child: Text(
-                _emoji,
-                style: const TextStyle(fontSize: 100),
-              ),
-            ),
+            Center(child: Text(_emoji, style: const TextStyle(fontSize: 100))),
             // Decorative circles
             Positioned(
               right: -30,
@@ -149,10 +152,7 @@ class MenuItemDetailScreen extends StatelessWidget {
                 height: 80,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [
-                      Colors.transparent,
-                      AppColors.background,
-                    ],
+                    colors: [Colors.transparent, AppColors.background],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                   ),
@@ -212,7 +212,10 @@ class MenuItemDetailScreen extends StatelessWidget {
                   if (item.isBestseller) ...[
                     const SizedBox(width: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFFF6B35),
                         borderRadius: BorderRadius.circular(8),
@@ -240,7 +243,9 @@ class MenuItemDetailScreen extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '${item.category} · ${item.subcategory}',
-                style: AppTheme.bodySmall.copyWith(color: AppColors.textSecondary),
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
               ),
             ],
           ),
@@ -394,13 +399,14 @@ class MenuItemDetailScreen extends StatelessWidget {
         children: item.ingredients
             .map(
               (ing) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: primaryColor.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: primaryColor.withOpacity(0.2),
-                  ),
+                  border: Border.all(color: primaryColor.withOpacity(0.2)),
                 ),
                 child: Text(
                   ing,
@@ -428,17 +434,25 @@ class MenuItemDetailScreen extends StatelessWidget {
         children: item.allergens
             .map(
               (a) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFFF3E0),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE65100).withOpacity(0.4)),
+                  border: Border.all(
+                    color: const Color(0xFFE65100).withOpacity(0.4),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.warning_amber,
-                        size: 13, color: Color(0xFFE65100)),
+                    const Icon(
+                      Icons.warning_amber,
+                      size: 13,
+                      color: Color(0xFFE65100),
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       a,
@@ -462,7 +476,10 @@ class MenuItemDetailScreen extends StatelessWidget {
       padding: EdgeInsets.all(AppSizes.paddingLarge),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [primaryColor.withOpacity(0.05), primaryColor.withOpacity(0.1)],
+          colors: [
+            primaryColor.withOpacity(0.05),
+            primaryColor.withOpacity(0.1),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -506,7 +523,10 @@ class MenuItemDetailScreen extends StatelessWidget {
               icon: const Icon(Icons.add_shopping_cart_outlined),
               label: Text(
                 item.available ? 'Add to Order' : 'Currently Unavailable',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
@@ -514,7 +534,9 @@ class MenuItemDetailScreen extends StatelessWidget {
                 disabledBackgroundColor: Colors.grey.shade300,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppSizes.borderRadiusMedium),
+                  borderRadius: BorderRadius.circular(
+                    AppSizes.borderRadiusMedium,
+                  ),
                 ),
               ),
             ),

@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:pos_app/models/onboard_data.dart';
 
 class OnboardingProvider with ChangeNotifier {
-  // ── Pages ─────────────────────────────────
   final List<OnboardingData> pages = const [
     OnboardingData(
       title: 'Smart',

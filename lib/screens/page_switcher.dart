@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
+import 'package:pos_app/screens/profile_screen.dart';
 import 'package:pos_app/screens/utils/app_sizes.dart';
 import 'package:pos_app/theme/app_colors.dart';
 import 'package:provider/provider.dart';
@@ -25,6 +26,7 @@ class PageSwitcher extends StatelessWidget {
               TablesScreen(),
               MenuScreen(),
               InventoryScreen(),
+              ProfileScreen(),
             ],
           ),
           bottomNavigationBar: const BottomNavBar(),
@@ -96,6 +98,13 @@ class BottomNavBar extends StatelessWidget {
                     isSelected: navigationProvider.selectedIndex == 4,
                     onTap: () => navigationProvider.setSelectedIndex(4),
                   ),
+                  _NavItem(
+                    index: 5,
+                    icon: Icons.person,
+                    label: 'Profile',
+                    isSelected: navigationProvider.selectedIndex == 5,
+                    onTap: () => navigationProvider.setSelectedIndex(5),
+                  ),
                 ],
               ),
             ),
@@ -138,7 +147,9 @@ class _NavItem extends StatelessWidget {
                 padding: EdgeInsets.all(isSelected ? 8 : 6),
                 decoration: BoxDecoration(
                   gradient: isSelected ? AppColors.primaryGradient : null,
-                  borderRadius: BorderRadius.circular(AppSizes.borderRadiusMedium),
+                  borderRadius: BorderRadius.circular(
+                    AppSizes.borderRadiusMedium,
+                  ),
                 ),
                 child: Icon(
                   icon,

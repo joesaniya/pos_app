@@ -5,6 +5,7 @@ import 'package:pos_app/providers/menu_provider.dart';
 import 'package:pos_app/providers/onboard_provider.dart';
 import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
+import 'package:pos_app/providers/profile_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
@@ -33,5 +34,6 @@ class ProviderHelperClass {
         ChangeNotifierProvider(create: (_) => TablesProvider()),
         ChangeNotifierProvider(create: (_) => MenuProvider()),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
+        ChangeNotifierProvider(create: (_) => ProfileProvider()),
   ];
 }

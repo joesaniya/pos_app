@@ -1,95 +1,416 @@
 import 'package:flutter/material.dart';
+import 'package:pos_app/models/inventory_modal.dart';
 
-class InventoryItem {
-  final String name;
-  final int quantity;
-  final String unit;
-  final String status;
-  final String lastUpdated;
 
-  InventoryItem({
-    required this.name,
-    required this.quantity,
-    required this.unit,
-    required this.status,
-    required this.lastUpdated,
-  });
-}
+enum InventorySortBy { name, stockLowHigh, stockHighLow, lastUpdated, value }
+
+enum InventoryFilter { all, inStock, lowStock, critical, outOfStock }
 
 class InventoryProvider extends ChangeNotifier {
-  final List<InventoryItem> _inventoryItems = [
+  String _searchQuery = '';
+  String _selectedCategory = 'All';
+  InventorySortBy _sortBy = InventorySortBy.name;
+  InventoryFilter _filter = InventoryFilter.all;
+  bool _isLoading = false;
+
+  final List<InventoryItem> _items = [
     InventoryItem(
-      name: 'Fresh Salmon',
-      quantity: 25,
-      unit: 'kg',
-      status: 'good',
-      lastUpdated: '2 hours ago',
+      id: 'i01',
+      name: 'Rice Batter',
+      category: 'Grains',
+      emoji: '🍚',
+      currentStock: 45,
+      minThreshold: 10,
+      maxCapacity: 100,
+      unit: StockUnit.kg,
+      costPerUnit: 25,
+      supplier: 'Sri Annapoorna Traders',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 2)),
+      transactions: [
+        StockTransaction(
+          id: 't1',
+          type: TransactionType.stockIn,
+          quantity: 20,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(hours: 2)),
+          note: 'Morning delivery',
+          updatedBy: 'Arjun K',
+        ),
+        StockTransaction(
+          id: 't2',
+          type: TransactionType.stockOut,
+          quantity: 5,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(hours: 5)),
+          note: 'Used for dosa prep',
+          updatedBy: 'Chef Ravi',
+        ),
+      ],
     ),
     InventoryItem(
-      name: 'Tomatoes',
-      quantity: 8,
-      unit: 'kg',
-      status: 'low',
-      lastUpdated: '5 hours ago',
+      id: 'i02',
+      name: 'Urad Dal',
+      category: 'Pulses',
+      emoji: '🫘',
+      currentStock: 8,
+      minThreshold: 10,
+      maxCapacity: 50,
+      unit: StockUnit.kg,
+      costPerUnit: 120,
+      supplier: 'Murugan Pulses',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 6)),
+      transactions: [
+        StockTransaction(
+          id: 't3',
+          type: TransactionType.stockIn,
+          quantity: 30,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(days: 3)),
+          note: 'Weekly restock',
+          updatedBy: 'Arjun K',
+        ),
+        StockTransaction(
+          id: 't4',
+          type: TransactionType.stockOut,
+          quantity: 22,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(hours: 6)),
+          note: 'Idli & Dosa production',
+          updatedBy: 'Chef Ravi',
+        ),
+      ],
     ),
     InventoryItem(
-      name: 'Pasta',
-      quantity: 150,
-      unit: 'packs',
-      status: 'good',
-      lastUpdated: '1 day ago',
+      id: 'i03',
+      name: 'Coconut Oil',
+      category: 'Oils',
+      emoji: '🥥',
+      currentStock: 0,
+      minThreshold: 5,
+      maxCapacity: 30,
+      unit: StockUnit.litre,
+      costPerUnit: 180,
+      supplier: 'Kerala Fresh',
+      lastUpdated: DateTime.now().subtract(const Duration(days: 1)),
+      transactions: [
+        StockTransaction(
+          id: 't5',
+          type: TransactionType.stockOut,
+          quantity: 5,
+          unit: StockUnit.litre,
+          date: DateTime.now().subtract(const Duration(days: 1)),
+          note: 'Last batch used',
+          updatedBy: 'Chef Ravi',
+        ),
+      ],
     ),
     InventoryItem(
-      name: 'Olive Oil',
-      quantity: 3,
-      unit: 'liters',
-      status: 'critical',
-      lastUpdated: '3 hours ago',
+      id: 'i04',
+      name: 'Fresh Tomatoes',
+      category: 'Vegetables',
+      emoji: '🍅',
+      currentStock: 12,
+      minThreshold: 5,
+      maxCapacity: 40,
+      unit: StockUnit.kg,
+      costPerUnit: 40,
+      supplier: 'Santhosh Vegetables',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 1)),
+      transactions: [
+        StockTransaction(
+          id: 't6',
+          type: TransactionType.stockIn,
+          quantity: 15,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(hours: 1)),
+          note: 'Fresh morning delivery',
+          updatedBy: 'Arjun K',
+        ),
+      ],
     ),
     InventoryItem(
-      name: 'Chicken',
-      quantity: 40,
-      unit: 'kg',
-      status: 'good',
-      lastUpdated: '4 hours ago',
+      id: 'i05',
+      name: 'Ghee',
+      category: 'Dairy',
+      emoji: '🧈',
+      currentStock: 3,
+      minThreshold: 5,
+      maxCapacity: 20,
+      unit: StockUnit.kg,
+      costPerUnit: 600,
+      supplier: 'Aavin Dairy',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 3)),
+      transactions: [
+        StockTransaction(
+          id: 't7',
+          type: TransactionType.waste,
+          quantity: 0.5,
+          unit: StockUnit.kg,
+          date: DateTime.now().subtract(const Duration(hours: 3)),
+          note: 'Expired batch discarded',
+          updatedBy: 'Chef Ravi',
+        ),
+      ],
     ),
     InventoryItem(
-      name: 'Lettuce',
-      quantity: 12,
-      unit: 'kg',
-      status: 'low',
-      lastUpdated: '6 hours ago',
+      id: 'i06',
+      name: 'Toor Dal',
+      category: 'Pulses',
+      emoji: '🫘',
+      currentStock: 35,
+      minThreshold: 10,
+      maxCapacity: 60,
+      unit: StockUnit.kg,
+      costPerUnit: 110,
+      supplier: 'Murugan Pulses',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 8)),
+    ),
+    InventoryItem(
+      id: 'i07',
+      name: 'Onions',
+      category: 'Vegetables',
+      emoji: '🧅',
+      currentStock: 25,
+      minThreshold: 8,
+      maxCapacity: 50,
+      unit: StockUnit.kg,
+      costPerUnit: 35,
+      supplier: 'Santhosh Vegetables',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 4)),
+    ),
+    InventoryItem(
+      id: 'i08',
+      name: 'Mustard Seeds',
+      category: 'Spices',
+      emoji: '🌱',
+      currentStock: 2,
+      minThreshold: 1,
+      maxCapacity: 10,
+      unit: StockUnit.kg,
+      costPerUnit: 90,
+      supplier: 'Spice Garden',
+      lastUpdated: DateTime.now().subtract(const Duration(days: 2)),
+    ),
+    InventoryItem(
+      id: 'i09',
+      name: 'Sunflower Oil',
+      category: 'Oils',
+      emoji: '🌻',
+      currentStock: 18,
+      minThreshold: 10,
+      maxCapacity: 50,
+      unit: StockUnit.litre,
+      costPerUnit: 130,
+      supplier: 'Gold Drop Oils',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 12)),
+    ),
+    InventoryItem(
+      id: 'i10',
+      name: 'Milk',
+      category: 'Dairy',
+      emoji: '🥛',
+      currentStock: 20,
+      minThreshold: 10,
+      maxCapacity: 40,
+      unit: StockUnit.litre,
+      costPerUnit: 55,
+      supplier: 'Aavin Dairy',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 1)),
+    ),
+    InventoryItem(
+      id: 'i11',
+      name: 'Green Chilli',
+      category: 'Vegetables',
+      emoji: '🌶️',
+      currentStock: 1,
+      minThreshold: 2,
+      maxCapacity: 10,
+      unit: StockUnit.kg,
+      costPerUnit: 60,
+      supplier: 'Santhosh Vegetables',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 5)),
+    ),
+    InventoryItem(
+      id: 'i12',
+      name: 'Curry Leaves',
+      category: 'Herbs',
+      emoji: '🌿',
+      currentStock: 0.5,
+      minThreshold: 0.2,
+      maxCapacity: 3,
+      unit: StockUnit.kg,
+      costPerUnit: 80,
+      supplier: 'Local Market',
+      lastUpdated: DateTime.now().subtract(const Duration(hours: 6)),
     ),
   ];
 
-  List<InventoryItem> get inventoryItems => _inventoryItems;
+  // ─── Getters ────────────────────────────────────────────────
+  String get searchQuery => _searchQuery;
+  String get selectedCategory => _selectedCategory;
+  InventorySortBy get sortBy => _sortBy;
+  InventoryFilter get activeFilter => _filter;
+  bool get isLoading => _isLoading;
 
-  int get totalItemsCount => _inventoryItems.length;
-
-  int get lowStockCount =>
-      _inventoryItems.where((item) => item.status == 'low').length;
-
-  int get criticalStockCount =>
-      _inventoryItems.where((item) => item.status == 'critical').length;
-
-  void updateItemQuantity(String itemName, int newQuantity) {
-    final index = _inventoryItems.indexWhere((item) => item.name == itemName);
-    if (index != -1) {
-      String newStatus = 'good';
-      if (newQuantity < 5) {
-        newStatus = 'critical';
-      } else if (newQuantity < 15) {
-        newStatus = 'low';
-      }
-
-      _inventoryItems[index] = InventoryItem(
-        name: _inventoryItems[index].name,
-        quantity: newQuantity,
-        unit: _inventoryItems[index].unit,
-        status: newStatus,
-        lastUpdated: 'Just now',
-      );
-      notifyListeners();
-    }
+  List<String> get categories {
+    final cats = _items.map((e) => e.category).toSet().toList()..sort();
+    return ['All', ...cats];
   }
+
+  List<InventoryItem> get filteredItems {
+    var result = List<InventoryItem>.from(_items);
+
+    // Category filter
+    if (_selectedCategory != 'All') {
+      result = result.where((i) => i.category == _selectedCategory).toList();
+    }
+    // Status filter
+    if (_filter != InventoryFilter.all) {
+      result = result.where((i) {
+        switch (_filter) {
+          case InventoryFilter.inStock:
+            return i.status == StockStatus.inStock;
+          case InventoryFilter.lowStock:
+            return i.status == StockStatus.lowStock;
+          case InventoryFilter.critical:
+            return i.status == StockStatus.critical;
+          case InventoryFilter.outOfStock:
+            return i.status == StockStatus.outOfStock;
+          default:
+            return true;
+        }
+      }).toList();
+    }
+    // Search
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      result = result
+          .where(
+            (i) =>
+                i.name.toLowerCase().contains(q) ||
+                i.category.toLowerCase().contains(q) ||
+                i.supplier.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    // Sort
+    switch (_sortBy) {
+      case InventorySortBy.name:
+        result.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case InventorySortBy.stockLowHigh:
+        result.sort((a, b) => a.stockPercent.compareTo(b.stockPercent));
+        break;
+      case InventorySortBy.stockHighLow:
+        result.sort((a, b) => b.stockPercent.compareTo(a.stockPercent));
+        break;
+      case InventorySortBy.lastUpdated:
+        result.sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
+        break;
+      case InventorySortBy.value:
+        result.sort((a, b) => b.totalValue.compareTo(a.totalValue));
+        break;
+    }
+    return result;
+  }
+
+  // Summary stats
+  int get totalItems => _items.length;
+  int get lowStockCount => _items
+      .where(
+        (i) =>
+            i.status == StockStatus.lowStock ||
+            i.status == StockStatus.critical,
+      )
+      .length;
+  int get outOfStockCount =>
+      _items.where((i) => i.status == StockStatus.outOfStock).length;
+  double get totalInventoryValue => _items.fold(0, (s, i) => s + i.totalValue);
+
+  // ─── Mutations ──────────────────────────────────────────────
+  void setSearch(String q) {
+    _searchQuery = q;
+    notifyListeners();
+  }
+
+  void setCategory(String c) {
+    _selectedCategory = c;
+    notifyListeners();
+  }
+
+  void setSortBy(InventorySortBy s) {
+    _sortBy = s;
+    notifyListeners();
+  }
+
+  void setFilter(InventoryFilter f) {
+    _filter = f;
+    notifyListeners();
+  }
+
+  Future<void> addItem(InventoryItem item) async {
+    _isLoading = true;
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 400));
+    _items.add(item);
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> updateItem(InventoryItem updated) async {
+    _isLoading = true;
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 400));
+    final idx = _items.indexWhere((i) => i.id == updated.id);
+    if (idx != -1) _items[idx] = updated;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> deleteItem(String id) async {
+    _isLoading = true;
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 300));
+    _items.removeWhere((i) => i.id == id);
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> recordTransaction({
+    required String itemId,
+    required TransactionType type,
+    required double quantity,
+    required String note,
+    required String updatedBy,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 300));
+    final idx = _items.indexWhere((i) => i.id == itemId);
+    if (idx != -1) {
+      final item = _items[idx];
+      final delta = (type == TransactionType.stockIn)
+          ? quantity
+          : (type == TransactionType.adjustment ? quantity : -quantity);
+      final newStock = (item.currentStock + delta).clamp(0.0, item.maxCapacity);
+      final tx = StockTransaction(
+        id: 'tx_${DateTime.now().millisecondsSinceEpoch}',
+        type: type,
+        quantity: quantity,
+        unit: item.unit,
+        date: DateTime.now(),
+        note: note,
+        updatedBy: updatedBy,
+      );
+      _items[idx] = item.copyWith(
+        currentStock: newStock,
+        lastUpdated: DateTime.now(),
+        transactions: [tx, ...item.transactions],
+      );
+    }
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  String generateId() => 'i${DateTime.now().millisecondsSinceEpoch % 10000}';
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/models/inventory_modal.dart';
+import 'package:pos_app/screens/supplier_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/inventory_provider.dart';
 import 'package:pos_app/screens/widgets/inventory_widgets.dart';
@@ -66,9 +67,7 @@ class _InventoryBodyState extends State<_InventoryBody>
             child: Column(
               children: [
                 // ── HEADER ──────────────────────────────────
-                _Header(
-                  alertCount: prov.lowStockCount + prov.outOfStockCount,
-                ),
+                _Header(alertCount: prov.lowStockCount + prov.outOfStockCount),
                 // ── SEARCH BAR ──────────────────────────────
                 _SearchBar(
                   controller: _searchCtrl,
@@ -119,18 +118,23 @@ class _InventoryBodyState extends State<_InventoryBody>
   }
 
   void _openDetailSheet(
-      BuildContext ctx, InventoryItem item, InventoryProvider prov) {
+    BuildContext ctx,
+    InventoryItem item,
+    InventoryProvider prov,
+  ) {
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _DetailSheet(item: item, provider: prov),
+      builder: (_) => _DetailSheet(item: item, provider: prov),
     );
   }
 
   void _openStockSheet(
-      BuildContext ctx, InventoryItem item, InventoryProvider prov) {
+    BuildContext ctx,
+    InventoryItem item,
+    InventoryProvider prov,
+  ) {
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
@@ -160,26 +164,30 @@ class _Header extends StatelessWidget {
               color: IColors.accent,
               borderRadius: BorderRadius.circular(13),
             ),
-            child: const Icon(Icons.inventory_2_outlined,
-                color: Colors.white, size: 22),
+            child: const Icon(
+              Icons.inventory_2_outlined,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Inventory',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                      color: IColors.textPrimary,
-                      letterSpacing: -0.8,
-                    )),
-                Text('Stock management',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: IColors.textMuted,
-                    )),
+                const Text(
+                  'Inventory',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    color: IColors.textPrimary,
+                    letterSpacing: -0.8,
+                  ),
+                ),
+                Text(
+                  'Stock management',
+                  style: TextStyle(fontSize: 12, color: IColors.textMuted),
+                ),
               ],
             ),
           ),
@@ -187,15 +195,43 @@ class _Header extends StatelessWidget {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: IColors.surface,
-                  borderRadius: BorderRadius.circular(13),
-                  border: Border.all(color: IColors.divider),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (_, a, __) => SuppliersScreen(),
+                    transitionsBuilder: (_, a, __, child) => FadeTransition(
+                      opacity: a,
+                      child: SlideTransition(
+                        position:
+                            Tween<Offset>(
+                              begin: const Offset(0, 0.06),
+                              end: Offset.zero,
+                            ).animate(
+                              CurvedAnimation(
+                                parent: a,
+                                curve: Curves.easeOutCubic,
+                              ),
+                            ),
+                        child: child,
+                      ),
+                    ),
+                  ),
                 ),
-                child: const Icon(Icons.notifications_outlined,
-                    color: IColors.textSecondary, size: 22),
+
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: IColors.surface,
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: IColors.divider),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_outlined,
+                    color: IColors.textSecondary,
+                    size: 22,
+                  ),
+                ),
               ),
               if (alertCount > 0)
                 Positioned(
@@ -209,13 +245,17 @@ class _Header extends StatelessWidget {
                       color: IColors.critical,
                       shape: BoxShape.circle,
                       border: const Border.fromBorderSide(
-                          BorderSide(color: IColors.bg, width: 2)),
+                        BorderSide(color: IColors.bg, width: 2),
+                      ),
                     ),
-                    child: Text('$alertCount',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900)),
+                    child: Text(
+                      '$alertCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -255,21 +295,31 @@ class _SearchBar extends StatelessWidget {
                 controller: controller,
                 onChanged: onChanged,
                 style: const TextStyle(
-                    fontSize: 14, color: IColors.textPrimary),
+                  fontSize: 14,
+                  color: IColors.textPrimary,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Search items, suppliers...',
                   hintStyle: const TextStyle(
-                      color: IColors.textMuted, fontSize: 13),
-                  prefixIcon: const Icon(Icons.search_rounded,
-                      color: IColors.textMuted, size: 20),
+                    color: IColors.textMuted,
+                    fontSize: 13,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search_rounded,
+                    color: IColors.textMuted,
+                    size: 20,
+                  ),
                   suffixIcon: controller.text.isNotEmpty
                       ? GestureDetector(
                           onTap: () {
                             controller.clear();
                             onChanged('');
                           },
-                          child: const Icon(Icons.close_rounded,
-                              size: 17, color: IColors.textMuted),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 17,
+                            color: IColors.textMuted,
+                          ),
                         )
                       : null,
                   filled: true,
@@ -286,7 +336,9 @@ class _SearchBar extends StatelessWidget {
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(13),
                     borderSide: const BorderSide(
-                        color: IColors.accentMid, width: 1.5),
+                      color: IColors.accentMid,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -304,8 +356,11 @@ class _SearchBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(13),
                 border: Border.all(color: IColors.divider),
               ),
-              child: const Icon(Icons.sort_rounded,
-                  color: IColors.textSecondary, size: 20),
+              child: const Icon(
+                Icons.sort_rounded,
+                color: IColors.textSecondary,
+                size: 20,
+              ),
             ),
           ),
         ],
@@ -318,14 +373,15 @@ class _SearchBar extends StatelessWidget {
       context: context,
       backgroundColor: IColors.surface,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (_) {
         final options = {
-          InventorySortBy.name:          ('A–Z Name',       '🔤'),
-          InventorySortBy.stockLowHigh:  ('Stock: Low → High','📉'),
-          InventorySortBy.stockHighLow:  ('Stock: High → Low','📈'),
-          InventorySortBy.lastUpdated:   ('Recently Updated','🕐'),
-          InventorySortBy.value:         ('Highest Value',   '💰'),
+          InventorySortBy.name: ('A–Z Name', '🔤'),
+          InventorySortBy.stockLowHigh: ('Stock: Low → High', '📉'),
+          InventorySortBy.stockHighLow: ('Stock: High → Low', '📈'),
+          InventorySortBy.lastUpdated: ('Recently Updated', '🕐'),
+          InventorySortBy.value: ('Highest Value', '💰'),
         };
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
@@ -344,11 +400,14 @@ class _SearchBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const Text('Sort By',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: IColors.textPrimary)),
+              const Text(
+                'Sort By',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: IColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 14),
               ...options.entries.map((e) {
                 final isSelected = sortBy == e.key;
@@ -361,7 +420,9 @@ class _SearchBar extends StatelessWidget {
                     duration: const Duration(milliseconds: 150),
                     margin: const EdgeInsets.only(bottom: 6),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: isSelected
                           ? IColors.accentLight
@@ -375,24 +436,28 @@ class _SearchBar extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        Text(e.value.$2,
-                            style: const TextStyle(fontSize: 16)),
+                        Text(e.value.$2, style: const TextStyle(fontSize: 16)),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(e.value.$1,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: isSelected
-                                    ? IColors.accentMid
-                                    : IColors.textPrimary,
-                              )),
+                          child: Text(
+                            e.value.$1,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: isSelected
+                                  ? IColors.accentMid
+                                  : IColors.textPrimary,
+                            ),
+                          ),
                         ),
                         if (isSelected)
-                          const Icon(Icons.check_circle,
-                              color: IColors.accentMid, size: 18),
+                          const Icon(
+                            Icons.check_circle,
+                            color: IColors.accentMid,
+                            size: 18,
+                          ),
                       ],
                     ),
                   ),
@@ -484,11 +549,11 @@ class _FilterTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const tabs = [
-      (InventoryFilter.all,        'All',      ''),
-      (InventoryFilter.inStock,    'In Stock', '✅'),
-      (InventoryFilter.lowStock,   'Low',      '⚠️'),
-      (InventoryFilter.critical,   'Critical', '🔴'),
-      (InventoryFilter.outOfStock, 'Out',      '❌'),
+      (InventoryFilter.all, 'All', ''),
+      (InventoryFilter.inStock, 'In Stock', '✅'),
+      (InventoryFilter.lowStock, 'Low', '⚠️'),
+      (InventoryFilter.critical, 'Critical', '🔴'),
+      (InventoryFilter.outOfStock, 'Out', '❌'),
     ];
 
     return SizedBox(
@@ -506,31 +571,33 @@ class _FilterTabBar extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 7),
+                  horizontal: 14,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? IColors.accent : IColors.surface,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color:
-                        isSelected ? IColors.accent : IColors.divider,
+                    color: isSelected ? IColors.accent : IColors.divider,
                   ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (emoji.isNotEmpty) ...[
-                      Text(emoji,
-                          style: const TextStyle(fontSize: 11)),
+                      Text(emoji, style: const TextStyle(fontSize: 11)),
                       const SizedBox(width: 5),
                     ],
-                    Text(label,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: isSelected
-                              ? Colors.white
-                              : IColors.textSecondary,
-                        )),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isSelected
+                            ? Colors.white
+                            : IColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -572,26 +639,24 @@ class _CategoryChips extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 13, vertical: 6),
+                  horizontal: 13,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: isSel
-                      ? IColors.accentLight
-                      : Colors.transparent,
+                  color: isSel ? IColors.accentLight : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSel
-                        ? IColors.accentMid
-                        : Colors.transparent,
+                    color: isSel ? IColors.accentMid : Colors.transparent,
                   ),
                 ),
-                child: Text(cat,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isSel
-                          ? IColors.accentMid
-                          : IColors.textSecondary,
-                    )),
+                child: Text(
+                  cat,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isSel ? IColors.accentMid : IColors.textSecondary,
+                  ),
+                ),
               ),
             ),
           );
@@ -653,19 +718,22 @@ class _EmptyState extends StatelessWidget {
               color: IColors.accentLight,
               shape: BoxShape.circle,
             ),
-            child: const Text('📦',
-                style: TextStyle(fontSize: 44)),
+            child: const Text('📦', style: TextStyle(fontSize: 44)),
           ),
           const SizedBox(height: 18),
-          const Text('No items found',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: IColors.textPrimary)),
+          const Text(
+            'No items found',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: IColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 6),
-          const Text('Try adjusting your search or filters',
-              style: TextStyle(
-                  fontSize: 13, color: IColors.textSecondary)),
+          const Text(
+            'Try adjusting your search or filters',
+            style: TextStyle(fontSize: 13, color: IColors.textSecondary),
+          ),
         ],
       ),
     );
@@ -684,8 +752,7 @@ class _AddFAB extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [IColors.accent, IColors.accentMid],
@@ -706,12 +773,14 @@ class _AddFAB extends StatelessWidget {
           children: [
             Icon(Icons.add_rounded, color: Colors.white, size: 20),
             SizedBox(width: 8),
-            Text('Add Item',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                )),
+            Text(
+              'Add Item',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ],
         ),
       ),
@@ -769,19 +838,24 @@ class _DetailSheet extends StatelessWidget {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Current Stock',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: IColors.textSecondary,
-                                        fontWeight: FontWeight.w600)),
+                                const Text(
+                                  'Current Stock',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: IColors.textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                                 const SizedBox(height: 4),
-                                Text(item.stockDisplay,
-                                    style: TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.w900,
-                                      color: color,
-                                      letterSpacing: -0.8,
-                                    )),
+                                Text(
+                                  item.stockDisplay,
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w900,
+                                    color: color,
+                                    letterSpacing: -0.8,
+                                  ),
+                                ),
                               ],
                             ),
                             StockStatusBadge(status: item.status),
@@ -797,18 +871,28 @@ class _DetailSheet extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Min: ${item.minThreshold.toInt()} ${item.unit.label}',
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    color: IColors.textSecondary)),
                             Text(
-                                '${(item.stockPercent * 100).toInt()}% of capacity',
-                                style: TextStyle(
-                                    fontSize: 11, color: color, fontWeight: FontWeight.w700)),
-                            Text('Max: ${item.maxCapacity.toInt()} ${item.unit.label}',
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    color: IColors.textSecondary)),
+                              'Min: ${item.minThreshold.toInt()} ${item.unit.label}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: IColors.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              '${(item.stockPercent * 100).toInt()}% of capacity',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: color,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              'Max: ${item.maxCapacity.toInt()} ${item.unit.label}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: IColors.textSecondary,
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -820,17 +904,37 @@ class _DetailSheet extends StatelessWidget {
                   // ── Info grid ─────────────────────────────
                   Row(
                     children: [
-                      Expanded(child: _InfoTile(label: 'Cost / Unit', value: '₹${item.costPerUnit.toInt()}')),
+                      Expanded(
+                        child: _InfoTile(
+                          label: 'Cost / Unit',
+                          value: '₹${item.costPerUnit.toInt()}',
+                        ),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: _InfoTile(label: 'Total Value', value: '₹${item.totalValue.toInt()}')),
+                      Expanded(
+                        child: _InfoTile(
+                          label: 'Total Value',
+                          value: '₹${item.totalValue.toInt()}',
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Expanded(child: _InfoTile(label: 'Supplier', value: item.supplier)),
+                      Expanded(
+                        child: _InfoTile(
+                          label: 'Supplier',
+                          value: item.supplier,
+                        ),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: _InfoTile(label: 'Last Updated', value: item.lastUpdatedLabel)),
+                      Expanded(
+                        child: _InfoTile(
+                          label: 'Last Updated',
+                          value: item.lastUpdatedLabel,
+                        ),
+                      ),
                     ],
                   ),
 
@@ -851,7 +955,9 @@ class _DetailSheet extends StatelessWidget {
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,
                               builder: (_) => _StockUpdateSheet(
-                                  item: item, provider: provider),
+                                item: item,
+                                provider: provider,
+                              ),
                             );
                           },
                         ),
@@ -869,7 +975,9 @@ class _DetailSheet extends StatelessWidget {
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,
                               builder: (_) => _AddEditSheet(
-                                  provider: provider, editItem: item),
+                                provider: provider,
+                                editItem: item,
+                              ),
                             );
                           },
                         ),
@@ -890,7 +998,9 @@ class _DetailSheet extends StatelessWidget {
                     const SheetSection(title: 'Transaction History'),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: IColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(16),
@@ -898,16 +1008,18 @@ class _DetailSheet extends StatelessWidget {
                       ),
                       child: Column(
                         children: item.transactions
-                            .map((tx) => Column(
-                                  children: [
-                                    TransactionTile(
-                                        tx: tx, unit: item.unit),
-                                    if (tx != item.transactions.last)
-                                      const Divider(
-                                          height: 1,
-                                          color: IColors.divider),
-                                  ],
-                                ))
+                            .map(
+                              (tx) => Column(
+                                children: [
+                                  TransactionTile(tx: tx, unit: item.unit),
+                                  if (tx != item.transactions.last)
+                                    const Divider(
+                                      height: 1,
+                                      color: IColors.divider,
+                                    ),
+                                ],
+                              ),
+                            )
                             .toList(),
                       ),
                     ),
@@ -926,17 +1038,23 @@ class _DetailSheet extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
-        title: Text('Delete ${item.name}?',
-            style: const TextStyle(fontWeight: FontWeight.w800)),
-        content: const Text('This will remove the item from inventory.',
-            style: TextStyle(color: IColors.textSecondary)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Delete ${item.name}?',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          'This will remove the item from inventory.',
+          style: TextStyle(color: IColors.textSecondary),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel',
-                  style: TextStyle(color: IColors.textSecondary))),
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: IColors.textSecondary),
+            ),
+          ),
           ElevatedButton(
             onPressed: () {
               provider.deleteItem(item.id);
@@ -947,7 +1065,8 @@ class _DetailSheet extends StatelessWidget {
               backgroundColor: IColors.critical,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
             child: const Text('Delete'),
           ),
@@ -974,20 +1093,26 @@ class _InfoTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 10,
-                  color: IColors.textMuted,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              color: IColors.textMuted,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(value,
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: IColors.textPrimary),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: IColors.textPrimary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
@@ -1023,11 +1148,14 @@ class _ActionButton extends StatelessWidget {
           children: [
             Text(emoji, style: const TextStyle(fontSize: 14)),
             const SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: color)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
           ],
         ),
       ),
@@ -1077,9 +1205,9 @@ class _StockUpdateSheet extends StatefulWidget {
 
 class _StockUpdateSheetState extends State<_StockUpdateSheet> {
   TransactionType _txType = TransactionType.stockIn;
-  final _qtyCtrl  = TextEditingController();
+  final _qtyCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
-  final _formKey  = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
 
   @override
   void dispose() {
@@ -1093,11 +1221,11 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
     final item = widget.item;
     return Container(
       padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: IColors.surface,
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Form(
         key: _formKey,
@@ -1128,7 +1256,9 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
                     label: 'Quantity',
                     hint: 'Enter quantity',
                     controller: _qtyCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     suffix: item.unit.label,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Required';
@@ -1151,7 +1281,9 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
                   // Current stock indicator
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: IColors.surfaceAlt,
                       borderRadius: BorderRadius.circular(12),
@@ -1159,16 +1291,22 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
                     ),
                     child: Row(
                       children: [
-                        const Text('Current',
-                            style: TextStyle(
-                                fontSize: 12, color: IColors.textSecondary)),
+                        const Text(
+                          'Current',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: IColors.textSecondary,
+                          ),
+                        ),
                         const Spacer(),
-                        Text(item.stockDisplay,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              color: IColors.textPrimary,
-                            )),
+                        Text(
+                          item.stockDisplay,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: IColors.textPrimary,
+                          ),
+                        ),
                         const SizedBox(width: 10),
                         StockStatusBadge(status: item.status, compact: true),
                       ],
@@ -1186,12 +1324,17 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                         elevation: 0,
                       ),
-                      child: const Text('Confirm Update',
-                          style: TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w800)),
+                      child: const Text(
+                        'Confirm Update',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -1226,10 +1369,10 @@ class _TxTypeSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const types = [
-      (TransactionType.stockIn,    '📥', 'Stock In',  IColors.inStock),
-      (TransactionType.stockOut,   '📤', 'Stock Out', IColors.lowStock),
-      (TransactionType.adjustment, '🔧', 'Adjust',    IColors.accentMid),
-      (TransactionType.waste,      '🗑️', 'Waste',     IColors.critical),
+      (TransactionType.stockIn, '📥', 'Stock In', IColors.inStock),
+      (TransactionType.stockOut, '📤', 'Stock Out', IColors.lowStock),
+      (TransactionType.adjustment, '🔧', 'Adjust', IColors.accentMid),
+      (TransactionType.waste, '🗑️', 'Waste', IColors.critical),
     ];
     return Row(
       children: types.map((t) {
@@ -1255,12 +1398,14 @@ class _TxTypeSelector extends StatelessWidget {
                   children: [
                     Text(emoji, style: const TextStyle(fontSize: 16)),
                     const SizedBox(height: 4),
-                    Text(label,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: isSel ? color : IColors.textSecondary,
-                        )),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isSel ? color : IColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1300,32 +1445,68 @@ class _AddEditSheetState extends State<_AddEditSheet> {
   bool get isEditing => widget.editItem != null;
 
   static const _categories = [
-    'Grains', 'Pulses', 'Vegetables', 'Dairy',
-    'Oils', 'Spices', 'Herbs', 'Beverages', 'Other'
+    'Grains',
+    'Pulses',
+    'Vegetables',
+    'Dairy',
+    'Oils',
+    'Spices',
+    'Herbs',
+    'Beverages',
+    'Other',
   ];
   static const _emojis = [
-    '🍚','🫘','🥔','🍅','🧅','🌶️','🥬','🧄','🫚',
-    '🧈','🥛','🌻','🥥','🌿','🌱','📦','🫙','🍶',
+    '🍚',
+    '🫘',
+    '🥔',
+    '🍅',
+    '🧅',
+    '🌶️',
+    '🥬',
+    '🧄',
+    '🫚',
+    '🧈',
+    '🥛',
+    '🌻',
+    '🥥',
+    '🌿',
+    '🌱',
+    '📦',
+    '🫙',
+    '🍶',
   ];
 
   @override
   void initState() {
     super.initState();
     final e = widget.editItem;
-    _nameCtrl     = TextEditingController(text: e?.name ?? '');
+    _nameCtrl = TextEditingController(text: e?.name ?? '');
     _supplierCtrl = TextEditingController(text: e?.supplier ?? '');
-    _stockCtrl    = TextEditingController(text: e != null ? '${e.currentStock}' : '');
-    _minCtrl      = TextEditingController(text: e != null ? '${e.minThreshold}' : '');
-    _maxCtrl      = TextEditingController(text: e != null ? '${e.maxCapacity}' : '');
-    _costCtrl     = TextEditingController(text: e != null ? '${e.costPerUnit}' : '');
-    _unit         = e?.unit ?? StockUnit.kg;
-    _category     = e?.category ?? 'Grains';
-    _emoji        = e?.emoji ?? '📦';
+    _stockCtrl = TextEditingController(
+      text: e != null ? '${e.currentStock}' : '',
+    );
+    _minCtrl = TextEditingController(
+      text: e != null ? '${e.minThreshold}' : '',
+    );
+    _maxCtrl = TextEditingController(text: e != null ? '${e.maxCapacity}' : '');
+    _costCtrl = TextEditingController(
+      text: e != null ? '${e.costPerUnit}' : '',
+    );
+    _unit = e?.unit ?? StockUnit.kg;
+    _category = e?.category ?? 'Grains';
+    _emoji = e?.emoji ?? '📦';
   }
 
   @override
   void dispose() {
-    for (final c in [_nameCtrl, _supplierCtrl, _stockCtrl, _minCtrl, _maxCtrl, _costCtrl]) {
+    for (final c in [
+      _nameCtrl,
+      _supplierCtrl,
+      _stockCtrl,
+      _minCtrl,
+      _maxCtrl,
+      _costCtrl,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -1343,7 +1524,8 @@ class _AddEditSheetState extends State<_AddEditSheet> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom),
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Form(
           key: _formKey,
           child: Column(
@@ -1390,8 +1572,10 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                                   width: isSelected ? 2 : 1,
                                 ),
                               ),
-                              child: Text(_emojis[i],
-                                  style: const TextStyle(fontSize: 22)),
+                              child: Text(
+                                _emojis[i],
+                                style: const TextStyle(fontSize: 22),
+                              ),
                             ),
                           );
                         },
@@ -1421,16 +1605,21 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Category',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: IColors.textSecondary,
-                                  letterSpacing: 0.3)),
+                          const Text(
+                            'Category',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: IColors.textSecondary,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 4),
+                              horizontal: 14,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: IColors.inputFill,
                               borderRadius: BorderRadius.circular(12),
@@ -1440,14 +1629,18 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                                 value: _category,
                                 isExpanded: true,
                                 style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: IColors.textPrimary),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: IColors.textPrimary,
+                                ),
                                 dropdownColor: IColors.surface,
                                 items: _categories
-                                    .map((c) => DropdownMenuItem(
+                                    .map(
+                                      (c) => DropdownMenuItem(
                                         value: c,
-                                        child: Text(c)))
+                                        child: Text(c),
+                                      ),
+                                    )
                                     .toList(),
                                 onChanged: (v) =>
                                     setState(() => _category = v!),
@@ -1464,12 +1657,15 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Unit',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: IColors.textSecondary,
-                                  letterSpacing: 0.3)),
+                          const Text(
+                            'Unit',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: IColors.textSecondary,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           Wrap(
                             spacing: 8,
@@ -1481,7 +1677,9 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 140),
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 8),
+                                    horizontal: 14,
+                                    vertical: 8,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: isSel
                                         ? IColors.accentLight
@@ -1494,14 +1692,16 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                                       width: isSel ? 1.5 : 1,
                                     ),
                                   ),
-                                  child: Text(u.label,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: isSel
-                                            ? IColors.accentMid
-                                            : IColors.textSecondary,
-                                      )),
+                                  child: Text(
+                                    u.label,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: isSel
+                                          ? IColors.accentMid
+                                          : IColors.textSecondary,
+                                    ),
+                                  ),
                                 ),
                               );
                             }).toList(),
@@ -1519,7 +1719,9 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                             label: 'Current Stock *',
                             hint: '0',
                             controller: _stockCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             suffix: _unit.label,
                             validator: (v) =>
                                 (v == null || v.isEmpty) ? 'Required' : null,
@@ -1531,7 +1733,9 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                             label: 'Min Threshold *',
                             hint: '0',
                             controller: _minCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             suffix: _unit.label,
                             validator: (v) =>
                                 (v == null || v.isEmpty) ? 'Required' : null,
@@ -1546,7 +1750,9 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                             label: 'Max Capacity *',
                             hint: '100',
                             controller: _maxCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             suffix: _unit.label,
                             validator: (v) =>
                                 (v == null || v.isEmpty) ? 'Required' : null,
@@ -1558,7 +1764,9 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                             label: 'Cost / Unit *',
                             hint: '0',
                             controller: _costCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             prefix: '₹',
                             isLast: true,
                             validator: (v) =>
@@ -1580,13 +1788,17 @@ class _AddEditSheetState extends State<_AddEditSheet> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                           elevation: 0,
                         ),
                         child: Text(
-                            isEditing ? 'Save Changes' : 'Add to Inventory',
-                            style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w800)),
+                          isEditing ? 'Save Changes' : 'Add to Inventory',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ),
                   ],

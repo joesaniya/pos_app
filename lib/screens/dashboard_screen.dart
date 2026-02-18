@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:pos_app/screens/orders_screen.dart';
 import 'package:pos_app/screens/revenue_analytics_screen.dart';
+import 'package:pos_app/screens/tables_screen.dart';
 import 'package:pos_app/screens/utils/responsive_utils.dart';
 import 'package:pos_app/screens/widgets/action_card_widget.dart';
 import 'package:pos_app/screens/widgets/filter_chip_widget.dart';
@@ -223,18 +225,26 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 SizedBox(
                   width: cardWidth,
-                  child: const ActionCard(
+                  child: ActionCard(
                     title: 'New Order',
                     icon: Icons.add_shopping_cart,
                     color: AppColors.success,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const OrdersScreen()),
+                    ),
                   ),
                 ),
                 SizedBox(
                   width: cardWidth,
-                  child: const ActionCard(
+                  child: ActionCard(
                     title: 'View Tables',
                     icon: Icons.table_restaurant,
                     color: AppColors.info,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const TablesScreen()),
+                    ),
                   ),
                 ),
                 SizedBox(

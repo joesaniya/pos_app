@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/orders_screen.dart';
+import 'package:pos_app/screens/reports_screen.dart';
 import 'package:pos_app/screens/revenue_analytics_screen.dart';
+import 'package:pos_app/screens/settings_screen.dart';
 import 'package:pos_app/screens/tables_screen.dart';
 import 'package:pos_app/screens/utils/responsive_utils.dart';
 import 'package:pos_app/screens/widgets/action_card_widget.dart';
@@ -249,18 +251,26 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 SizedBox(
                   width: cardWidth,
-                  child: const ActionCard(
+                  child: ActionCard(
                     title: 'Reports',
                     icon: Icons.bar_chart,
                     color: AppColors.warning,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                    ),
                   ),
                 ),
                 SizedBox(
                   width: cardWidth,
-                  child: const ActionCard(
+                  child:  ActionCard(
                     title: 'Settings',
                     icon: Icons.settings,
                     color: AppColors.secondary,
+                      onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    ),
                   ),
                 ),
               ],

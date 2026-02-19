@@ -1,9 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:pos_app/firebase_options.dart';
 import 'package:pos_app/providers/common_provider.dart';
-import 'package:pos_app/screens/login_screen.dart';
-import 'package:pos_app/screens/page_switcher.dart';
 import 'package:pos_app/screens/splash_screen.dart';
 
 import 'package:pos_app/theme/theme_provider.dart';
@@ -14,6 +14,7 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,

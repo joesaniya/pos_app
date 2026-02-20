@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:pos_app/providers/auth_provider.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/screens/forgot_pwd_screen.dart';
 import 'package:pos_app/screens/page_switcher.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
@@ -79,12 +79,13 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  // ── Handlers ──────────────────────────────────────────────────
+  // Replace your _handleLogin method in login_screen.dart with this:
 
-  Future<void> _handleLogin(AuthProvider provider) async {
+  Future<void> _handleLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
     bool success = false;
+    String errorMsg = 'Login failed. Please check your credentials.';
 
     if (provider.isEmailPasswordMethod) {
       success = await provider.loginWithEmail(
@@ -99,81 +100,51 @@ class _LoginScreenState extends State<LoginScreen>
         );
       } else {
         success = await provider.sendOTP(phone: _phoneController.text.trim());
-        if (success) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text('OTP sent successfully!'),
-                backgroundColor: AppColors.success,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.r),
-                ),
+        if (success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('OTP sent successfully!'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8.r),
               ),
-            );
-          }
+            ),
+          );
         }
         return;
       }
     }
 
-    if (mounted) {
-      if (success) {
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                const PageSwitcher(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-            transitionDuration: const Duration(milliseconds: 400),
+    if (!mounted) return;
+
+    if (success) {
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const PageSwitcher(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 400),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMsg),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8.r),
           ),
-        );
-        /* ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Login successful!'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.r),
-            ),
-          ),
-        );
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                const PageSwitcher(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-                  return ScaleTransition(
-                    scale: Tween(begin: 0.9, end: 1.0).animate(
-                      CurvedAnimation(parent: animation, curve: Curves.easeOut),
-                    ),
-                    child: FadeTransition(opacity: animation, child: child),
-                  );
-                },
-            transitionDuration: const Duration(milliseconds: 450),
-          ),
-        );*/
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Login failed. Please try again.'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.r),
-            ),
-          ),
-        );
-      }
+        ),
+      );
     }
   }
 
-  Future<void> _handleResendOTP(AuthProvider provider) async {
+  Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final success = await provider.resendOTP(
       phone: _phoneController.text.trim(),
     );
@@ -194,7 +165,10 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _handleSocialLogin(AuthProvider provider, String type) async {
+  Future<void> _handleSocialLogin(
+    AppAuthenticationProvider provider,
+    String type,
+  ) async {
     final success = await provider.socialLogin(provider: type);
 
     if (mounted) {
@@ -214,18 +188,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  /*void _navigateToSignup() {
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, animation, __) =>
-            FadeTransition(opacity: animation, child: const SignupScreen()),
-        transitionDuration: const Duration(milliseconds: 300),
-      ),
-    );
-  }
-*/
-
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -244,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen>
                 opacity: _fadeAnimation,
                 child: SlideTransition(
                   position: _slideAnimation,
-                  child: Consumer<AuthProvider>(
+                  child: Consumer<AppAuthenticationProvider>(
                     builder: (context, provider, _) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,7 +252,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildLoginMethodTabs(AuthProvider provider) {
+  Widget _buildLoginMethodTabs(AppAuthenticationProvider provider) {
     return AuthTabContainer(
       children: [
         AuthTabButton(
@@ -307,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildForm(AuthProvider provider) {
+  Widget _buildForm(AppAuthenticationProvider provider) {
     return Form(
       key: _formKey,
       child: AnimatedSwitcher(
@@ -329,7 +291,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildEmailPasswordForm(AuthProvider provider) {
+  Widget _buildEmailPasswordForm(AppAuthenticationProvider provider) {
     return Column(
       key: const ValueKey('email-password'),
       children: [
@@ -374,7 +336,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildPhoneOTPForm(AuthProvider provider) {
+  Widget _buildPhoneOTPForm(AppAuthenticationProvider provider) {
     return Column(
       key: const ValueKey('phone-otp'),
       children: [
@@ -422,7 +384,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildRememberMeAndForgot(AuthProvider provider) {
+  Widget _buildRememberMeAndForgot(AppAuthenticationProvider provider) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -452,7 +414,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildActionButton(AuthProvider provider) {
+  Widget _buildActionButton(AppAuthenticationProvider provider) {
     return AuthPrimaryButton(
       label: provider.isPhoneOtpMethod && !provider.otpSent
           ? 'Send OTP'
@@ -466,7 +428,7 @@ class _LoginScreenState extends State<LoginScreen>
     return const AuthDivider();
   }
 
-  Widget _buildSocialLogin(AuthProvider provider) {
+  Widget _buildSocialLogin(AppAuthenticationProvider provider) {
     return Column(
       children: [
         SocialLoginButton(
@@ -485,14 +447,6 @@ class _LoginScreenState extends State<LoginScreen>
       ],
     );
   }
-
-  /*Widget _buildFooter() {
-    return AuthFooterText(
-      text: 'Don\'t have an account? ',
-      actionText: 'Sign Up',
-      onActionTap: _navigateToSignup,
-    );
-  }*/
 }
 
 
@@ -613,7 +567,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ── Handlers ──────────────────────────────────────────────────
 
-  Future<void> _handleLogin(AuthProvider provider) async {
+  Future<void> _handleLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
     if (provider.isEmailPasswordMethod) {
@@ -664,7 +618,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _handleResendOTP(AuthProvider provider) async {
+  Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final result =
         await provider.resendOTP(phone: _phoneController.text.trim());
 
@@ -678,7 +632,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Future<void> _handleSocialLogin(AuthProvider provider, String type) async {
+  Future<void> _handleSocialLogin(AppAuthenticationProvider provider, String type) async {
     final result = await provider.socialLogin(provider: type);
 
     if (!mounted) return;
@@ -721,7 +675,7 @@ class _LoginScreenState extends State<LoginScreen>
                 opacity: _fadeAnimation,
                 child: SlideTransition(
                   position: _slideAnimation,
-                  child: Consumer<AuthProvider>(
+                  child: Consumer<AppAuthenticationProvider>(
                     builder: (context, provider, _) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -767,7 +721,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildLoginMethodTabs(AuthProvider provider) {
+  Widget _buildLoginMethodTabs(AppAuthenticationProvider provider) {
     return AuthTabContainer(
       children: [
         AuthTabButton(
@@ -784,7 +738,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildForm(AuthProvider provider) {
+  Widget _buildForm(AppAuthenticationProvider provider) {
     return Form(
       key: _formKey,
       child: AnimatedSwitcher(
@@ -806,7 +760,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildEmailPasswordForm(AuthProvider provider) {
+  Widget _buildEmailPasswordForm(AppAuthenticationProvider provider) {
     return Column(
       key: const ValueKey('email-password'),
       children: [
@@ -851,7 +805,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildPhoneOTPForm(AuthProvider provider) {
+  Widget _buildPhoneOTPForm(AppAuthenticationProvider provider) {
     return Column(
       key: const ValueKey('phone-otp'),
       children: [
@@ -899,7 +853,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildRememberMeAndForgot(AuthProvider provider) {
+  Widget _buildRememberMeAndForgot(AppAuthenticationProvider provider) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -930,7 +884,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildActionButton(AuthProvider provider) {
+  Widget _buildActionButton(AppAuthenticationProvider provider) {
     return AuthPrimaryButton(
       label: provider.isPhoneOtpMethod && !provider.otpSent
           ? 'Send OTP'
@@ -942,7 +896,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   Widget _buildDivider() => const AuthDivider();
 
-  Widget _buildSocialLogin(AuthProvider provider) {
+  Widget _buildSocialLogin(AppAuthenticationProvider provider) {
     return Column(
       children: [
         SocialLoginButton(

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:pos_app/providers/auth_provider.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
 import 'package:pos_app/screens/widgets/auth_backbtn_widget.dart';
 import 'package:pos_app/screens/widgets/auth_header_widget.dart';
@@ -43,7 +43,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     super.initState();
     _setupAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().resetForgotPasswordFlow();
+      context.read<AppAuthenticationProvider>().resetForgotPasswordFlow();
     });
   }
 
@@ -89,7 +89,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Handlers ──────────────────────────────────────────────────
 
-  Future<void> _handleSendOTP(AuthProvider provider) async {
+  Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
     if (!_emailFormKey.currentState!.validate()) return;
 
     final success = await provider.sendPasswordResetOTP(
@@ -110,7 +110,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     }
   }
 
-  Future<void> _handleVerifyOTP(AuthProvider provider) async {
+  Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_otpFormKey.currentState!.validate()) return;
 
     final success = await provider.verifyPasswordResetOTP(
@@ -132,7 +132,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     }
   }
 
-  Future<void> _handleResetPassword(AuthProvider provider) async {
+  Future<void> _handleResetPassword(AppAuthenticationProvider provider) async {
     if (!_passwordFormKey.currentState!.validate()) return;
 
     final success = await provider.resetPassword(
@@ -151,7 +151,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     }
   }
 
-  Future<void> _handleResendOTP(AuthProvider provider) async {
+  Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final success = await provider.resendPasswordResetOTP(
       email: _emailController.text.trim(),
     );
@@ -187,7 +187,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
       child: Scaffold(
         backgroundColor: AppColors.lightNeutral100,
         body: SafeArea(
-          child: Consumer<AuthProvider>(
+          child: Consumer<AppAuthenticationProvider>(
             builder: (context, provider, _) {
               return SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -238,7 +238,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step Router ───────────────────────────────────────────────
 
-  Widget _buildCurrentStep(AuthProvider provider) {
+  Widget _buildCurrentStep(AppAuthenticationProvider provider) {
     switch (provider.forgotPasswordStep) {
       case ForgotPasswordStep.enterEmail:
         return _buildEnterEmailStep(provider);
@@ -253,7 +253,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 1: Enter Email ───────────────────────────────────────
 
-  Widget _buildEnterEmailStep(AuthProvider provider) {
+  Widget _buildEnterEmailStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -304,7 +304,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 2: Verify OTP ────────────────────────────────────────
 
-  Widget _buildVerifyOtpStep(AuthProvider provider) {
+  Widget _buildVerifyOtpStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -384,7 +384,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 3: Reset Password ────────────────────────────────────
 
-  Widget _buildResetPasswordStep(AuthProvider provider) {
+  Widget _buildResetPasswordStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -562,7 +562,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     super.initState();
     _setupAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().resetForgotPasswordFlow();
+      context.read<AppAuthenticationProvider>().resetForgotPasswordFlow();
     });
   }
 
@@ -624,7 +624,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   // ── Handlers ──────────────────────────────────────────────────
 
   /// Step 1 — Send reset email
-  Future<void> _handleSendOTP(AuthProvider provider) async {
+  Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
     if (!_emailFormKey.currentState!.validate()) return;
 
     final result = await provider.sendPasswordResetOTP(
@@ -645,7 +645,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   }
 
   /// Step 2 — Verify OTP / action code from email
-  Future<void> _handleVerifyOTP(AuthProvider provider) async {
+  Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_otpFormKey.currentState!.validate()) return;
 
     final result = await provider.verifyPasswordResetOTP(
@@ -666,7 +666,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   }
 
   /// Step 3 — Confirm new password
-  Future<void> _handleResetPassword(AuthProvider provider) async {
+  Future<void> _handleResetPassword(AppAuthenticationProvider provider) async {
     if (!_passwordFormKey.currentState!.validate()) return;
 
     final result = await provider.resetPassword(
@@ -688,7 +688,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   }
 
   /// Resend reset email
-  Future<void> _handleResendOTP(AuthProvider provider) async {
+  Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final result = await provider.resendPasswordResetOTP(
       email: _emailController.text.trim(),
     );
@@ -715,7 +715,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
       child: Scaffold(
         backgroundColor: AppColors.lightNeutral100,
         body: SafeArea(
-          child: Consumer<AuthProvider>(
+          child: Consumer<AppAuthenticationProvider>(
             builder: (context, provider, _) {
               return SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -766,7 +766,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step Router ───────────────────────────────────────────────
 
-  Widget _buildCurrentStep(AuthProvider provider) {
+  Widget _buildCurrentStep(AppAuthenticationProvider provider) {
     switch (provider.forgotPasswordStep) {
       case ForgotPasswordStep.enterEmail:
         return _buildEnterEmailStep(provider);
@@ -781,7 +781,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 1: Enter Email ───────────────────────────────────────
 
-  Widget _buildEnterEmailStep(AuthProvider provider) {
+  Widget _buildEnterEmailStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -860,7 +860,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 2: Verify OTP ────────────────────────────────────────
 
-  Widget _buildVerifyOtpStep(AuthProvider provider) {
+  Widget _buildVerifyOtpStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -932,7 +932,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   // ── Step 3: Reset Password ────────────────────────────────────
 
-  Widget _buildResetPasswordStep(AuthProvider provider) {
+  Widget _buildResetPasswordStep(AppAuthenticationProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

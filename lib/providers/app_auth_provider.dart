@@ -1,5 +1,10 @@
+import 'dart:developer';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pos_app/services/storage_service.dart';
 
 enum AuthMode { login, signup }
 
@@ -7,7 +12,11 @@ enum LoginMethod { emailPassword, phoneOtp }
 
 enum ForgotPasswordStep { enterEmail, verifyOtp, resetPassword, success }
 
-class AuthProvider with ChangeNotifier {
+class AppAuthenticationProvider with ChangeNotifier {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final StorageService _storage = StorageService.instance;
+
   // ── State ─────────────────────────────────────────────────────
   AuthMode _authMode = AuthMode.login;
   LoginMethod _loginMethod = LoginMethod.emailPassword;
@@ -21,6 +30,9 @@ class AuthProvider with ChangeNotifier {
   bool _agreedToTerms = false;
   String _resetEmail = '';
 
+  // Stored user data after login
+  Map<String, dynamic> _userData = {};
+
   // ── Getters ───────────────────────────────────────────────────
   AuthMode get authMode => _authMode;
   LoginMethod get loginMethod => _loginMethod;
@@ -33,6 +45,7 @@ class AuthProvider with ChangeNotifier {
   bool get otpSent => _otpSent;
   bool get agreedToTerms => _agreedToTerms;
   String get resetEmail => _resetEmail;
+  Map<String, dynamic> get userData => _userData;
 
   bool get isLoginMode => _authMode == AuthMode.login;
   bool get isSignupMode => _authMode == AuthMode.signup;
@@ -152,8 +165,8 @@ class AuthProvider with ChangeNotifier {
   }
 
   // ── API Calls ─────────────────────────────────────────────────
-  
-  /// Login with email and password
+
+  /// Login with email and password — validates against Firestore users collection
   Future<bool> loginWithEmail({
     required String email,
     required String password,
@@ -162,13 +175,80 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // Simulate success
+      // 1. Sign in with Firebase Auth
+      final UserCredential credential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final User? firebaseUser = credential.user;
+      if (firebaseUser == null) {
+        setLoading(false);
+        return false;
+      }
+
+      // 2. Fetch user document from Firestore
+      final docSnapshot = await _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .get();
+
+      if (!docSnapshot.exists) {
+        // User not found in Firestore — reject login
+        await _auth.signOut();
+        setLoading(false);
+        return false;
+      }
+
+      final data = docSnapshot.data()!;
+
+      // 3. Check isActive flag
+      if (data['isActive'] != true) {
+        await _auth.signOut();
+        setLoading(false);
+        return false;
+      }
+
+      // 4. Get fresh ID token
+      final String token = await firebaseUser.getIdToken() ?? '';
+
+      log(
+        'Login successful for token $token  ==>  ${data['email']} (UID: ${firebaseUser.uid})',
+      );
+      await _storage.saveUserData(
+        uid: data['uid'] ?? firebaseUser.uid,
+        token: token,
+        name: data['name'] ?? '',
+        email: data['email'] ?? email,
+        phone: data['phone'] ?? '',
+        role: data['role'] ?? '',
+        businessId: data['businessId'] ?? '',
+        businessName: data['businessName'] ?? '',
+        profilePhoto: data['profilePhoto'],
+        isActive: data['isActive'] ?? true,
+      );
+
+      // 6. Cache locally
+      _userData = {
+        'uid': data['uid'] ?? firebaseUser.uid,
+        'name': data['name'] ?? '',
+        'email': data['email'] ?? email,
+        'phone': data['phone'] ?? '',
+        'role': data['role'] ?? '',
+        'businessId': data['businessId'] ?? '',
+        'businessName': data['businessName'] ?? '',
+        'profilePhoto': data['profilePhoto'] ?? '',
+        'isActive': data['isActive'] ?? true,
+      };
+
       setLoading(false);
       return true;
+    } on FirebaseAuthException catch (e) {
+      debugPrint('FirebaseAuthException: ${e.code} - ${e.message}');
+      setLoading(false);
+      return false;
     } catch (e) {
+      debugPrint('loginWithEmail error: $e');
       setLoading(false);
       return false;
     }
@@ -180,9 +260,9 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
+      // TODO: Replace with actual Firebase Phone Auth
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       setOtpSent(true);
       return true;
@@ -193,17 +273,14 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Verify OTP
-  Future<bool> verifyOTP({
-    required String phone,
-    required String otp,
-  }) async {
+  Future<bool> verifyOTP({required String phone, required String otp}) async {
     setLoading(true);
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
+      // TODO: Replace with actual Firebase Phone Auth verification
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -218,9 +295,8 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.lightImpact();
 
     try {
-      // TODO: Replace with actual API call
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -236,17 +312,14 @@ class AuthProvider with ChangeNotifier {
     required String password,
     required String phone,
   }) async {
-    if (!_agreedToTerms) {
-      return false;
-    }
+    if (!_agreedToTerms) return false;
 
     setLoading(true);
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -261,17 +334,14 @@ class AuthProvider with ChangeNotifier {
     required String phone,
     required String otp,
   }) async {
-    if (!_agreedToTerms) {
-      return false;
-    }
+    if (!_agreedToTerms) return false;
 
     setLoading(true);
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -286,9 +356,9 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
+      // TODO: Replace with actual social login
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -299,16 +369,13 @@ class AuthProvider with ChangeNotifier {
 
   // ── Forgot Password API Calls ─────────────────────────────────
 
-  /// Send OTP for password reset
   Future<bool> sendPasswordResetOTP({required String email}) async {
     setLoading(true);
     setResetEmail(email);
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
-      await Future.delayed(const Duration(seconds: 2));
-      
+      await _auth.sendPasswordResetEmail(email: email);
       setLoading(false);
       setOtpSent(true);
       return true;
@@ -318,7 +385,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Verify OTP for password reset
   Future<bool> verifyPasswordResetOTP({
     required String email,
     required String otp,
@@ -327,9 +393,8 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -338,7 +403,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Reset password with new password
   Future<bool> resetPassword({
     required String email,
     required String otp,
@@ -348,9 +412,8 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // TODO: Replace with actual API call
       await Future.delayed(const Duration(seconds: 2));
-      
+
       setLoading(false);
       return true;
     } catch (e) {
@@ -359,21 +422,26 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Resend password reset OTP
   Future<bool> resendPasswordResetOTP({required String email}) async {
     setLoading(true);
     HapticFeedback.lightImpact();
 
     try {
-      // TODO: Replace with actual API call
-      await Future.delayed(const Duration(seconds: 2));
-      
+      await _auth.sendPasswordResetEmail(email: email);
       setLoading(false);
       return true;
     } catch (e) {
       setLoading(false);
       return false;
     }
+  }
+
+  // ── Logout ────────────────────────────────────────────────────
+  Future<void> logout() async {
+    await _auth.signOut();
+    await _storage.clearUserData();
+    _userData = {};
+    resetAll();
   }
 
   // ── Reset State ───────────────────────────────────────────────
@@ -383,7 +451,6 @@ class AuthProvider with ChangeNotifier {
     _isNewPasswordVisible = false;
     _otpSent = false;
     _agreedToTerms = false;
-    // Don't reset rememberMe as it's user preference
   }
 
   void resetAll() {
@@ -414,7 +481,7 @@ enum LoginMethod { emailPassword, phoneOtp }
 
 enum ForgotPasswordStep { enterEmail, verifyOtp, resetPassword, success }
 
-class AuthProvider with ChangeNotifier {
+class AppAuthenticationProvider with ChangeNotifier {
   // ── Firebase Instances ────────────────────────────────────────
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -714,7 +781,7 @@ class AuthProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      final credential = PhoneAuthProvider.credential(
+      final credential = PhoneAppAuthenticationProvider.credential(
         verificationId: _verificationId!,
         smsCode: otp,
       );
@@ -813,7 +880,7 @@ class AuthProvider with ChangeNotifier {
             await googleUser.authentication;
 
         // Both accessToken and idToken available in v6
-        final credential = GoogleAuthProvider.credential(
+        final credential = GoogleAppAuthenticationProvider.credential(
           accessToken: googleAuth.accessToken,
           idToken: googleAuth.idToken,
         );

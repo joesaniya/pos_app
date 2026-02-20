@@ -1,4 +1,4 @@
-import 'package:pos_app/providers/auth_provider.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/create_account_provider.dart';
 import 'package:pos_app/providers/dashboard_provider.dart';
 import 'package:pos_app/providers/inventory_provider.dart';
@@ -26,7 +26,7 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => SplashProvider()),
     ChangeNotifierProvider(create: (_) => ThemeProvider()),
     ChangeNotifierProvider(create: (_) => OnboardingProvider()),
-    ChangeNotifierProvider(create: (_) => AuthProvider()),
+    ChangeNotifierProvider(create: (_) => AppAuthenticationProvider()),
 
     //screens
     ChangeNotifierProvider(create: (_) => PageSwitcherProvider()),

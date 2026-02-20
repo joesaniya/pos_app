@@ -1,6 +1,11 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
+import 'package:pos_app/screens/change_pwd_screen.dart';
 import 'package:pos_app/screens/create_account_screen.dart';
+import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
@@ -11,7 +16,7 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-  return const _ProfileView();
+    return const _ProfileView();
   }
 }
 
@@ -1040,7 +1045,15 @@ class _SettingsSection extends StatelessWidget {
                 label: 'Change Password',
                 subtitle: 'Last changed 30 days ago',
                 iconBg: const Color(0xFFFCE4EC),
-                onTap: () {},
+                onTap: () {
+                  log('change password tapped');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ChangePasswordScreen(),
+                    ),
+                  );
+                },
               ),
               SettingsRow(
                 emoji: '🛡️',
@@ -1213,7 +1226,26 @@ class _LogoutButton extends StatelessWidget {
             ),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () async {
+              log('User confirmed logout');
+              Navigator.pop(context);
+
+              await context.read<AppAuthenticationProvider>().logout();
+
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (_, animation, __) => FadeTransition(
+                      opacity: animation,
+                      child: const LoginScreen(),
+                    ),
+                    transitionDuration: const Duration(milliseconds: 400),
+                  ),
+                  (route) => false,
+                );
+              }
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: PColors.dangerRed,
               foregroundColor: Colors.white,

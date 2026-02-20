@@ -490,7 +490,7 @@ class ActivityItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline line + dot
+       
           Column(
             children: [
               Container(

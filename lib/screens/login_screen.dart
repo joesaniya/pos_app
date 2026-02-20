@@ -4,12 +4,10 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/auth_provider.dart';
 import 'package:pos_app/screens/forgot_pwd_screen.dart';
 import 'package:pos_app/screens/page_switcher.dart';
-import 'package:pos_app/screens/signup_screen.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
 import 'package:pos_app/screens/widgets/auth_divider_widget.dart';
 import 'package:pos_app/screens/widgets/auth_header_widget.dart';
 import 'package:pos_app/screens/widgets/auth_primary_button_widget.dart';
-import 'package:pos_app/screens/widgets/auth_step_footer_widget.dart';
 import 'package:pos_app/screens/widgets/auth_tab_btn_widget.dart';
 import 'package:pos_app/screens/widgets/auth_tab_container_widget.dart';
 import 'package:pos_app/screens/widgets/checkbox_widget.dart';
@@ -216,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  void _navigateToSignup() {
+  /*void _navigateToSignup() {
     Navigator.push(
       context,
       PageRouteBuilder(
@@ -226,8 +224,7 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-
-  // ── Build ─────────────────────────────────────────────────────
+*/
 
   @override
   Widget build(BuildContext context) {
@@ -489,13 +486,13 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildFooter() {
+  /*Widget _buildFooter() {
     return AuthFooterText(
       text: 'Don\'t have an account? ',
       actionText: 'Sign Up',
       onActionTap: _navigateToSignup,
     );
-  }
+  }*/
 }
 
 

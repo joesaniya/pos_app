@@ -1,4 +1,5 @@
 import 'package:pos_app/providers/auth_provider.dart';
+import 'package:pos_app/providers/create_account_provider.dart';
 import 'package:pos_app/providers/dashboard_provider.dart';
 import 'package:pos_app/providers/inventory_provider.dart';
 import 'package:pos_app/providers/menu_provider.dart';
@@ -29,11 +30,12 @@ class ProviderHelperClass {
 
     //screens
     ChangeNotifierProvider(create: (_) => PageSwitcherProvider()),
-        ChangeNotifierProvider(create: (_) => DashboardProvider()),
-        ChangeNotifierProvider(create: (_) => OrdersProvider()),
-        ChangeNotifierProvider(create: (_) => TablesProvider()),
-        ChangeNotifierProvider(create: (_) => MenuProvider()),
-        ChangeNotifierProvider(create: (_) => InventoryProvider()),
-        ChangeNotifierProvider(create: (_) => ProfileProvider()),
+    ChangeNotifierProvider(create: (_) => DashboardProvider()),
+    ChangeNotifierProvider(create: (_) => OrdersProvider()),
+    ChangeNotifierProvider(create: (_) => TablesProvider()),
+    ChangeNotifierProvider(create: (_) => MenuProvider()),
+    ChangeNotifierProvider(create: (_) => InventoryProvider()),
+    ChangeNotifierProvider(create: (_) => ProfileProvider()),
+    ChangeNotifierProvider(create: (_) => CreateAccountProvider()),
   ];
 }

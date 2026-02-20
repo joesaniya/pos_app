@@ -3,12 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  CREATE ACCOUNT PROVIDER
-//  Holds all business logic, state, and Firebase calls.
-//  UI layer should only call methods and read state from here.
-// ─────────────────────────────────────────────────────────────────────────────
-
 enum CreateAccountStatus { idle, loading, success, error }
 
 class CreateAccountProvider extends ChangeNotifier {
@@ -137,6 +131,7 @@ class CreateAccountProvider extends ChangeNotifier {
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'createdBy': _auth.currentUser?.uid ?? 'system',
+        'passwordLastChanged': FieldValue.serverTimestamp(),
       });
 
       // 4. Send verification email

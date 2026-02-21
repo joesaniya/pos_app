@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
@@ -11,9 +13,15 @@ class ProfileProvider extends ChangeNotifier {
   bool _isLoading = true;
   String? _error;
 
+  // ── Creator info (read directly from the user's own document) ─
+  String _creatorName = '';
+  String _creatorRole = '';
+
   UserProfile? get profile => _profile;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  String get creatorName => _creatorName;
+  String get creatorRole => _creatorRole;
 
   ProfileProvider() {
     loadProfile();
@@ -25,10 +33,12 @@ class ProfileProvider extends ChangeNotifier {
   Future<void> loadProfile() async {
     _isLoading = true;
     _error = null;
+    _creatorName = '';
+    _creatorRole = '';
     notifyListeners();
 
     try {
-      // 1. Get UID from local storage (only thing we need stored locally)
+      // 1. Get UID from local storage
       final localData = await _storage.getUserData();
       final String uid = localData['uid'] ?? '';
 
@@ -39,7 +49,7 @@ class ProfileProvider extends ChangeNotifier {
         return;
       }
 
-      // 2. Fetch complete user document from Firestore
+      // 2. Fetch user document from Firestore
       final doc = await _db.collection('users').doc(uid).get();
 
       if (!doc.exists || doc.data() == null) {
@@ -50,27 +60,34 @@ class ProfileProvider extends ChangeNotifier {
       }
 
       final data = doc.data()!;
+      log('Profile loaded for uid=$uid ==> $data');
 
-      // 3. Parse all fields
+      // ── Basic fields ──────────────────────────────────────
       final String name = data['name'] ?? 'User';
       final String email = data['email'] ?? '';
       final String phone = data['phone'] ?? '';
       final String role = data['role'] ?? '';
       final String businessId = data['businessId'] ?? '';
       final String businessName = data['businessName'] ?? '';
-      final String createdBy = data['createdBy'] ?? '';
       final String profilePhoto = data['profilePhoto'] ?? '';
       final bool isActive =
           data['isActive'] == true || data['isActive'] == 'true';
 
-      // 4. Parse Firestore Timestamps
+      // ── Creator fields — stored on the user's OWN document ─
+      // These were written at account-creation time by CreateAccountProvider
+      // so we never need to read another user's document.
+      final String createdBy = data['createdBy'] ?? '';
+      final String createdByName = data['createdByName'] ?? '';
+      final String createdByRole = data['createdByRole'] ?? '';
+
+      // ── Timestamps ────────────────────────────────────────
       final DateTime createdAt = _tsToDate(data['createdAt']) ?? DateTime.now();
       final DateTime? passwordLastChanged = _tsToDate(
         data['passwordLastChanged'],
       );
       final DateTime? updatedAt = _tsToDate(data['updatedAt']);
 
-      // 5. Build profile
+      // 3. Build UserProfile
       _profile = UserProfile(
         id: uid,
         name: name,
@@ -80,7 +97,9 @@ class ProfileProvider extends ChangeNotifier {
         avatarInitials: _getInitials(name),
         joinedDate: createdAt,
         createdBy: createdBy,
-        isOnShift: _profile?.isOnShift ?? false, // preserve shift state
+        createdByName: createdByName,
+        createdByRole: createdByRole,
+        isOnShift: _profile?.isOnShift ?? false,
         isActive: isActive,
         passwordLastChanged: passwordLastChanged,
         updatedAt: updatedAt,
@@ -97,13 +116,28 @@ class ProfileProvider extends ChangeNotifier {
         businessName: businessName,
         profilePhoto: profilePhoto,
       );
+
+      // 4. Set creator info directly from the user's own document
+      //    ✅ No extra Firestore read — no permission issues
+      _creatorName = createdByName.isNotEmpty
+          ? createdByName
+          : (createdBy == uid ? name : ''); // fallback: self-registered
+      _creatorRole = createdByRole.isNotEmpty
+          ? _parseRole(createdByRole).label
+          : '';
+
+      log('creatorName="$_creatorName" creatorRole="$_creatorRole"');
+
+      _isLoading = false;
+      notifyListeners();
     } on FirebaseException catch (e) {
       _error = 'Firestore error: ${e.message}';
       debugPrint('ProfileProvider Firestore error: $e');
+      _isLoading = false;
+      notifyListeners();
     } catch (e) {
       _error = 'Unexpected error: $e';
       debugPrint('ProfileProvider error: $e');
-    } finally {
       _isLoading = false;
       notifyListeners();
     }
@@ -112,7 +146,7 @@ class ProfileProvider extends ChangeNotifier {
   Future<void> reloadProfile() => loadProfile();
 
   // ─────────────────────────────────────────────────────────
-  //  UPDATE PROFILE — writes to Firestore then reloads
+  //  UPDATE PROFILE
   // ─────────────────────────────────────────────────────────
   Future<void> updateProfile({
     String? name,
@@ -132,8 +166,6 @@ class ProfileProvider extends ChangeNotifier {
       if (phone != null) updates['phone'] = phone;
 
       await _db.collection('users').doc(_profile!.id).update(updates);
-
-      // Reload fresh data from Firestore
       await loadProfile();
     } catch (e) {
       debugPrint('updateProfile error: $e');
@@ -143,7 +175,7 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   // ─────────────────────────────────────────────────────────
-  //  TOGGLE SHIFT — local only (not persisted to Firestore)
+  //  TOGGLE SHIFT
   // ─────────────────────────────────────────────────────────
   void toggleShift() {
     if (_profile == null) return;
@@ -152,19 +184,21 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   // ─────────────────────────────────────────────────────────
+  //  ACTIVITY TIME LABEL
+  // ─────────────────────────────────────────────────────────
+  String activityTimeLabel(ActivityLog log) {
+    final diff = DateTime.now().difference(log.time);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  // ─────────────────────────────────────────────────────────
   //  HELPERS
   // ─────────────────────────────────────────────────────────
-
-  /// Converts Firestore Timestamp, ISO string, or epoch millis → DateTime
   DateTime? _tsToDate(dynamic value) {
     if (value == null) return null;
-
-    // Native Firestore Timestamp object
-    if (value is Timestamp) {
-      return value.toDate();
-    }
-
-    // Timestamp toString: "Timestamp(seconds=..., nanoseconds=...)"
+    if (value is Timestamp) return value.toDate();
     if (value is String && value.startsWith('Timestamp(')) {
       try {
         final secStr = RegExp(r'seconds=(\d+)').firstMatch(value)?.group(1);
@@ -173,17 +207,12 @@ class ProfileProvider extends ChangeNotifier {
         }
       } catch (_) {}
     }
-
-    // ISO 8601
     try {
       return DateTime.parse(value.toString());
     } catch (_) {}
-
-    // Epoch millis
     try {
       return DateTime.fromMillisecondsSinceEpoch(int.parse(value.toString()));
     } catch (_) {}
-
     return null;
   }
 
@@ -196,6 +225,8 @@ class ProfileProvider extends ChangeNotifier {
       case 'cashier':
         return StaffRole.cashier;
       case 'waiter':
+        return StaffRole.waiter;
+      case 'server':
         return StaffRole.waiter;
       case 'chef':
         return StaffRole.chef;
@@ -210,67 +241,105 @@ class ProfileProvider extends ChangeNotifier {
     if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : 'U';
   }
-
-  String activityTimeLabel(ActivityLog log) {
-    final diff = DateTime.now().difference(log.time);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
 }
 
 
-
 /*import 'dart:developer';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:pos_app/services/storage_service.dart';
 
 class ProfileProvider extends ChangeNotifier {
   final StorageService _storage = StorageService.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   UserProfile? _profile;
   bool _isLoading = true;
+  String? _error;
+
+  // ── Creator info fetched separately ───────────────────────────
+  String _creatorName = '';
+  String _creatorRole = '';
+  bool _isLoadingCreator = false;
 
   UserProfile? get profile => _profile;
   bool get isLoading => _isLoading;
+  String? get error => _error;
+  String get creatorName => _creatorName;
+  String get creatorRole => _creatorRole;
+  bool get isLoadingCreator => _isLoadingCreator;
 
   ProfileProvider() {
-    _loadProfileFromStorage();
+    loadProfile();
   }
 
-  Future<void> _loadProfileFromStorage() async {
+  // ─────────────────────────────────────────────────────────
+  //  MAIN LOAD — always fetches fresh from Firestore
+  // ─────────────────────────────────────────────────────────
+  Future<void> loadProfile() async {
     _isLoading = true;
+    _error = null;
+    _creatorName = '';
+    _creatorRole = '';
     notifyListeners();
+
     try {
-      final data = await _storage.getUserData();
+      // 1. Get UID from local storage
+      final localData = await _storage.getUserData();
+      final String uid = localData['uid'] ?? '';
 
+      if (uid.isEmpty) {
+        _error = 'No user session found.';
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+
+      // 2. Fetch user document from Firestore
+      final doc = await _db.collection('users').doc(uid).get();
+
+      if (!doc.exists || doc.data() == null) {
+        _error = 'User document not found.';
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+
+      final data = doc.data()!;
+      log('Profile data for cre ${data['createdBy']}==> $data');
       final String name = data['name'] ?? 'User';
-      final StaffRole role = _parseRole(data['role'] ?? '');
-      final String initials = _getInitials(name);
-
-      // ── Parse all timestamp fields from storage ──────────
-      // Firestore timestamps are stored as ISO strings or millis
-      final DateTime? passwordLastChanged = _parseDateTime(
-        data['passwordLastChanged'],
-      );
-      final DateTime? updatedAt = _parseDateTime(data['updatedAt']);
-      final DateTime createdAt =
-          _parseDateTime(data['createdAt']) ?? DateTime.now();
-
+      final String email = data['email'] ?? '';
+      final String phone = data['phone'] ?? '';
+      final String role = data['role'] ?? '';
+      final String businessId = data['businessId'] ?? '';
+      final String businessName = data['businessName'] ?? '';
+      final String createdBy = data['createdBy'] ?? '';
+      final String createdByName = data['createdByName'] ?? 'System';
+      final String createdByRole = data['createdByRole'] ?? 'System';
+      final String profilePhoto = data['profilePhoto'] ?? '';
       final bool isActive =
           data['isActive'] == true || data['isActive'] == 'true';
 
+      final DateTime createdAt = _tsToDate(data['createdAt']) ?? DateTime.now();
+      final DateTime? passwordLastChanged = _tsToDate(
+        data['passwordLastChanged'],
+      );
+      final DateTime? updatedAt = _tsToDate(data['updatedAt']);
+
       _profile = UserProfile(
-        id: data['uid'] ?? '',
+        id: uid,
         name: name,
-        email: data['email'] ?? '',
-        phone: data['phone'] ?? '',
-        role: role,
-        avatarInitials: initials,
+        email: email,
+        phone: phone,
+        role: _parseRole(role),
+        avatarInitials: _getInitials(name),
         joinedDate: createdAt,
-        createdBy: data['createdBy'] ?? '',
-        isOnShift: false,
+        createdBy: createdBy,
+        createdByName: createdByName,
+        createdByRole: createdByRole,
+        isOnShift: _profile?.isOnShift ?? false,
         isActive: isActive,
         passwordLastChanged: passwordLastChanged,
         updatedAt: updatedAt,
@@ -283,21 +352,134 @@ class ProfileProvider extends ChangeNotifier {
           shiftsThisWeek: 0,
         ),
         recentActivity: const [],
-        businessId: data['businessId'] ?? '',
-        businessName: data['businessName'] ?? '',
-        profilePhoto: data['profilePhoto'] ?? '',
+        businessId: businessId,
+        businessName: businessName,
+        profilePhoto: profilePhoto,
       );
+
+      _isLoading = false;
+      notifyListeners();
+
+      // 3. Now fetch creator name+role in background (non-blocking)
+      //    This does a second Firestore read using the createdBy UID
+      if (createdBy.isNotEmpty) {
+        _fetchCreatorInfo(createdBy, currentUserId: uid);
+      }
+    } on FirebaseException catch (e) {
+      _error = 'Firestore error: ${e.message}';
+      debugPrint('ProfileProvider Firestore error: $e');
+      _isLoading = false;
+      notifyListeners();
     } catch (e) {
+      _error = 'Unexpected error: $e';
       debugPrint('ProfileProvider error: $e');
-    } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<void> reloadProfile() => _loadProfileFromStorage();
+  // ─────────────────────────────────────────────────────────
+  //  FETCH CREATOR INFO
+  //  Looks up the createdBy UID in Firestore to get name + role
+  // ─────────────────────────────────────────────────────────
+  Future<void> _fetchCreatorInfo(
+    String creatorUid, {
+    required String currentUserId,
+  }) async {
+    // If creator is the same person (owner who registered themselves)
+    if (creatorUid == currentUserId) {
+      _creatorName = _profile?.name ?? '';
+      _creatorRole = _profile?.role.label ?? '';
+      notifyListeners();
+      return;
+    }
 
-  // ── Helpers ──────────────────────────────────────────────
+    _isLoadingCreator = true;
+    notifyListeners();
+
+    try {
+      final doc = await _db.collection('users').doc(creatorUid).get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        _creatorName = data['name'] ?? '';
+        _creatorRole = _parseRole(data['role'] ?? '').label;
+      } else {
+        _creatorName = 'Unknown';
+        _creatorRole = '';
+      }
+    } catch (e) {
+      debugPrint('_fetchCreatorInfo error: $e');
+      _creatorName = 'Unknown';
+      _creatorRole = '';
+    } finally {
+      _isLoadingCreator = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> reloadProfile() => loadProfile();
+
+  // ─────────────────────────────────────────────────────────
+  //  UPDATE PROFILE
+  // ─────────────────────────────────────────────────────────
+  Future<void> updateProfile({
+    String? name,
+    String? email,
+    String? phone,
+  }) async {
+    if (_profile == null) return;
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final Map<String, dynamic> updates = {
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (name != null && name.isNotEmpty) updates['name'] = name;
+      if (email != null && email.isNotEmpty) updates['email'] = email;
+      if (phone != null) updates['phone'] = phone;
+
+      await _db.collection('users').doc(_profile!.id).update(updates);
+      await loadProfile();
+    } catch (e) {
+      debugPrint('updateProfile error: $e');
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  //  TOGGLE SHIFT
+  // ─────────────────────────────────────────────────────────
+  void toggleShift() {
+    if (_profile == null) return;
+    _profile = _profile!.copyWith(isOnShift: !_profile!.isOnShift);
+    notifyListeners();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  //  HELPERS
+  // ─────────────────────────────────────────────────────────
+  DateTime? _tsToDate(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is String && value.startsWith('Timestamp(')) {
+      try {
+        final secStr = RegExp(r'seconds=(\d+)').firstMatch(value)?.group(1);
+        if (secStr != null) {
+          return DateTime.fromMillisecondsSinceEpoch(int.parse(secStr) * 1000);
+        }
+      } catch (_) {}
+    }
+    try {
+      return DateTime.parse(value.toString());
+    } catch (_) {}
+    try {
+      return DateTime.fromMillisecondsSinceEpoch(int.parse(value.toString()));
+    } catch (_) {}
+    return null;
+  }
 
   StaffRole _parseRole(String role) {
     switch (role.toLowerCase()) {
@@ -311,6 +493,8 @@ class ProfileProvider extends ChangeNotifier {
         return StaffRole.waiter;
       case 'chef':
         return StaffRole.chef;
+      case 'server':
+        return StaffRole.waiter;
       case 'admin':
       default:
         return StaffRole.owner;
@@ -321,70 +505,6 @@ class ProfileProvider extends ChangeNotifier {
     final parts = name.trim().split(' ');
     if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : 'U';
-  }
-
-  /// Safely parse Firestore Timestamp strings, ISO strings, or epoch millis.
-  DateTime? _parseDateTime(dynamic value) {
-    if (value == null) return null;
-    // Firestore Timestamp toString: "Timestamp(seconds=..., nanoseconds=...)"
-    if (value is String && value.startsWith('Timestamp(')) {
-      try {
-        final secStr = RegExp(r'seconds=(\d+)').firstMatch(value)?.group(1);
-        if (secStr != null) {
-          return DateTime.fromMillisecondsSinceEpoch(int.parse(secStr) * 1000);
-        }
-      } catch (_) {}
-    }
-    // ISO 8601
-    try {
-      return DateTime.parse(value.toString());
-    } catch (_) {}
-    // Epoch millis
-    try {
-      return DateTime.fromMillisecondsSinceEpoch(int.parse(value.toString()));
-    } catch (_) {}
-    return null;
-  }
-
-  // ── Actions ──────────────────────────────────────────────
-
-  Future<void> updateProfile({
-    String? name,
-    String? email,
-    String? phone,
-  }) async {
-    if (_profile == null) return;
-    _isLoading = true;
-    notifyListeners();
-    await Future.delayed(const Duration(milliseconds: 500));
-    _profile = _profile!.copyWith(
-      name: name,
-      email: email,
-      phone: phone,
-      updatedAt: DateTime.now(),
-    );
-    final stored = await _storage.getUserData();
-    await _storage.saveUserData(
-      uid: _profile!.id,
-      token: await _storage.getAuthToken() ?? '',
-      name: _profile!.name,
-      email: _profile!.email,
-      phone: _profile!.phone,
-      role: stored['role'] ?? '',
-      businessId: _profile!.businessId,
-      businessName: _profile!.businessName,
-      profilePhoto: _profile!.profilePhoto.isEmpty
-          ? null
-          : _profile!.profilePhoto,
-    );
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  void toggleShift() {
-    if (_profile == null) return;
-    _profile = _profile!.copyWith(isOnShift: !_profile!.isOnShift);
-    notifyListeners();
   }
 
   String activityTimeLabel(ActivityLog log) {

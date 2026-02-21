@@ -90,7 +90,9 @@ class UserProfile {
   final StaffRole role;
   final String? avatarInitials;
   final DateTime joinedDate; // createdAt
-  final String createdBy; 
+  final String createdBy;
+  final String createdByName; // ← NEW: store creator's NAME
+  final String createdByRole; // ← NEW: store creator's ROLE
   final bool isOnShift;
   final bool isActive;
   final ProfileStats stats;
@@ -120,6 +122,8 @@ class UserProfile {
     this.avatarInitials,
     required this.joinedDate,
     this.createdBy = '',
+    this.createdByName = 'System',
+    this.createdByRole = 'System',
     required this.isOnShift,
     this.isActive = true,
     required this.stats,
@@ -157,6 +161,8 @@ class UserProfile {
       avatarInitials: avatarInitials,
       joinedDate: joinedDate,
       createdBy: createdBy,
+      createdByName: createdByName,
+      createdByRole: createdByRole,
       isOnShift: isOnShift ?? this.isOnShift,
       isActive: isActive ?? this.isActive,
       stats: stats,

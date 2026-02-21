@@ -8,12 +8,6 @@ import 'package:pos_app/screens/widgets/role_ropdown_widget.dart';
 import 'package:provider/provider.dart';
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  CREATE ACCOUNT SCREEN
-//  Pure UI — reads state from CreateAccountProvider.
-//  Pass businessId + businessName from parent (e.g. auth session).
-// ─────────────────────────────────────────────────────────────────────────────
-
 class CreateAccountScreen extends StatelessWidget {
   /// Required business context passed from the logged-in admin session.
   final String businessId;

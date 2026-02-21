@@ -3,12 +3,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/screens/utils/role_config.dart';
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  REUSABLE WIDGETS
-//  All standalone, stateless, easily composable pieces.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── App Colors ────────────────────────────────────────────────────────────────
 class AppColors {
   static const background = Color(0xFFF7F5F0);
   static const card = Colors.white;

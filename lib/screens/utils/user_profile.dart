@@ -90,7 +90,7 @@ class UserProfile {
   final StaffRole role;
   final String? avatarInitials;
   final DateTime joinedDate; // createdAt
-  final String createdBy; // createdBy (uid of creator)
+  final String createdBy; 
   final bool isOnShift;
   final bool isActive;
   final ProfileStats stats;

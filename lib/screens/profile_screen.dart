@@ -1,9 +1,11 @@
+import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/screens/change_pwd_screen.dart';
 import 'package:pos_app/screens/create_account_screen.dart';
+import 'package:pos_app/screens/edit_profile_Screen.dart';
 import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:provider/provider.dart';
@@ -76,7 +78,31 @@ class _Screen extends StatelessWidget {
               physics: const BouncingScrollPhysics(),
               slivers: [
                 SliverToBoxAdapter(
-                  child: _TopBar(onEdit: () => _openEdit(context)),
+                  child: _TopBar(
+                    // onEdit: () => _openEdit(context)
+                    onEdit: () => Navigator.push(
+                      context,
+                      PageRouteBuilder(
+                        pageBuilder: (_, a, __) => const EditProfileScreen(),
+                        transitionsBuilder: (_, a, __, child) => FadeTransition(
+                          opacity: a,
+                          child: SlideTransition(
+                            position:
+                                Tween<Offset>(
+                                  begin: const Offset(0, 0.06),
+                                  end: Offset.zero,
+                                ).animate(
+                                  CurvedAnimation(
+                                    parent: a,
+                                    curve: Curves.easeOutCubic,
+                                  ),
+                                ),
+                            child: child,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
                 SliverToBoxAdapter(
                   child: _IdentityCard(p: p, onToggleShift: prov.toggleShift),
@@ -728,6 +754,7 @@ class _OrgCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    log('creator uid: ${p.createdBy}');
     final shortCreatedBy = p.createdBy.length > 16
         ? '${p.createdBy.substring(0, 16)}…'
         : p.createdBy;

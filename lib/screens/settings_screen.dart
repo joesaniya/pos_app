@@ -1,422 +1,432 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
-// ═══════════════════════════════════════════════════════════════
-//  DESIGN TOKENS — soft pink/rose
-// ═══════════════════════════════════════════════════════════════
-class SC {
-  static const bg = Color(0xFFFDF2F8);
+void main() => runApp(const _App());
+
+class _App extends StatelessWidget {
+  const _App();
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: const SettingsScreen(),
+  );
+}
+
+// ─── TOKENS ──────────────────────────────────────────────────────────────────
+class T {
+  // Warm cream base
+  static const bg = Color(0xFFF7F3EE);
+  static const bgAlt = Color(0xFFEFEAE2);
   static const surface = Color(0xFFFFFFFF);
-  static const surfaceAlt = Color(0xFFFCE7F3);
+  static const divider = Color(0xFFE8E2D9);
 
-  static const pink = Color(0xFFEC4899);
-  static const pinkDark = Color(0xFFDB2777);
-  static const pinkLight = Color(0xFFFCE7F3);
+  // Accent palette — terracotta, sage, sky, plum, gold
+  static const terra = Color(0xFFD4663A);
+  static const terraLt = Color(0xFFFAEDE6);
+  static const sage = Color(0xFF5C8E6E);
+  static const sageLt = Color(0xFFE4F0E9);
+  static const sky = Color(0xFF3A7BD4);
+  static const skyLt = Color(0xFFE4EDFA);
+  static const plum = Color(0xFF8B4DA8);
+  static const plumLt = Color(0xFFF3E8FA);
+  static const gold = Color(0xFFBF8A2E);
+  static const goldLt = Color(0xFFFAF2E0);
 
-  static const blue = Color(0xFF3B82F6);
-  static const blueBg = Color(0xFFDBEAFE);
-  static const green = Color(0xFF10B981);
-  static const greenBg = Color(0xFFD1FAE5);
-  static const red = Color(0xFFEF4444);
-  static const redBg = Color(0xFFFEE2E2);
-  static const purple = Color(0xFF7C3AED);
-  static const purpleBg = Color(0xFFF3E8FF);
-  static const orange = Color(0xFFF59E0B);
-  static const orangeBg = Color(0xFFFEF3C7);
-
-  static const textPri = Color(0xFF1F2937);
-  static const textSec = Color(0xFF6B7280);
-  static const textMute = Color(0xFF9CA3AF);
-  static const border = Color(0xFFFCE7F3);
+  // Text
+  static const txtHi = Color(0xFF1A1612);
+  static const txtMid = Color(0xFF6B6157);
+  static const txtLow = Color(0xFFAEA59B);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTINGS SCREEN
-// ═════════════════════════════════════════════════════════════════════════════
-class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+// ─── MAIN SCREEN ─────────────────────────────────────────────────────────────
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen>
+    with TickerProviderStateMixin {
+  // Toggle states
+  bool _pushNotif = true;
+  bool _orderAlerts = true;
+  bool _emailNotif = false;
+  bool _promoEmail = false;
+  bool _sound = true;
+  bool _vibration = false;
+  bool _orderBell = true;
+  bool _cloudBackup = true;
+  bool _autoLock = true;
+  String _language = 'English';
+  String _currency = 'INR ₹';
+  String _dateFormat = 'DD/MM/YYYY';
+
+  late final AnimationController _entryCtrl;
+  late final List<Animation<double>> _fadeAnims;
 
   @override
-  Widget build(BuildContext context) {
+  void initState() {
+    super.initState();
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..forward();
+    _fadeAnims = List.generate(
+      12,
+      (i) => CurvedAnimation(
+        parent: _entryCtrl,
+        curve: Interval(
+          (i * 0.07).clamp(0, 1.0),
+          ((i * 0.07) + 0.5).clamp(0, 1.0),
+          curve: Curves.easeOutCubic,
+        ),
+      ),
+    );
+  }
 
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
+  }
+
+  Widget _slide(int i, Widget child) => FadeTransition(
+    opacity: _fadeAnims[i],
+    child: SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0, 0.18),
+        end: Offset.zero,
+      ).animate(_fadeAnims[i]),
+      child: child,
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SC.bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _PinkHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                child: Column(
-                  children: [
-                    _ProfileCard(),
-                    const SizedBox(height: 24),
-                    _QuickStats(),
-                    const SizedBox(height: 24),
-                    _SectionLabel('Account'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem(
-                          '👤',
-                          'Profile Settings',
-                          'Update personal info',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '🔐',
-                          'Security',
-                          'Password & 2FA',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📧',
-                          'Email Notifications',
-                          'Daily reports',
-                          true,
-                          null,
-                        ),
-                        _SettingItem(
-                          '🔔',
-                          'Push Notifications',
-                          'Order alerts',
-                          true,
-                          null,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Restaurant'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem(
-                          '🏪',
-                          'Business Info',
-                          'Name, address, hours',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '💳',
-                          'Payment Methods',
-                          'Accepted payments',
-                          null,
-                          SC.blue,
-                        ),
-                        _SettingItem(
-                          '🧾',
-                          'Receipts & Invoices',
-                          'Customize templates',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📊',
-                          'Tax Settings',
-                          'GST & tax rates',
-                          null,
-                          SC.green,
-                        ),
-                        _SettingItem(
-                          '🍽️',
-                          'Menu Management',
-                          'Add/edit items',
-                          null,
-                          SC.orange,
-                        ),
-                        _SettingItem(
-                          '🪑',
-                          'Table Settings',
-                          'Layout & capacity',
-                          null,
-                          SC.purple,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Preferences'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem('🌍', 'Language', 'English', null, null),
-                        _SettingItem('💱', 'Currency', 'INR (₹)', null, null),
-                        _SettingItem(
-                          '📅',
-                          'Date Format',
-                          'DD/MM/YYYY',
-                          null,
-                          null,
-                        ),
-                        _SettingItem('⏰', 'Time Format', '12-hour', null, null),
-                        _SettingItem(
-                          '🔊',
-                          'Sound Effects',
-                          'Button sounds',
-                          true,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📳',
-                          'Haptic Feedback',
-                          'Vibration',
-                          false,
-                          null,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Integrations'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem(
-                          '☁️',
-                          'Cloud Backup',
-                          'Auto backup data',
-                          true,
-                          SC.blue,
-                        ),
-                        _SettingItem(
-                          '📱',
-                          'Mobile POS',
-                          'Tablet sync',
-                          false,
-                          SC.purple,
-                        ),
-                        _SettingItem(
-                          '🖨️',
-                          'Printer Settings',
-                          'KOT & receipt',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📡',
-                          'API Access',
-                          'Third-party apps',
-                          null,
-                          SC.green,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Support'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem(
-                          '❓',
-                          'Help Center',
-                          'FAQs & tutorials',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📞',
-                          'Contact Support',
-                          'Get help from team',
-                          null,
-                          SC.blue,
-                        ),
-                        _SettingItem(
-                          '💬',
-                          'Chat with Us',
-                          'Live support',
-                          null,
-                          SC.green,
-                        ),
-                        _SettingItem(
-                          '⭐',
-                          'Rate App',
-                          'Share your feedback',
-                          null,
-                          SC.orange,
-                        ),
-                        _SettingItem(
-                          '📝',
-                          'Send Feedback',
-                          'Suggest improvements',
-                          null,
-                          null,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Legal'),
-                    _SettingsGroup(
-                      items: [
-                        _SettingItem(
-                          '📄',
-                          'Terms of Service',
-                          'Read our terms',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '🔒',
-                          'Privacy Policy',
-                          'How we use data',
-                          null,
-                          null,
-                        ),
-                        _SettingItem(
-                          '📋',
-                          'Licenses',
-                          'Open source licenses',
-                          null,
-                          null,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _DangerZone(),
-                    const SizedBox(height: 24),
-                    _AppVersion(),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+      backgroundColor: T.bg,
+      body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          // ── Artistic Header ────────────────────────────────────────────────
+          SliverToBoxAdapter(child: _slide(0, const _ArtHeader())),
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  PINK HEADER
-// ═════════════════════════════════════════════════════════════════════════════
-class _PinkHeader extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [SC.pink, SC.pinkDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Settings',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                    letterSpacing: -0.8,
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 40),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                // ── Notification Section ───────────────────────────────────
+                _slide(
+                  1,
+                  _ChapterLabel(
+                    number: '01',
+                    label: 'Notifications',
+                    accent: T.terra,
                   ),
                 ),
-                SizedBox(height: 2),
-                Text(
-                  'App preferences & configuration',
-                  style: TextStyle(fontSize: 13, color: Colors.white70),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  PROFILE CARD
-// ═════════════════════════════════════════════════════════════════════════════
-class _ProfileCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [SC.pink, SC.pinkDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: SC.pink.withOpacity(0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              'RS',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                color: SC.pink,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Resto Admin',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
+                const SizedBox(height: 12),
+                _slide(
+                  2,
+                  _BentoGrid(
+                    children: [
+                      _BentoToggle(
+                        icon: Icons.notifications_active_rounded,
+                        label: 'Push',
+                        sublabel: 'Live alerts',
+                        color: T.terra,
+                        bgColor: T.terraLt,
+                        value: _pushNotif,
+                        onChanged: (v) => setState(() => _pushNotif = v),
+                      ),
+                      _BentoToggle(
+                        icon: Icons.receipt_long_rounded,
+                        label: 'Orders',
+                        sublabel: 'New pings',
+                        color: T.gold,
+                        bgColor: T.goldLt,
+                        value: _orderAlerts,
+                        onChanged: (v) => setState(() => _orderAlerts = v),
+                      ),
+                      _BentoToggle(
+                        icon: Icons.email_rounded,
+                        label: 'Email',
+                        sublabel: 'Reports',
+                        color: T.sky,
+                        bgColor: T.skyLt,
+                        value: _emailNotif,
+                        onChanged: (v) => setState(() => _emailNotif = v),
+                      ),
+                      _BentoToggle(
+                        icon: Icons.local_offer_rounded,
+                        label: 'Promos',
+                        sublabel: 'Offers',
+                        color: T.plum,
+                        bgColor: T.plumLt,
+                        value: _promoEmail,
+                        onChanged: (v) => setState(() => _promoEmail = v),
+                      ),
+                    ],
                   ),
                 ),
-                SizedBox(height: 3),
-                Text(
-                  'admin@restopos.com',
-                  style: TextStyle(fontSize: 13, color: Colors.white70),
+
+                const SizedBox(height: 28),
+
+                // ── Sound Section ──────────────────────────────────────────
+                _slide(
+                  3,
+                  _ChapterLabel(
+                    number: '02',
+                    label: 'Sound & Feel',
+                    accent: T.plum,
+                  ),
                 ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.edit_outlined,
-              color: Colors.white,
-              size: 18,
+                const SizedBox(height: 12),
+                _slide(
+                  4,
+                  _StripCard(
+                    children: [
+                      _StripToggle(
+                        icon: Icons.volume_up_rounded,
+                        label: 'Sound Effects',
+                        sub: 'Tap & action audio',
+                        color: T.plum,
+                        value: _sound,
+                        onChanged: (v) => setState(() => _sound = v),
+                      ),
+                      _StripToggle(
+                        icon: Icons.vibration_rounded,
+                        label: 'Vibration',
+                        sub: 'Haptic feedback',
+                        color: T.sky,
+                        value: _vibration,
+                        onChanged: (v) => setState(() => _vibration = v),
+                      ),
+                      _StripToggle(
+                        icon: Icons.doorbell_rounded,
+                        label: 'Order Bell',
+                        sub: 'Distinct order ring',
+                        color: T.terra,
+                        value: _orderBell,
+                        onChanged: (v) => setState(() => _orderBell = v),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── Preferences Section ────────────────────────────────────
+                _slide(
+                  5,
+                  _ChapterLabel(
+                    number: '03',
+                    label: 'Preferences',
+                    accent: T.sage,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _slide(
+                  6,
+                  _PillSelector(
+                    icon: Icons.language_rounded,
+                    label: 'Language',
+                    color: T.sage,
+                    bgColor: T.sageLt,
+                    options: const [
+                      'English',
+                      'Hindi',
+                      'Tamil',
+                      'Telugu',
+                      'Kannada',
+                      'Marathi',
+                    ],
+                    selected: _language,
+                    onSelect: (v) => setState(() => _language = v),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _slide(
+                  7,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DropCard(
+                          icon: Icons.currency_rupee_rounded,
+                          label: 'Currency',
+                          value: _currency,
+                          color: T.gold,
+                          bgColor: T.goldLt,
+                          options: const ['INR ₹', 'USD \$', 'EUR €', 'GBP £'],
+                          onChanged: (v) => setState(() => _currency = v!),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _DropCard(
+                          icon: Icons.calendar_today_rounded,
+                          label: 'Date Format',
+                          value: _dateFormat,
+                          color: T.sky,
+                          bgColor: T.skyLt,
+                          options: const [
+                            'DD/MM/YYYY',
+                            'MM/DD/YYYY',
+                            'YYYY-MM-DD',
+                          ],
+                          onChanged: (v) => setState(() => _dateFormat = v!),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── Security Section ───────────────────────────────────────
+                _slide(
+                  8,
+                  _ChapterLabel(number: '04', label: 'Security', accent: T.sky),
+                ),
+                const SizedBox(height: 12),
+                _slide(
+                  9,
+                  _StripCard(
+                    children: [
+                      _StripToggle(
+                        icon: Icons.lock_clock_rounded,
+                        label: 'Auto Lock',
+                        sub: 'Lock after 5 min idle',
+                        color: T.sky,
+                        value: _autoLock,
+                        onChanged: (v) => setState(() => _autoLock = v),
+                      ),
+                      _StripToggle(
+                        icon: Icons.cloud_done_rounded,
+                        label: 'Cloud Backup',
+                        sub: 'Auto-sync data',
+                        color: T.sage,
+                        value: _cloudBackup,
+                        onChanged: (v) => setState(() => _cloudBackup = v),
+                      ),
+                      _StripNav(
+                        icon: Icons.fingerprint_rounded,
+                        label: 'Biometric Auth',
+                        sub: 'Face / fingerprint',
+                        color: T.plum,
+                        onTap: () {},
+                      ),
+                      _StripNav(
+                        icon: Icons.password_rounded,
+                        label: 'Change Password',
+                        sub: 'Update credentials',
+                        color: T.terra,
+                        onTap: () {},
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── Integrations Section ───────────────────────────────────
+                _slide(
+                  10,
+                  _ChapterLabel(
+                    number: '05',
+                    label: 'Integrations',
+                    accent: T.gold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _slide(
+                  10,
+                  _StripCard(
+                    children: [
+                      _StripNav(
+                        icon: Icons.print_rounded,
+                        label: 'Printer Settings',
+                        sub: 'KOT & receipt printer',
+                        color: T.gold,
+                        onTap: () {},
+                      ),
+                      _StripNav(
+                        icon: Icons.tablet_android_rounded,
+                        label: 'Mobile POS Sync',
+                        sub: 'Link tablet devices',
+                        color: T.sky,
+                        onTap: () {},
+                      ),
+                      _StripNav(
+                        icon: Icons.api_rounded,
+                        label: 'API Access',
+                        sub: 'Third-party connections',
+                        color: T.sage,
+                        onTap: () {},
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── Support & Legal ────────────────────────────────────────
+                _slide(
+                  10,
+                  _ChapterLabel(
+                    number: '06',
+                    label: 'Help & Legal',
+                    accent: T.terra,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _slide(
+                  11,
+                  _IconRowGroup(
+                    items: [
+                      _IconRowItem(
+                        icon: Icons.help_outline_rounded,
+                        label: 'Help Center',
+                        color: T.sky,
+                        onTap: () {},
+                      ),
+                      _IconRowItem(
+                        icon: Icons.headset_mic_rounded,
+                        label: 'Contact Support',
+                        color: T.sage,
+                        onTap: () {},
+                      ),
+                      _IconRowItem(
+                        icon: Icons.star_outline_rounded,
+                        label: 'Rate the App',
+                        color: T.gold,
+                        onTap: () {},
+                      ),
+                      _IconRowItem(
+                        icon: Icons.description_outlined,
+                        label: 'Terms of Service',
+                        color: T.txtMid,
+                        onTap: () {},
+                      ),
+                      _IconRowItem(
+                        icon: Icons.privacy_tip_outlined,
+                        label: 'Privacy Policy',
+                        color: T.txtMid,
+                        onTap: () {},
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── Danger Zone ────────────────────────────────────────────
+                _slide(11, _DangerSection()),
+
+                const SizedBox(height: 32),
+                _slide(11, const _Footer()),
+              ]),
             ),
           ),
         ],
@@ -425,793 +435,991 @@ class _ProfileCard extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  QUICK STATS
-// ═════════════════════════════════════════════════════════════════════════════
-class _QuickStats extends StatelessWidget {
+// ─── ARTISTIC HEADER ─────────────────────────────────────────────────────────
+class _ArtHeader extends StatelessWidget {
+  const _ArtHeader();
+
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Stack(
       children: [
-        Expanded(child: _StatTile('Active since', 'Jan 2024', SC.blue)),
-        const SizedBox(width: 12),
-        Expanded(child: _StatTile('Total Orders', '2,348', SC.green)),
+        // Decorative blobs
+        Positioned(
+          right: -40,
+          top: 10,
+          child: Container(
+            width: 180,
+            height: 180,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [T.terra.withOpacity(0.12), Colors.transparent],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: -20,
+          top: 60,
+          child: Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [T.sage.withOpacity(0.1), Colors.transparent],
+              ),
+            ),
+          ),
+        ),
+
+        // Diagonal accent strip
+        Positioned.fill(
+          child: ClipRect(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Transform.rotate(
+                angle: -0.18,
+                child: Container(
+                  width: 220,
+                  height: 8,
+                  margin: const EdgeInsets.only(top: 80),
+                  decoration: BoxDecoration(
+                    color: T.terra.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            MediaQuery.of(context).padding.top + 16,
+            20,
+            28,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [_BackBtn(), const Spacer(), _VersionChip()]),
+              const SizedBox(height: 26),
+
+              // Oversized label
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: T.txtMid,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      Text(
+                        'Settings',
+                        style: TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.w900,
+                          color: T.txtHi,
+                          letterSpacing: -2.5,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  // Stacked accent dots
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Row(
+                        children: [
+                          _Dot(T.terra),
+                          const SizedBox(width: 5),
+                          _Dot(T.sage),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          _Dot(T.sky),
+                          const SizedBox(width: 5),
+                          _Dot(T.gold),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: T.bgAlt,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Manage your app preferences',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: T.txtMid,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 }
 
-class _StatTile extends StatelessWidget {
-  final String label, value;
+class _BackBtn extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: () => Navigator.maybePop(context),
+    child: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: T.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: T.divider),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: T.txtMid),
+    ),
+  );
+}
+
+class _VersionChip extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: T.terraLt,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: T.terra.withOpacity(0.25)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: T.terra),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          'v3.2.1',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: T.terra,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _Dot extends StatelessWidget {
   final Color color;
-  const _StatTile(this.label, this.value, this.color);
+  const _Dot(this.color);
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 10,
+    height: 10,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: color.withOpacity(0.4),
+    ),
+  );
+}
+
+// ─── CHAPTER LABEL ────────────────────────────────────────────────────────────
+class _ChapterLabel extends StatelessWidget {
+  final String number, label;
+  final Color accent;
+  const _ChapterLabel({
+    required this.number,
+    required this.label,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(
+        number,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: accent,
+          letterSpacing: 1.5,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Container(height: 1.5, width: 16, color: accent.withOpacity(0.4)),
+      const SizedBox(width: 8),
+      Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: T.txtMid,
+          letterSpacing: 1.5,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Container(height: 1, color: T.divider)),
+    ],
+  );
+}
+
+// ─── BENTO GRID (2×2 toggle tiles) ───────────────────────────────────────────
+class _BentoGrid extends StatelessWidget {
+  final List<Widget> children;
+  const _BentoGrid({required this.children});
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Row(
+        children: [
+          Expanded(child: children[0]),
+          const SizedBox(width: 10),
+          Expanded(child: children[1]),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(child: children[2]),
+          const SizedBox(width: 10),
+          Expanded(child: children[3]),
+        ],
+      ),
+    ],
+  );
+}
+
+class _BentoToggle extends StatelessWidget {
+  final IconData icon;
+  final String label, sublabel;
+  final Color color, bgColor;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _BentoToggle({
+    required this.icon,
+    required this.label,
+    required this.sublabel,
+    required this.color,
+    required this.bgColor,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 200),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: value ? bgColor : T.surface,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: value ? color.withOpacity(0.25) : T.divider),
+      boxShadow: [
+        if (value)
+          BoxShadow(
+            color: color.withOpacity(0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        if (!value)
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: value ? color.withOpacity(0.18) : T.bgAlt,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: value ? color : T.txtLow, size: 18),
+            ),
+            const Spacer(),
+            CupertinoSwitch(
+              value: value,
+              onChanged: onChanged,
+              activeColor: color,
+              trackColor: T.bgAlt,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: value ? T.txtHi : T.txtMid,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          sublabel,
+          style: TextStyle(
+            fontSize: 11.5,
+            color: value ? color : T.txtLow,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── STRIP CARD ───────────────────────────────────────────────────────────────
+class _StripCard extends StatelessWidget {
+  final List<Widget> children;
+  const _StripCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: T.surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: T.divider),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.03),
+          blurRadius: 8,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      children: children
+          .asMap()
+          .entries
+          .map(
+            (e) => Column(
+              children: [
+                e.value,
+                if (e.key < children.length - 1)
+                  Container(
+                    height: 1,
+                    margin: const EdgeInsets.only(left: 66),
+                    color: T.divider,
+                  ),
+              ],
+            ),
+          )
+          .toList(),
+    ),
+  );
+}
+
+class _StripToggle extends StatelessWidget {
+  final IconData icon;
+  final String label, sub;
+  final Color color;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _StripToggle({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    required this.color,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    child: Row(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: value ? color.withOpacity(0.14) : T.bgAlt,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: value ? color : T.txtLow, size: 20),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: T.txtHi,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(sub, style: TextStyle(fontSize: 11.5, color: T.txtMid)),
+            ],
+          ),
+        ),
+        CupertinoSwitch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: color,
+          trackColor: T.bgAlt,
+        ),
+      ],
+    ),
+  );
+}
+
+class _StripNav extends StatelessWidget {
+  final IconData icon;
+  final String label, sub;
+  final Color color;
+  final VoidCallback onTap;
+  const _StripNav({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(0),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: T.txtHi,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(sub, style: TextStyle(fontSize: 11.5, color: T.txtMid)),
+              ],
+            ),
+          ),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: T.bgAlt,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.chevron_right_rounded, color: T.txtMid, size: 16),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ─── PILL SELECTOR ───────────────────────────────────────────────────────────
+class _PillSelector extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color, bgColor;
+  final List<String> options;
+  final String selected;
+  final ValueChanged<String> onSelect;
+
+  const _PillSelector({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.bgColor,
+    required this.options,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+    decoration: BoxDecoration(
+      color: T.surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: T.divider),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: T.txtHi,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 7,
+          runSpacing: 7,
+          children: options.map((o) {
+            final sel = o == selected;
+            return GestureDetector(
+              onTap: () => onSelect(o),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: sel ? color : T.bgAlt,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: sel ? color : T.divider),
+                  boxShadow: sel
+                      ? [
+                          BoxShadow(
+                            color: color.withOpacity(0.2),
+                            blurRadius: 8,
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Text(
+                  o,
+                  style: TextStyle(
+                    color: sel ? Colors.white : T.txtMid,
+                    fontSize: 12.5,
+                    fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── DROP CARD ───────────────────────────────────────────────────────────────
+class _DropCard extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  final Color color, bgColor;
+  final List<String> options;
+  final ValueChanged<String?> onChanged;
+
+  const _DropCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.bgColor,
+    required this.options,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: color.withOpacity(0.3)),
+      color: bgColor,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: color.withOpacity(0.2)),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: SC.textSec,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-            color: color,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SECTION LABEL
-// ═════════════════════════════════════════════════════════════════════════════
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 4, bottom: 10),
-    child: Text(
-      text.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w800,
-        color: SC.textMute,
-        letterSpacing: 1.2,
-      ),
-    ),
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTINGS GROUP
-// ═════════════════════════════════════════════════════════════════════════════
-class _SettingsGroup extends StatelessWidget {
-  final List<_SettingItem> items;
-  const _SettingsGroup({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: SC.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SC.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: items.asMap().entries.map((e) {
-          final i = e.key;
-          return Column(
-            children: [
-              _SettingItemWidget(item: e.value),
-              if (i < items.length - 1)
-                const Divider(height: 1, indent: 58, color: SC.border),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTING ITEM DATA
-// ═════════════════════════════════════════════════════════════════════════════
-class _SettingItem {
-  final String emoji, title, subtitle;
-  final bool? hasSwitch;
-  final Color? accentColor;
-  const _SettingItem(
-    this.emoji,
-    this.title,
-    this.subtitle,
-    this.hasSwitch,
-    this.accentColor,
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTING ITEM WIDGET
-// ═════════════════════════════════════════════════════════════════════════════
-class _SettingItemWidget extends StatefulWidget {
-  final _SettingItem item;
-  const _SettingItemWidget({required this.item});
-
-  @override
-  State<_SettingItemWidget> createState() => _SettingItemWidgetState();
-}
-
-class _SettingItemWidgetState extends State<_SettingItemWidget> {
-  late bool _switchValue;
-
-  @override
-  void initState() {
-    super.initState();
-    _switchValue = widget.item.hasSwitch ?? false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: widget.item.hasSwitch == null ? () {} : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
+        Row(
           children: [
-            Text(widget.item.emoji, style: const TextStyle(fontSize: 24)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.item.title,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: SC.textPri,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.item.subtitle,
-                    style: const TextStyle(fontSize: 12, color: SC.textSec),
-                  ),
-                ],
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+                letterSpacing: 0.5,
               ),
             ),
-            if (widget.item.hasSwitch != null)
-              Transform.scale(
-                scale: 0.85,
-                child: Switch.adaptive(
-                  value: _switchValue,
-                  onChanged: (v) => setState(() => _switchValue = v),
-                  activeColor: Colors.white,
-                  activeTrackColor: widget.item.accentColor ?? SC.pink,
-                  inactiveThumbColor: Colors.white,
-                  inactiveTrackColor: const Color(0xFFDDDDE8),
-                ),
-              )
-            else if (widget.item.accentColor != null)
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: widget.item.accentColor!.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.arrow_forward_ios,
-                  size: 12,
-                  color: widget.item.accentColor,
-                ),
-              )
-            else
-              const Icon(Icons.arrow_forward_ios, size: 14, color: SC.textMute),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  DANGER ZONE
-// ═════════════════════════════════════════════════════════════════════════════
-class _DangerZone extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: SC.redBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SC.red.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: SC.red, size: 20),
-              SizedBox(width: 8),
-              Text(
-                'Danger Zone',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: SC.red,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _DangerButton('Clear All Data', Icons.delete_sweep_outlined, () {}),
-          const SizedBox(height: 8),
-          _DangerButton('Reset Settings', Icons.restart_alt, () {}),
-          const SizedBox(height: 8),
-          _DangerButton('Logout', Icons.logout, () {}),
-          const SizedBox(height: 8),
-          _DangerButton('Delete Account', Icons.person_remove_outlined, () {}),
-        ],
-      ),
-    );
-  }
-}
-
-class _DangerButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  const _DangerButton(this.label, this.icon, this.onTap);
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: SC.red.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 16, color: SC.red),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: SC.red,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  APP VERSION
-// ═════════════════════════════════════════════════════════════════════════════
-class _AppVersion extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 16),
-    child: Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: SC.pinkLight,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.restaurant_menu, color: SC.pink, size: 24),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          'Resto POS',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            color: SC.textPri,
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Version 1.0.0 (Build 2025)',
-          style: TextStyle(fontSize: 11, color: SC.textMute),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'Made with ❤️ in India',
-          style: TextStyle(fontSize: 11, color: SC.textSec),
+        DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: value,
+            isDense: true,
+            icon: Icon(Icons.expand_more_rounded, color: color, size: 18),
+            style: TextStyle(
+              color: T.txtHi,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+            dropdownColor: T.surface,
+            items: options
+                .map(
+                  (o) => DropdownMenuItem(
+                    value: o,
+                    child: Text(
+                      o,
+                      style: TextStyle(color: T.txtHi, fontSize: 13),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: onChanged,
+          ),
         ),
       ],
     ),
   );
 }
 
-/*import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-// ═══════════════════════════════════════════════════════════════
-//  DESIGN TOKENS — soft pink/rose theme
-// ═══════════════════════════════════════════════════════════════
-class SC {
-  static const bg          = Color(0xFFFDF2F8);
-  static const surface     = Color(0xFFFFFFFF);
-  static const surfaceAlt  = Color(0xFFFCE7F3);
-  
-  // Pink/Rose
-  static const pink        = Color(0xFFEC4899);
-  static const pinkDark    = Color(0xFFDB2777);
-  static const pinkLight   = Color(0xFFFCE7F3);
-  static const rose        = Color(0xFFF472B6);
-  
-  // Supporting
-  static const blue        = Color(0xFF3B82F6);
-  static const blueBg      = Color(0xFFDBEAFE);
-  static const green       = Color(0xFF10B981);
-  static const greenBg     = Color(0xFFD1FAE5);
-  static const red         = Color(0xFFEF4444);
-  static const redBg       = Color(0xFFFEE2E2);
-  static const purple      = Color(0xFF7C3AED);
-  static const purpleBg    = Color(0xFFF3E8FF);
-  
-  // Text
-  static const textPri  = Color(0xFF1F2937);
-  static const textSec  = Color(0xFF6B7280);
-  static const textMute = Color(0xFF9CA3AF);
-  static const border   = Color(0xFFFCE7F3);
+// ─── ICON ROW GROUP ───────────────────────────────────────────────────────────
+class _IconRowItem {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _IconRowItem({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTINGS SCREEN
-// ═════════════════════════════════════════════════════════════════════════════
-class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+class _IconRowGroup extends StatelessWidget {
+  final List<_IconRowItem> items;
+  const _IconRowGroup({required this.items});
 
   @override
-  Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    
-    return Scaffold(
-      backgroundColor: SC.bg,
-      body: SafeArea(
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: T.surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: T.divider),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.03),
+          blurRadius: 8,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      children: items
+          .asMap()
+          .entries
+          .map(
+            (e) => Column(
+              children: [
+                InkWell(
+                  onTap: e.value.onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 13,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: e.value.color.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            e.value.icon,
+                            color: e.value.color,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Text(
+                          e.value.label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: T.txtHi,
+                          ),
+                        ),
+                        const Spacer(),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: T.txtLow,
+                          size: 18,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (e.key < items.length - 1)
+                  Container(
+                    height: 1,
+                    margin: const EdgeInsets.only(left: 65),
+                    color: T.divider,
+                  ),
+              ],
+            ),
+          )
+          .toList(),
+    ),
+  );
+}
+
+// ─── DANGER SECTION ──────────────────────────────────────────────────────────
+class _DangerSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          const Text(
+            '07',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFFEF4444),
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            height: 1.5,
+            width: 16,
+            color: const Color(0xFFEF4444).withOpacity(0.4),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'DANGER ZONE',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: T.txtMid,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Container(height: 1, color: T.divider)),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.2)),
+        ),
         child: Column(
           children: [
-            _PinkHeader(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _ProfileCard(),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Account'),
-                    _SettingsGroup(items: [
-                      ('👤', 'Profile Settings', 'Update personal info', null),
-                      ('🔐', 'Security', 'Password & authentication', null),
-                      ('📧', 'Notifications', 'Email & push alerts', true),
-                    ]),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Restaurant'),
-                    _SettingsGroup(items: [
-                      ('🏪', 'Business Info', 'Name, address, hours', null),
-                      ('💳', 'Payment Methods', 'Accepted payments', null),
-                      ('🧾', 'Receipts & Invoices', 'Customize templates', null),
-                      ('📊', 'Tax Settings', 'GST & tax rates', null),
-                    ]),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Preferences'),
-                    _SettingsGroup(items: [
-                      ('🌍', 'Language', 'English', null),
-                      ('💱', 'Currency', 'INR (₹)', null),
-                      ('📅', 'Date Format', 'DD/MM/YYYY', null),
-                      ('🔔', 'Sound', 'Notification sounds', true),
-                    ]),
-                    const SizedBox(height: 20),
-                    _SectionLabel('Support'),
-                    _SettingsGroup(items: [
-                      ('❓', 'Help Center', 'FAQs & tutorials', null),
-                      ('📞', 'Contact Support', 'Get help from team', null),
-                      ('⭐', 'Rate App', 'Share your feedback', null),
-                    ]),
-                    const SizedBox(height: 20),
-                    _DangerZone(),
-                    const SizedBox(height: 20),
-                    _AppVersion(),
-                  ],
-                ),
-              ),
+            _DRow(
+              icon: Icons.delete_sweep_rounded,
+              label: 'Clear All Data',
+              sub: 'Remove cached app data',
+            ),
+            Container(
+              height: 1,
+              margin: const EdgeInsets.only(left: 66),
+              color: const Color(0xFFEF4444).withOpacity(0.1),
+            ),
+            _DRow(
+              icon: Icons.restart_alt_rounded,
+              label: 'Reset Settings',
+              sub: 'Restore defaults',
+            ),
+            Container(
+              height: 1,
+              margin: const EdgeInsets.only(left: 66),
+              color: const Color(0xFFEF4444).withOpacity(0.1),
+            ),
+            _DRow(
+              icon: Icons.logout_rounded,
+              label: 'Log Out',
+              sub: 'Sign out of this account',
+              bold: true,
             ),
           ],
         ),
       ),
-    );
-  }
+    ],
+  );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  PINK HEADER
-// ═════════════════════════════════════════════════════════════════════════════
-class _PinkHeader extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [SC.pink, SC.pinkDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.arrow_back_ios_new,
-                  color: Colors.white, size: 18),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Settings',
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: -0.8,
-                    )),
-                SizedBox(height: 2),
-                Text('App preferences & configuration',
-                    style: TextStyle(fontSize: 13, color: Colors.white70)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  PROFILE CARD
-// ═════════════════════════════════════════════════════════════════════════════
-class _ProfileCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [SC.pink, SC.pinkDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: SC.pink.withOpacity(0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: const Text('RS',
-                style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    color: SC.pink)),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Resto Admin',
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white)),
-                SizedBox(height: 3),
-                Text('admin@restopos.com',
-                    style: TextStyle(fontSize: 13, color: Colors.white70)),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.edit_outlined, color: Colors.white, size: 18),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SECTION LABEL
-// ═════════════════════════════════════════════════════════════════════════════
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 10),
-      child: Text(text.toUpperCase(),
-          style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              color: SC.textMute,
-              letterSpacing: 1.2)),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTINGS GROUP
-// ═════════════════════════════════════════════════════════════════════════════
-class _SettingsGroup extends StatelessWidget {
-  final List<(String, String, String, bool?)> items;
-  const _SettingsGroup({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: SC.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SC.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: items.asMap().entries.map((e) {
-          final i = e.key;
-          final item = e.value;
-          return Column(
-            children: [
-              _SettingsItem(
-                emoji: item.$1,
-                title: item.$2,
-                subtitle: item.$3,
-                hasSwitch: item.$4,
-              ),
-              if (i < items.length - 1)
-                const Divider(height: 1, indent: 58, color: SC.border),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SETTINGS ITEM
-// ═════════════════════════════════════════════════════════════════════════════
-class _SettingsItem extends StatefulWidget {
-  final String emoji, title, subtitle;
-  final bool? hasSwitch;
-  const _SettingsItem({
-    required this.emoji,
-    required this.title,
-    required this.subtitle,
-    this.hasSwitch,
+class _DRow extends StatelessWidget {
+  final IconData icon;
+  final String label, sub;
+  final bool bold;
+  const _DRow({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    this.bold = false,
   });
 
   @override
-  State<_SettingsItem> createState() => _SettingsItemState();
-}
-
-class _SettingsItemState extends State<_SettingsItem> {
-  bool _switchValue = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: widget.hasSwitch == null ? () {} : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Text(widget.emoji, style: const TextStyle(fontSize: 24)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.title,
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: SC.textPri)),
-                  const SizedBox(height: 2),
-                  Text(widget.subtitle,
-                      style: const TextStyle(fontSize: 12, color: SC.textSec)),
-                ],
-              ),
-            ),
-            if (widget.hasSwitch != null)
-              Transform.scale(
-                scale: 0.85,
-                child: Switch.adaptive(
-                  value: _switchValue,
-                  onChanged: (v) => setState(() => _switchValue = v),
-                  activeColor: Colors.white,
-                  activeTrackColor: SC.pink,
-                  inactiveThumbColor: Colors.white,
-                  inactiveTrackColor: const Color(0xFFDDDDE8),
-                ),
-              )
-            else
-              const Icon(Icons.arrow_forward_ios,
-                  size: 14, color: SC.textMute),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  DANGER ZONE
-// ═════════════════════════════════════════════════════════════════════════════
-class _DangerZone extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: SC.redBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SC.red.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) => InkWell(
+    onTap: () {},
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
         children: [
-          const Row(
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEF4444).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(icon, color: const Color(0xFFEF4444), size: 19),
+          ),
+          const SizedBox(width: 14),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.warning_amber_rounded, color: SC.red, size: 20),
-              SizedBox(width: 8),
-              Text('Danger Zone',
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: SC.red)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  color: const Color(0xFFEF4444),
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                sub,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: Color(0xFFB45454),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          _DangerButton(
-            label: 'Clear All Data',
-            onTap: () {},
-          ),
-          const SizedBox(height: 8),
-          _DangerButton(
-            label: 'Logout',
-            onTap: () {},
-          ),
-          const SizedBox(height: 8),
-          _DangerButton(
-            label: 'Delete Account',
-            onTap: () {},
+          const Spacer(),
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: Color(0xFFEF4444),
+            size: 18,
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
 }
 
-class _DangerButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _DangerButton({required this.label, required this.onTap});
-
+// ─── FOOTER ──────────────────────────────────────────────────────────────────
+class _Footer extends StatelessWidget {
+  const _Footer();
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: SC.red.withOpacity(0.3)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.logout, size: 16, color: SC.red),
-            const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: SC.red)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  APP VERSION
-// ═════════════════════════════════════════════════════════════════════════════
-class _AppVersion extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
+  Widget build(BuildContext context) => Column(
+    children: [
+      Container(height: 1, color: T.divider),
+      const SizedBox(height: 20),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text('Resto POS',
-              style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: SC.textSec)),
-          SizedBox(height: 4),
-          Text('Version 1.0.0',
-              style: TextStyle(fontSize: 11, color: SC.textMute)),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: T.terraLt,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              Icons.restaurant_menu_rounded,
+              color: T.terra,
+              size: 22,
+            ),
+          ),
         ],
       ),
-    );
-  }
-}*/
+      const SizedBox(height: 10),
+      Text(
+        'PetPooja',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+          color: T.txtHi,
+          letterSpacing: -0.5,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        'v3.2.1 · Build 2025',
+        style: TextStyle(fontSize: 11, color: T.txtLow),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Made with 🔥 for restaurateurs',
+        style: TextStyle(fontSize: 11, color: T.txtMid),
+      ),
+    ],
+  );
+}

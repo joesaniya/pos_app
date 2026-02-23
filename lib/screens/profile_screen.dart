@@ -84,66 +84,80 @@ class _Screen extends StatelessWidget {
         children: [
           Positioned.fill(child: CustomPaint(painter: _GridPainter())),
           SafeArea(
-            child: CustomScrollView(
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _TopBar(
-                    onEdit: () => Navigator.push(
-                      context,
-                      PageRouteBuilder(
-                        pageBuilder: (_, a, __) => const EditProfileScreen(),
-                        transitionsBuilder: (_, a, __, child) => FadeTransition(
-                          opacity: a,
-                          child: SlideTransition(
-                            position:
-                                Tween<Offset>(
-                                  begin: const Offset(0, 0.06),
-                                  end: Offset.zero,
-                                ).animate(
-                                  CurvedAnimation(
-                                    parent: a,
-                                    curve: Curves.easeOutCubic,
-                                  ),
+            child: RefreshIndicator(
+              color: _K.royal,
+              backgroundColor: _K.white,
+              onRefresh: () => prov.loadProfile(),
+              child: CustomScrollView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _TopBar(
+                      onEdit: () => Navigator.push(
+                        context,
+                        PageRouteBuilder(
+                          pageBuilder: (_, a, __) => const EditProfileScreen(),
+                          transitionsBuilder: (_, a, __, child) =>
+                              FadeTransition(
+                                opacity: a,
+                                child: SlideTransition(
+                                  position:
+                                      Tween<Offset>(
+                                        begin: const Offset(0, 0.06),
+                                        end: Offset.zero,
+                                      ).animate(
+                                        CurvedAnimation(
+                                          parent: a,
+                                          curve: Curves.easeOutCubic,
+                                        ),
+                                      ),
+                                  child: child,
                                 ),
-                            child: child,
-                          ),
+                              ),
                         ),
-                      ),
-                    ).then((_) => prov.loadProfile()),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: _IdentityCard(p: p, onToggleShift: prov.toggleShift),
-                ),
-                SliverToBoxAdapter(child: _StatsStrip(p: p)),
-                SliverToBoxAdapter(child: _SectionHead(title: 'PERSONAL INFO')),
-                SliverToBoxAdapter(child: _PersonalCard(p: p)),
-                SliverToBoxAdapter(child: _SectionHead(title: 'ORGANISATION')),
-                SliverToBoxAdapter(
-                  child: _OrgCard(p: p, prov: prov),
-                ),
-                SliverToBoxAdapter(
-                  child: _SectionHead(title: 'ACCOUNT TIMELINE'),
-                ),
-                SliverToBoxAdapter(child: _TimelineCard(p: p)),
-                SliverToBoxAdapter(child: _SectionHead(title: 'PERFORMANCE')),
-                SliverToBoxAdapter(child: _PerfCard(p: p)),
-                SliverToBoxAdapter(child: _SectionHead(title: 'QUICK ACTIONS')),
-                SliverToBoxAdapter(
-                  child: _ActionsGrid(p: p, prov: prov),
-                ),
-                if (p.recentActivity.isNotEmpty) ...[
-                  SliverToBoxAdapter(
-                    child: _SectionHead(title: 'RECENT ACTIVITY'),
+                      ).then((_) => prov.loadProfile()),
+                    ),
                   ),
                   SliverToBoxAdapter(
-                    child: _ActivityCard(p: p, prov: prov),
+                    child: _IdentityCard(p: p, onToggleShift: prov.toggleShift),
                   ),
+                  SliverToBoxAdapter(child: _StatsStrip(p: p)),
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'PERSONAL INFO'),
+                  ),
+                  SliverToBoxAdapter(child: _PersonalCard(p: p)),
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'ORGANISATION'),
+                  ),
+                  SliverToBoxAdapter(
+                    child: _OrgCard(p: p, prov: prov),
+                  ),
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'ACCOUNT TIMELINE'),
+                  ),
+                  SliverToBoxAdapter(child: _TimelineCard(p: p)),
+                  SliverToBoxAdapter(child: _SectionHead(title: 'PERFORMANCE')),
+                  SliverToBoxAdapter(child: _PerfCard(p: p)),
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'QUICK ACTIONS'),
+                  ),
+                  SliverToBoxAdapter(
+                    child: _ActionsGrid(p: p, prov: prov),
+                  ),
+                  if (p.recentActivity.isNotEmpty) ...[
+                    SliverToBoxAdapter(
+                      child: _SectionHead(title: 'RECENT ACTIVITY'),
+                    ),
+                    SliverToBoxAdapter(
+                      child: _ActivityCard(p: p, prov: prov),
+                    ),
+                  ],
+                  SliverToBoxAdapter(child: _SignOutRow()),
+                  const SliverToBoxAdapter(child: SizedBox(height: 48)),
                 ],
-                SliverToBoxAdapter(child: _SignOutRow()),
-                const SliverToBoxAdapter(child: SizedBox(height: 48)),
-              ],
+              ),
             ),
           ),
           if (prov.isLoading)
@@ -233,10 +247,12 @@ class _IdentityCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // ── Avatar — shows photo or initials ──────────────
             _Avatar(
               initials: p.avatarInitials ?? 'U',
               roleColor: p.role.color,
               isActive: p.isActive,
+              photoUrl: p.profilePhoto,
             ),
             const SizedBox(width: 18),
             Expanded(
@@ -313,30 +329,39 @@ class _IdentityCard extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  AVATAR  — shows network photo if available, else initials
+// ─────────────────────────────────────────────────────────────────────────────
 class _Avatar extends StatelessWidget {
   final String initials;
   final Color roleColor;
   final bool isActive;
+  final String photoUrl;
+
   const _Avatar({
     required this.initials,
     required this.roleColor,
     required this.isActive,
+    required this.photoUrl,
   });
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
+        // ── Photo or gradient+initials ────────────────────────
         Container(
           width: 76,
           height: 76,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: [roleColor, roleColor.withOpacity(0.6)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: photoUrl.isEmpty
+                ? LinearGradient(
+                    colors: [roleColor, roleColor.withOpacity(0.6)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
             boxShadow: [
               BoxShadow(
                 color: roleColor.withOpacity(0.30),
@@ -345,18 +370,45 @@ class _Avatar extends StatelessWidget {
               ),
             ],
           ),
-          child: Center(
-            child: Text(
-              initials,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1,
-              ),
-            ),
-          ),
+          child: photoUrl.isNotEmpty
+              ? ClipOval(
+                  child: Image.network(
+                    photoUrl,
+                    width: 76,
+                    height: 76,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (_, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [roleColor, roleColor.withOpacity(0.6)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => _initialsWidget(),
+                  ),
+                )
+              : _initialsWidget(),
         ),
+
+        // ── Active/inactive dot ───────────────────────────────
         Positioned(
           right: 1,
           bottom: 1,
@@ -373,8 +425,23 @@ class _Avatar extends StatelessWidget {
       ],
     );
   }
+
+  Widget _initialsWidget() => Center(
+    child: Text(
+      initials,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 26,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1,
+      ),
+    ),
+  );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PILL
+// ─────────────────────────────────────────────────────────────────────────────
 class _Pill extends StatelessWidget {
   final String label;
   final Color bg, border, textColor;
@@ -1268,15 +1335,12 @@ class _PBlock extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  QUICK ACTIONS GRID
-//  ✅ Create Account → ENABLED  for owner / admin / manager
-//  🔒 Create Account → DISABLED for waiter / cashier / chef / server
 // ─────────────────────────────────────────────────────────────────────────────
 class _ActionsGrid extends StatelessWidget {
   final UserProfile p;
   final ProfileProvider prov;
   const _ActionsGrid({required this.p, required this.prov});
 
-  /// Only owner, admin and manager may create accounts
   bool get _canCreateAccount {
     final role = p.role.label.toLowerCase();
     return role == 'owner' || role == 'admin' || role == 'manager';
@@ -1288,7 +1352,6 @@ class _ActionsGrid extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          // ── Create Account ───────────────────────────────────
           Expanded(
             child: _ActionCard(
               icon: Icons.person_add_alt_1_rounded,
@@ -1310,7 +1373,6 @@ class _ActionsGrid extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          
           Expanded(
             child: _ActionCard(
               icon: Icons.lock_reset_rounded,
@@ -1329,15 +1391,11 @@ class _ActionsGrid extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ACTION CARD
-//  isDisabled → dims to 45% opacity, shows lock icon, blocks tap
-// ─────────────────────────────────────────────────────────────────────────────
 class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String label, sub;
   final Color color;
-  final VoidCallback? onTap; // nullable when disabled
+  final VoidCallback? onTap;
   final bool isDisabled;
 
   const _ActionCard({

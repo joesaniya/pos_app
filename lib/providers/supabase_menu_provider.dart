@@ -1,3 +1,5 @@
+// lib/providers/supabase_menu_provider.dart
+
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -19,7 +21,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
   String? _error;
 
   List<SupabaseMenuCategory> _categories = [];
-  // categoryId → items
   final Map<String, List<SupabaseMenuItem>> _itemsCache = {};
 
   // Real-time subscriptions
@@ -42,6 +43,9 @@ class SupabaseMenuProvider extends ChangeNotifier {
   List<SupabaseMenuCategory> get categories => _categories;
   String get businessId => _businessId;
 
+  /// Exposed so the UI can gate add/edit/delete controls by role.
+  String? get userRole => _userRole;
+
   List<SupabaseMenuItem> itemsForCategory(String categoryId) =>
       _itemsCache[categoryId] ?? [];
 
@@ -49,7 +53,7 @@ class SupabaseMenuProvider extends ChangeNotifier {
       _itemsCache.values.expand((e) => e).toList();
 
   // ════════════════════════════════════════════════════════════
-  //  INIT  — call once after login / when screen mounts
+  //  INIT
   // ════════════════════════════════════════════════════════════
 
   Future<void> init() async {
@@ -58,7 +62,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
     await loadCategories();
   }
 
-  /// Pull business + user data from Firebase Firestore.
   Future<void> _loadUserContext() async {
     try {
       final fbUser = FirebaseAuth.instance.currentUser;
@@ -80,6 +83,9 @@ class SupabaseMenuProvider extends ChangeNotifier {
         _userRole = data['role'] as String? ?? 'staff';
         _userPhone = data['phone'] as String?;
       }
+
+      // Notify so role badge in header updates immediately after login.
+      notifyListeners();
     } catch (e) {
       _error = 'Failed to load user context: $e';
     }
@@ -96,7 +102,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
     try {
       _categories = await _svc.getCategories(_businessId);
-      // Load item counts for each category
       for (final cat in _categories) {
         await _loadItems(cat.id);
         cat.itemCount = _itemsCache[cat.id]?.length ?? 0;
@@ -109,7 +114,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Subscribe to real-time category updates.
   void subscribeCategories() {
     _categorySub?.cancel();
     _categorySub = _svc.watchCategories(_businessId).listen((cats) {
@@ -126,8 +130,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
     int displayOrder = 0,
     File? imageFile,
   }) async {
-    // Don't call _setLoading() here — it would show the skeleton grid
-    // and wipe out existing categories while saving.
     try {
       final cat = await _svc.createCategory(
         name: name,
@@ -145,12 +147,9 @@ class SupabaseMenuProvider extends ChangeNotifier {
         imageFile: imageFile,
       );
 
-      // ── FIX: initialise cache + count so card appears immediately ──
       cat.itemCount = 0;
       _itemsCache[cat.id] = [];
       _categories.add(cat);
-
-      // Ensure state is loaded so grid renders (not stuck on skeleton)
       _categoryState = MenuLoadState.loaded;
       notifyListeners();
     } catch (e) {
@@ -181,11 +180,9 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
       final idx = _categories.indexWhere((c) => c.id == id);
       if (idx != -1) {
-        // ── FIX: preserve the existing item count after update ──
         updated.itemCount = _categories[idx].itemCount;
         _categories[idx] = updated;
       }
-
       notifyListeners();
     } catch (e) {
       _error = e.toString();
@@ -225,7 +222,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _loadItems(categoryId);
-      // Update item count on the parent category
       final catIdx = _categories.indexWhere((c) => c.id == categoryId);
       if (catIdx != -1) {
         _categories[catIdx].itemCount = _itemsCache[categoryId]?.length ?? 0;
@@ -238,12 +234,10 @@ class SupabaseMenuProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Subscribe to real-time item updates for a category.
   void subscribeItems(String categoryId) {
     _itemSub?.cancel();
     _itemSub = _svc.watchItems(categoryId).listen((items) {
       _itemsCache[categoryId] = items;
-      // Update count on category
       final catIdx = _categories.indexWhere((c) => c.id == categoryId);
       if (catIdx != -1) _categories[catIdx].itemCount = items.length;
       notifyListeners();
@@ -302,7 +296,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
       imageFile: imageFile,
     );
 
-    // ── FIX: add to cache and bump category count immediately ──
     _itemsCache.putIfAbsent(categoryId, () => []).add(item);
     final catIdx = _categories.indexWhere((c) => c.id == categoryId);
     if (catIdx != -1) _categories[catIdx].itemCount++;
@@ -350,7 +343,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
     if (list != null) {
       final idx = list.indexWhere((i) => i.id == id);
       if (idx != -1) {
-        // rebuild because SupabaseMenuItem is immutable
         final old = list[idx];
         list[idx] = SupabaseMenuItem(
           id: old.id,
@@ -417,11 +409,6 @@ class SupabaseMenuProvider extends ChangeNotifier {
   // ════════════════════════════════════════════════════════════
   //  HELPERS
   // ════════════════════════════════════════════════════════════
-
-  void _setLoading() {
-    _categoryState = MenuLoadState.loading;
-    notifyListeners();
-  }
 
   void clearError() {
     _error = null;

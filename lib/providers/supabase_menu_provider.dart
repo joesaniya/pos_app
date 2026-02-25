@@ -1,5 +1,3 @@
-// lib/providers/supabase_menu_provider.dart
-
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -128,7 +126,8 @@ class SupabaseMenuProvider extends ChangeNotifier {
     int displayOrder = 0,
     File? imageFile,
   }) async {
-    _setLoading();
+    // Don't call _setLoading() here — it would show the skeleton grid
+    // and wipe out existing categories while saving.
     try {
       final cat = await _svc.createCategory(
         name: name,
@@ -145,10 +144,18 @@ class SupabaseMenuProvider extends ChangeNotifier {
         createdByPhone: _userPhone,
         imageFile: imageFile,
       );
+
+      // ── FIX: initialise cache + count so card appears immediately ──
+      cat.itemCount = 0;
+      _itemsCache[cat.id] = [];
       _categories.add(cat);
+
+      // Ensure state is loaded so grid renders (not stuck on skeleton)
+      _categoryState = MenuLoadState.loaded;
       notifyListeners();
     } catch (e) {
       _error = e.toString();
+      _categoryState = MenuLoadState.error;
       notifyListeners();
       rethrow;
     }
@@ -171,8 +178,14 @@ class SupabaseMenuProvider extends ChangeNotifier {
         businessId: _businessId,
         categoryName: categoryName ?? '',
       );
+
       final idx = _categories.indexWhere((c) => c.id == id);
-      if (idx != -1) _categories[idx] = updated;
+      if (idx != -1) {
+        // ── FIX: preserve the existing item count after update ──
+        updated.itemCount = _categories[idx].itemCount;
+        _categories[idx] = updated;
+      }
+
       notifyListeners();
     } catch (e) {
       _error = e.toString();
@@ -289,8 +302,8 @@ class SupabaseMenuProvider extends ChangeNotifier {
       imageFile: imageFile,
     );
 
+    // ── FIX: add to cache and bump category count immediately ──
     _itemsCache.putIfAbsent(categoryId, () => []).add(item);
-    // Update category item count
     final catIdx = _categories.indexWhere((c) => c.id == categoryId);
     if (catIdx != -1) _categories[catIdx].itemCount++;
     notifyListeners();

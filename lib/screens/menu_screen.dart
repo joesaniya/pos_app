@@ -664,47 +664,55 @@ class _CategoryOptionsSheet extends StatelessWidget {
               ),
               subtitle: const Text('This cannot be undone'),
               onTap: () {
-                Navigator.pop(context);
-                _confirmDelete(context);
+                // ── FIX: capture provider + navigator BEFORE popping ──
+                // Popping the sheet destroys its BuildContext, so we must
+                // grab everything we need from it first.
+                final provider = context.read<SupabaseMenuProvider>();
+                final navigator = Navigator.of(context);
+                navigator.pop(); // close bottom sheet
+
+                // Now show confirm dialog using the parent navigator
+                showDialog(
+                  context: navigator.context,
+                  builder: (_) => AlertDialog(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    title: const Text('Delete Category?'),
+                    content: Text(
+                      'Are you sure you want to delete "${category.name}"?\nThis action cannot be undone.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(navigator.context),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade400,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(navigator.context);
+                          try {
+                            await provider.deactivateCategory(category.id);
+                          } catch (e) {
+                            // Provider already sets error state;
+                            // optionally show a snackbar here.
+                          }
+                        },
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
               },
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Category?'),
-        content: Text(
-          'Are you sure you want to delete "${category.name}"? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade400,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              context.read<SupabaseMenuProvider>().deactivateCategory(
-                category.id,
-              );
-            },
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
   }

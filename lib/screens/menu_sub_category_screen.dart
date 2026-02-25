@@ -1034,9 +1034,10 @@ class _ItemOptionsSheet extends StatelessWidget {
             label: 'Edit Item',
             color: primaryColor,
             onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
+              // ── FIX: capture navigator before popping sheet ──
+              final navigator = Navigator.of(context);
+              navigator.pop();
+              navigator.push(
                 MaterialPageRoute(
                   builder: (_) =>
                       AddMenuItemScreen(category: category, editItem: item),
@@ -1051,7 +1052,9 @@ class _ItemOptionsSheet extends StatelessWidget {
             label: item.isAvailable ? 'Mark Unavailable' : 'Mark Available',
             color: item.isAvailable ? Colors.orange : AppColors.success,
             onTap: () async {
-              Navigator.pop(context);
+              // ── FIX: capture provider before popping sheet ──
+              final nav = Navigator.of(context);
+              nav.pop();
               await provider.toggleAvailability(
                 id: item.id,
                 categoryId: item.categoryId,
@@ -1064,20 +1067,29 @@ class _ItemOptionsSheet extends StatelessWidget {
             label: 'Delete Item',
             color: Colors.red,
             onTap: () async {
-              Navigator.pop(context);
+              // ── FIX: capture everything BEFORE popping sheet ──
+              // After Navigator.pop the sheet's context is dead.
+              final navigator = Navigator.of(context);
+              final prov = provider; // already read above in build()
+              final itemName = item.name;
+              final itemId = item.id;
+              final categoryId = item.categoryId;
+              final imageUrl = item.imageUrl;
+
+              navigator.pop(); // close bottom sheet
+
+              // Show confirm dialog from the live parent context
               final confirm = await showDialog<bool>(
-                context: context,
-                builder: (_) => AlertDialog(
+                context: navigator.context,
+                builder: (dialogCtx) => AlertDialog(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
                   title: const Text('Delete Item?'),
-                  content: Text(
-                    'Are you sure you want to delete "${item.name}"?',
-                  ),
+                  content: Text('Are you sure you want to delete "$itemName"?'),
                   actions: [
                     TextButton(
-                      onPressed: () => Navigator.pop(context, false),
+                      onPressed: () => Navigator.pop(dialogCtx, false),
                       child: const Text('Cancel'),
                     ),
                     ElevatedButton(
@@ -1088,17 +1100,18 @@ class _ItemOptionsSheet extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(context, true),
+                      onPressed: () => Navigator.pop(dialogCtx, true),
                       child: const Text('Delete'),
                     ),
                   ],
                 ),
               );
+
               if (confirm == true) {
-                await provider.deleteItem(
-                  id: item.id,
-                  categoryId: item.categoryId,
-                  imageUrl: item.imageUrl,
+                await prov.deleteItem(
+                  id: itemId,
+                  categoryId: categoryId,
+                  imageUrl: imageUrl,
                 );
               }
             },

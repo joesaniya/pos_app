@@ -10,23 +10,50 @@ import 'package:pos_app/theme/app_colors.dart';
 import 'package:pos_app/theme/app_theme.dart';
 
 const List<String> _icons = [
-  '🍽️', '🫓', '🍛', '🍳', '🍱', '🌙', '🧁', '🥤',
-  '🍜', '🥘', '🫕', '🍕', '🌮', '🥗', '🥩', '🍗',
-  '🦐', '🐟', '🥚', '🧆', '🧇', '🧈', '🥐', '🫔',
+  '🍽️',
+  '🫓',
+  '🍛',
+  '🍳',
+  '🍱',
+  '🌙',
+  '🧁',
+  '🥤',
+  '🍜',
+  '🥘',
+  '🫕',
+  '🍕',
+  '🌮',
+  '🥗',
+  '🥩',
+  '🍗',
+  '🦐',
+  '🐟',
+  '🥚',
+  '🧆',
+  '🧇',
+  '🧈',
+  '🥐',
+  '🫔',
 ];
 
 const List<Map<String, String>> _colorPresets = [
-  {'name': 'Tomato',   'hex': 'E74C3C'},
-  {'name': 'Orange',   'hex': 'E67E22'},
-  {'name': 'Gold',     'hex': 'F1C40F'},
-  {'name': 'Emerald',  'hex': '2ECC71'},
-  {'name': 'Teal',     'hex': '1ABC9C'},
-  {'name': 'Sky',      'hex': '3498DB'},
-  {'name': 'Iris',     'hex': '9B59B6'},
-  {'name': 'Rose',     'hex': 'E91E63'},
-  {'name': 'Slate',    'hex': '607D8B'},
-  {'name': 'Cocoa',    'hex': '795548'},
+  {'name': 'Tomato', 'hex': 'E74C3C'},
+  {'name': 'Orange', 'hex': 'E67E22'},
+  {'name': 'Gold', 'hex': 'F1C40F'},
+  {'name': 'Emerald', 'hex': '2ECC71'},
+  {'name': 'Teal', 'hex': '1ABC9C'},
+  {'name': 'Sky', 'hex': '3498DB'},
+  {'name': 'Iris', 'hex': '9B59B6'},
+  {'name': 'Rose', 'hex': 'E91E63'},
+  {'name': 'Slate', 'hex': '607D8B'},
+  {'name': 'Cocoa', 'hex': '795548'},
 ];
+
+/// Roles that may create or edit categories.
+const Set<String> _editableRoles = {'staff', 'admin', 'system', 'owner'};
+
+bool _canEdit(String? role) =>
+    role != null && _editableRoles.contains(role.toLowerCase());
 
 class AddCategoryScreen extends StatefulWidget {
   final String? editCategoryId; // null = create, non-null = edit
@@ -48,6 +75,56 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
 
   bool get _isEdit => widget.editCategoryId != null;
 
+  // Holds existing network image URL when editing
+  String? _existingImageUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final provider = context.read<SupabaseMenuProvider>();
+
+      // Role guard
+      if (!_canEdit(provider.userRole)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You don\'t have permission to manage categories.'),
+            backgroundColor: Color(0xFFE74C3C),
+          ),
+        );
+        Navigator.pop(context);
+        return;
+      }
+
+      // Pre-fill fields when editing
+      if (_isEdit) {
+        try {
+          final existing = provider.categories.firstWhere(
+            (c) => c.id == widget.editCategoryId,
+          );
+          // Strip leading '#' so hex matches our preset format
+          final rawHex = existing.colorHex.replaceFirst('#', '');
+          setState(() {
+            _nameCtrl.text = existing.name;
+            _descCtrl.text = existing.description;
+            _selectedIcon = existing.icon;
+            _selectedColorHex = rawHex;
+            _existingImageUrl = existing.imageUrl;
+          });
+        } catch (_) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not load category data. Please try again.'),
+              backgroundColor: Color(0xFFE74C3C),
+            ),
+          );
+          Navigator.pop(context);
+        }
+      }
+    });
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -67,6 +144,18 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   }
 
   Future<void> _save() async {
+    // Double-check role before saving (defence in depth).
+    final role = context.read<SupabaseMenuProvider>().userRole;
+    if (!_canEdit(role)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You don\'t have permission to perform this action.'),
+          backgroundColor: Color(0xFFE74C3C),
+        ),
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
 
@@ -112,6 +201,81 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final role = context.watch<SupabaseMenuProvider>().userRole;
+
+    // Show a blank locked screen while the role is still loading (null).
+    if (role == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // Hard block — render a "no permission" screen if role is insufficient.
+    if (!_canEdit(role)) {
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            _isEdit ? 'Edit Category' : 'New Category',
+            style: AppTheme.headlineSmall,
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 72,
+                  color: Colors.grey.shade300,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Access Restricted',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Your current role ($role) does not have\npermission to manage categories.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade500,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('Go Back'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ── Normal form (user has permission) ───────────────────────
     final accent = Color(int.parse('FF$_selectedColorHex', radix: 16));
 
     return Scaffold(
@@ -142,13 +306,17 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                       backgroundColor: accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 10),
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Save',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    child: const Text(
+                      'Save',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ),
           ),
         ],
@@ -166,6 +334,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                 icon: _selectedIcon,
                 colorHex: _selectedColorHex,
                 imageFile: _imageFile,
+                existingImageUrl: _existingImageUrl,
                 onTap: _pickImage,
               ),
               const SizedBox(height: 24),
@@ -227,17 +396,14 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     );
   }
 
-  InputDecoration _inputDec(
-      {required String hint, required IconData icon}) {
+  InputDecoration _inputDec({required String hint, required IconData icon}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle:
-          const TextStyle(color: Color(0xFFBBBBBB), fontSize: 14),
+      hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 14),
       prefixIcon: Icon(icon, size: 20, color: const Color(0xFFAAAAAA)),
       filled: true,
       fillColor: Colors.white,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: Color(0xFFEEEEEE)),
@@ -248,8 +414,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide:
-            BorderSide(color: AppColors.primaryPurple, width: 2),
+        borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
@@ -268,14 +433,14 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF444444),
-          letterSpacing: 0.2,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w700,
+      color: Color(0xFF444444),
+      letterSpacing: 0.2,
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,6 +451,7 @@ class _PreviewCard extends StatelessWidget {
   final String icon;
   final String colorHex;
   final File? imageFile;
+  final String? existingImageUrl; // shown when editing and no new image picked
   final VoidCallback onTap;
 
   const _PreviewCard({
@@ -293,6 +459,7 @@ class _PreviewCard extends StatelessWidget {
     required this.icon,
     required this.colorHex,
     this.imageFile,
+    this.existingImageUrl,
     required this.onTap,
   });
 
@@ -322,12 +489,21 @@ class _PreviewCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // New picked image takes priority; fall back to existing network image
             if (imageFile != null)
               Image.file(
                 imageFile!,
                 fit: BoxFit.cover,
                 color: Colors.black.withOpacity(0.25),
                 colorBlendMode: BlendMode.darken,
+              )
+            else if (existingImageUrl != null)
+              Image.network(
+                existingImageUrl!,
+                fit: BoxFit.cover,
+                color: Colors.black.withOpacity(0.25),
+                colorBlendMode: BlendMode.darken,
+                errorBuilder: (_, __, ___) => const SizedBox(),
               ),
             // Camera button
             Positioned(
@@ -341,8 +517,11 @@ class _PreviewCard extends StatelessWidget {
                     color: Colors.white.withOpacity(0.9),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.camera_alt_rounded,
-                      size: 18, color: Color(0xFF555555)),
+                  child: const Icon(
+                    Icons.camera_alt_rounded,
+                    size: 18,
+                    color: Color(0xFF555555),
+                  ),
                 ),
               ),
             ),
@@ -362,12 +541,7 @@ class _PreviewCard extends StatelessWidget {
                       color: Colors.white,
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black45,
-                          blurRadius: 8,
-                        )
-                      ],
+                      shadows: [Shadow(color: Colors.black45, blurRadius: 8)],
                     ),
                   ),
                 ],
@@ -417,13 +591,12 @@ class _IconPicker extends StatelessWidget {
                         color: AppColors.primaryPurple.withOpacity(0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 3),
-                      )
+                      ),
                     ]
                   : [],
             ),
             child: Center(
-              child: Text(emoji,
-                  style: const TextStyle(fontSize: 22)),
+              child: Text(emoji, style: const TextStyle(fontSize: 22)),
             ),
           ),
         );

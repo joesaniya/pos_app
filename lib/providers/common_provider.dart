@@ -8,10 +8,12 @@ import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
+import 'package:pos_app/providers/supabase_menu_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProviderHelperClass {
   static ProviderHelperClass? _instance;
@@ -34,6 +36,7 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => OrdersProvider()),
     ChangeNotifierProvider(create: (_) => TablesProvider()),
     ChangeNotifierProvider(create: (_) => MenuProvider()),
+    ChangeNotifierProvider(create: (_) => SupabaseMenuProvider()),
     ChangeNotifierProvider(create: (_) => InventoryProvider()),
     ChangeNotifierProvider(create: (_) => ProfileProvider()),
     ChangeNotifierProvider(create: (_) => CreateAccountProvider()),

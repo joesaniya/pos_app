@@ -1,4 +1,3 @@
-// lib/providers/supabase_menu_provider.dart
 
 import 'dart:async';
 import 'dart:io';
@@ -25,7 +24,9 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
   // Real-time subscriptions
   StreamSubscription? _categorySub;
-  StreamSubscription? _itemSub;
+  // Per-category item subscriptions — keyed by categoryId so
+  // navigating between categories doesn't orphan old channels.
+  final Map<String, StreamSubscription> _itemSubs = {};
 
   // Current user from Firebase
   String _businessId = '';
@@ -67,7 +68,7 @@ class SupabaseMenuProvider extends ChangeNotifier {
       final fbUser = FirebaseAuth.instance.currentUser;
       if (fbUser == null) return;
 
-      _userUid = fbUser.uid;
+      _userUid  = fbUser.uid;
       _userEmail = fbUser.email;
 
       final doc = await FirebaseFirestore.instance
@@ -77,11 +78,11 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
       if (doc.exists) {
         final data = doc.data()!;
-        _businessId = data['businessId'] as String? ?? '';
+        _businessId   = data['businessId']   as String? ?? '';
         _businessName = data['businessName'] as String? ?? '';
-        _userName = data['name'] as String? ?? fbUser.displayName ?? '';
-        _userRole = data['role'] as String? ?? 'staff';
-        _userPhone = data['phone'] as String?;
+        _userName     = data['name']         as String? ?? fbUser.displayName ?? '';
+        _userRole     = data['role']         as String? ?? 'staff';
+        _userPhone    = data['phone']        as String?;
       }
 
       // Notify so role badge in header updates immediately after login.
@@ -116,10 +117,21 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
   void subscribeCategories() {
     _categorySub?.cancel();
-    _categorySub = _svc.watchCategories(_businessId).listen((cats) {
-      _categories = cats;
-      notifyListeners();
-    });
+    _categorySub = _svc.watchCategories(_businessId).listen(
+      (cats) {
+        _categories = cats;
+        notifyListeners();
+      },
+      onError: (e) {
+        // Channel error (WebSocket drop, protocol error, etc.)
+        // Log silently and schedule a reconnect — do NOT rethrow.
+        debugPrint('[SupabaseMenuProvider] category channel error: $e');
+        Future.delayed(const Duration(seconds: 3), () {
+          if (_businessId.isNotEmpty) subscribeCategories();
+        });
+      },
+      cancelOnError: false, // keep the subscription alive on error
+    );
   }
 
   Future<void> createCategory({
@@ -235,13 +247,33 @@ class SupabaseMenuProvider extends ChangeNotifier {
   }
 
   void subscribeItems(String categoryId) {
-    _itemSub?.cancel();
-    _itemSub = _svc.watchItems(categoryId).listen((items) {
-      _itemsCache[categoryId] = items;
-      final catIdx = _categories.indexWhere((c) => c.id == categoryId);
-      if (catIdx != -1) _categories[catIdx].itemCount = items.length;
-      notifyListeners();
-    });
+    // If already subscribed to this category, skip — don't create duplicates.
+    if (_itemSubs.containsKey(categoryId)) return;
+
+    _itemSubs[categoryId] = _svc.watchItems(categoryId).listen(
+      (items) {
+        _itemsCache[categoryId] = items;
+        final catIdx = _categories.indexWhere((c) => c.id == categoryId);
+        if (catIdx != -1) _categories[catIdx].itemCount = items.length;
+        notifyListeners();
+      },
+      onError: (e) {
+        // Swallow the RealtimeSubscribeException — remove stale sub
+        // and reconnect after a short delay.
+        debugPrint('[SupabaseMenuProvider] item channel error ($categoryId): $e');
+        _itemSubs.remove(categoryId)?.cancel();
+        Future.delayed(const Duration(seconds: 3), () {
+          subscribeItems(categoryId);
+        });
+      },
+      cancelOnError: false,
+    );
+  }
+
+  /// Unsubscribe from a specific category's realtime channel.
+  /// Call this in the subcategory screen's dispose() to free Supabase channels.
+  void unsubscribeItems(String categoryId) {
+    _itemSubs.remove(categoryId)?.cancel();
   }
 
   Future<SupabaseMenuItem> createItem({
@@ -418,7 +450,10 @@ class SupabaseMenuProvider extends ChangeNotifier {
   @override
   void dispose() {
     _categorySub?.cancel();
-    _itemSub?.cancel();
+    for (final sub in _itemSubs.values) {
+      sub.cancel();
+    }
+    _itemSubs.clear();
     super.dispose();
   }
 }

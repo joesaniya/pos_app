@@ -117,6 +117,11 @@ class _MenuSubcategoryScreenState extends State<MenuSubcategoryScreen> {
 
   @override
   void dispose() {
+    // Unsubscribe from the realtime channel for this category
+    // so we don't leave orphaned WebSocket channels open on Supabase.
+    if (_isSupabase) {
+      context.read<SupabaseMenuProvider>().unsubscribeItems(_catId);
+    }
     _searchCtrl.dispose();
     super.dispose();
   }

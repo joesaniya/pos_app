@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
 import 'package:pos_app/screens/profile_screen.dart';
+import 'package:pos_app/screens/tables_screen/tables_screen1.dart';
 import 'package:pos_app/screens/utils/app_sizes.dart';
 import 'package:pos_app/theme/app_colors.dart';
 import 'package:provider/provider.dart';

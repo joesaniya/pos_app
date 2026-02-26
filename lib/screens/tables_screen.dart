@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -5340,3 +5340,4 @@ extension StringExt on String {
   String capitalize() =>
       isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
 }
+*/

@@ -4,6 +4,7 @@ import 'package:pos_app/screens/reports_screen.dart';
 import 'package:pos_app/screens/revenue_analytics_screen.dart';
 import 'package:pos_app/screens/settings_screen.dart';
 import 'package:pos_app/screens/tables_screen.dart';
+import 'package:pos_app/screens/tables_screen/tables_screen1.dart';
 import 'package:pos_app/screens/utils/responsive_utils.dart';
 import 'package:pos_app/screens/widgets/action_card_widget.dart';
 import 'package:pos_app/screens/widgets/filter_chip_widget.dart';
@@ -263,11 +264,11 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 SizedBox(
                   width: cardWidth,
-                  child:  ActionCard(
+                  child: ActionCard(
                     title: 'Settings',
                     icon: Icons.settings,
                     color: AppColors.secondary,
-                      onTap: () => Navigator.push(
+                    onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const SettingsScreen()),
                     ),

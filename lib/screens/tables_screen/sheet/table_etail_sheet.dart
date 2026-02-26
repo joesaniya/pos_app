@@ -4,13 +4,19 @@ import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 import 'package:provider/provider.dart';
 import '../widgets/shared_widgets.dart';
-import '../widgets/seated_duration_timer.dart';   // ← NEW
+import '../widgets/seated_duration_timer.dart';
 import 'reservation_sheet.dart';
 import 'add_edit_table_sheet.dart';
 
-// ═════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
 //  TABLE DETAIL SHEET
-// ═════════════════════════════════════════════════════════════
+//  Opened when a table card is tapped on the floor view.
+//  Shows different sections depending on table status:
+//    - occupied  → live duration timer + clear/checkout actions
+//    - reserved  → reservation info + Seat / No-Show / Cancel / Edit
+//    - available → quick reserve or seat walk-in
+//    - cleaning  → explains cleaning state + mark available button
+// ══════════════════════════════════════════════════════════════
 class TableDetailSheet extends StatelessWidget {
   final RestaurantTable table;
   const TableDetailSheet({super.key, required this.table});
@@ -34,6 +40,7 @@ class TableDetailSheet extends StatelessWidget {
         ),
         child: Column(
           children: [
+            // ── Drag handle ────────────────────────────────
             Container(
               width: 36,
               height: 4,
@@ -43,6 +50,7 @@ class TableDetailSheet extends StatelessWidget {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
+            // ── Table header ───────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
               child: Row(
@@ -70,7 +78,7 @@ class TableDetailSheet extends StatelessWidget {
                                 letterSpacing: -0.4,
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             if (table.isPremium)
                               const Text('⭐', style: TextStyle(fontSize: 14)),
                           ],
@@ -78,48 +86,20 @@ class TableDetailSheet extends StatelessWidget {
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: secBg,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '${table.section.emoji} ${table.section.label}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: secCol,
-                                ),
-                              ),
+                            _Badge(
+                              text:
+                                  '${table.section.emoji} ${table.section.label}',
+                              color: secCol,
+                              bg: secBg,
                             ),
                             const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: sb,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                table.status.label,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: sc,
-                                ),
-                              ),
-                            ),
+                            _Badge(text: table.status.label, color: sc, bg: sb),
                           ],
                         ),
                       ],
                     ),
                   ),
+                  // ── Edit table button ───────────────────
                   if (prov.canManageTables)
                     GestureDetector(
                       onTap: () {
@@ -155,11 +135,13 @@ class TableDetailSheet extends StatelessWidget {
               ),
             ),
             const Divider(height: 1, color: TC.divider),
+            // ── Content ────────────────────────────────────
             Expanded(
               child: ListView(
                 controller: ctrl,
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                 children: [
+                  // ── Info tiles row ──────────────────────
                   Row(
                     children: [
                       InfoTile(
@@ -182,6 +164,7 @@ class TableDetailSheet extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  // ── Status-specific section ─────────────
                   if (table.status == TableStatus.occupied)
                     OccupiedSection(table: table, prov: prov)
                   else if (table.status == TableStatus.reserved)
@@ -200,17 +183,41 @@ class TableDetailSheet extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  OCCUPIED SECTION  (now with live seated duration timer)
-// ─────────────────────────────────────────────────────────────
+// ── Small label badge ──────────────────────────────────────────
+class _Badge extends StatelessWidget {
+  final String text;
+  final Color color, bg;
+  const _Badge({required this.text, required this.color, required this.bg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  OCCUPIED SECTION
+//  Shows who is seated, for how long (live timer), and
+//  gives the option to clear the table (→ cleaning status).
+// ══════════════════════════════════════════════════════════════
 class OccupiedSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const OccupiedSection({
-    super.key,
-    required this.table,
-    required this.prov,
-  });
+  const OccupiedSection({super.key, required this.table, required this.prov});
 
   @override
   Widget build(BuildContext context) {
@@ -219,7 +226,7 @@ class OccupiedSection extends StatelessWidget {
       children: [
         const SheetSection('Current Occupancy'),
 
-        // ── Live seated duration timer ───────────────────
+        // Live seated duration timer widget
         if (table.occupiedSince != null) ...[
           SeatedDurationTimer(
             occupiedSince: table.occupiedSince,
@@ -258,16 +265,15 @@ class OccupiedSection extends StatelessWidget {
                     ? '₹${table.currentOrderTotal!.toInt()}'
                     : '—',
               ),
-              const Divider(height: 20, color: TC.divider),
-              // ── Seated since timestamp ────────────────
               if (table.occupiedSince != null) ...[
+                const Divider(height: 20, color: TC.divider),
                 DetailRow(
                   icon: '🕐',
                   label: 'Seated since',
                   value: _fmtTime(table.occupiedSince!),
                 ),
-                const Divider(height: 20, color: TC.divider),
               ],
+              const Divider(height: 20, color: TC.divider),
               DetailRow(
                 icon: '⏱️',
                 label: 'Duration',
@@ -277,8 +283,10 @@ class OccupiedSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+
+        // Clear Table → moves status to "cleaning"
         ActionBtn(
-          label: 'Clear Table',
+          label: 'Clear Table (Needs Cleaning)',
           emoji: '🧹',
           color: TC.cleaning,
           onTap: () {
@@ -299,9 +307,17 @@ class OccupiedSection extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 //  RESERVATION SECTION
-// ─────────────────────────────────────────────────────────────
+//  Shown when the table status is "reserved" and a today's
+//  reservation is attached.
+//
+//  Actions:
+//    ✅ Seat Guests  — guest arrived, move to occupied
+//    👻 No Show      — guest never came, free the table
+//    ✖  Cancel       — staff-initiated cancellation
+//    ✏  Edit         — modify reservation details
+// ══════════════════════════════════════════════════════════════
 class ReservationSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
@@ -313,11 +329,70 @@ class ReservationSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final res = table.reservation!;
+    // Guard: reservation can be null if the table is marked reserved in DB
+    // but today's reservation filter dropped it (e.g. timezone mismatch,
+    // or the reservation was for a different date). Show a safe fallback.
+    final res = table.reservation;
+    if (res == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: TC.reservedBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: TC.reserved.withOpacity(0.2)),
+            ),
+            child: const Row(
+              children: [
+                Text('📅', style: TextStyle(fontSize: 28)),
+                SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Reserved',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: TC.reserved,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Reservation is for a different date.\nView it in the Calendar tab.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: TC.textSec,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ActionBtn(
+            label: 'Cancel Reservation',
+            emoji: '✖️',
+            color: const Color(0xFFDC2626),
+            outlined: true,
+            onTap: () => _confirmCancelById(context),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SheetSection('Reservation Details'),
+
+        // ── Reservation info card ────────────────────────
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -329,11 +404,7 @@ class ReservationSection extends StatelessWidget {
             children: [
               DetailRow(icon: '👤', label: 'Guest', value: res.customerName),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(
-                icon: '📱',
-                label: 'Phone',
-                value: res.phone ?? '—',
-              ),
+              DetailRow(icon: '📱', label: 'Phone', value: res.phone ?? '—'),
               const Divider(height: 20, color: TC.divider),
               DetailRow(
                 icon: '👥',
@@ -355,11 +426,15 @@ class ReservationSection extends StatelessWidget {
                 ),
               ],
               const Divider(height: 20, color: TC.divider),
-              DetailRow(
-                icon: '⏰',
-                label: 'Arrives',
-                value: res.countdownLabel,
-              ),
+              DetailRow(icon: '⏰', label: 'Arrives', value: res.countdownLabel),
+              if (res.createdByName != null || res.createdByRole != null) ...[
+                const Divider(height: 20, color: TC.divider),
+                DetailRow(
+                  icon: '🏷️',
+                  label: 'Reserved by',
+                  value: res.createdByName ?? res.createdByRole ?? 'Staff',
+                ),
+              ],
               if (res.notes != null && res.notes!.isNotEmpty) ...[
                 const Divider(height: 20, color: TC.divider),
                 DetailRow(icon: '📝', label: 'Notes', value: res.notes!),
@@ -368,6 +443,39 @@ class ReservationSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+
+        // ── Action buttons ───────────────────────────────
+        // Row 1: Seat Guests (primary) + No Show
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: ActionBtn(
+                label: 'Seat Guests',
+                emoji: '🍽️',
+                color: TC.available,
+                onTap: () {
+                  prov.seatGuests(table.id, res.customerName);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: ActionBtn(
+                label: 'No Show',
+                emoji: '👻',
+                color: const Color(0xFF6B7280),
+                outlined: true,
+                onTap: () => _confirmNoShow(context),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Row 2: Cancel + Edit
         Row(
           children: [
             Expanded(
@@ -382,72 +490,81 @@ class ReservationSection extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: ActionBtn(
-                label: 'Seat Guests',
-                emoji: '🍽️',
-                color: TC.available,
+                label: 'Edit',
+                emoji: '✏️',
+                color: TC.accent,
+                outlined: true,
                 onTap: () {
-                  prov.seatGuests(table.id, res.customerName);
                   Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => ChangeNotifierProvider.value(
+                      value: prov,
+                      child: ReservationSheet(
+                        tableId: table.id,
+                        provider: prov,
+                        existing: res,
+                      ),
+                    ),
+                  );
                 },
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: ActionBtn(
-            label: 'Edit Reservation',
-            emoji: '✏️',
-            color: TC.accent,
-            outlined: true,
-            onTap: () {
-              Navigator.pop(context);
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => ChangeNotifierProvider.value(
-                  value: prov,
-                  child: ReservationSheet(
-                    tableId: table.id,
-                    provider: prov,
-                    existing: res,
+
+        // ── No-show explanation hint ─────────────────────
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('ℹ️', style: TextStyle(fontSize: 13)),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '"No Show" means the guest made a reservation but never arrived. '
+                  'The table will be freed and the booking recorded as no-show.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: TC.textSec,
+                    height: 1.4,
                   ),
                 ),
-              );
-            },
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  void _confirmCancel(BuildContext context) {
+  // Used when reservation is null (date mismatch) — cancel by table ID
+  void _confirmCancelById(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: TC.surface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           'Cancel Reservation?',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: TC.textPri,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w800, color: TC.textPri),
         ),
-        content: Text(
-          'The reservation for ${table.reservation?.customerName} will be removed.',
-          style: const TextStyle(color: TC.textSec),
+        content: const Text(
+          'This reservation is for a different date. Cancel it and free the table?',
+          style: TextStyle(color: TC.textSec),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Keep',
-              style: TextStyle(color: TC.textSec),
-            ),
+            child: const Text('Keep', style: TextStyle(color: TC.textSec)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -468,19 +585,97 @@ class ReservationSection extends StatelessWidget {
       ),
     );
   }
+
+  void _confirmNoShow(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: TC.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Mark as No-Show?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: TC.textPri),
+        ),
+        content: Text(
+          '${table.reservation?.customerName ?? 'The guest'} never arrived. '
+          'The table will be freed and the booking marked as no-show.',
+          style: const TextStyle(color: TC.textSec),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Back', style: TextStyle(color: TC.textSec)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              prov.markNoShow(table.id);
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6B7280),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('No Show'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmCancel(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: TC.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Cancel Reservation?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: TC.textPri),
+        ),
+        content: Text(
+          'The reservation for ${table.reservation?.customerName ?? 'this guest'} '
+          'will be cancelled.',
+          style: const TextStyle(color: TC.textSec),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Keep', style: TextStyle(color: TC.textSec)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              prov.cancelReservation(table.id);
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Cancel Booking'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 //  AVAILABLE SECTION
-// ─────────────────────────────────────────────────────────────
+//  Table is clean and ready — staff can take a walk-in
+//  or set a reservation for an upcoming guest.
+// ══════════════════════════════════════════════════════════════
 class AvailableSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const AvailableSection({
-    super.key,
-    required this.table,
-    required this.prov,
-  });
+  const AvailableSection({super.key, required this.table, required this.prov});
 
   @override
   Widget build(BuildContext context) {
@@ -566,23 +761,30 @@ class AvailableSection extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 //  CLEANING SECTION
-// ─────────────────────────────────────────────────────────────
+//
+//  What is "Cleaning"?
+//  ─────────────────────────────────────────────────────────────
+//  After guests leave, a table is set to "Cleaning" status.
+//  This means the table is NOT yet ready for new guests —
+//  staff are currently cleaning it (wiping, resetting).
+//  Once cleaned, staff tap "Mark as Available" and the table
+//  goes back to green (Available) so new guests can be seated.
+//
+//  This prevents accidentally seating new guests at a dirty table.
+// ══════════════════════════════════════════════════════════════
 class CleaningSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const CleaningSection({
-    super.key,
-    required this.table,
-    required this.prov,
-  });
+  const CleaningSection({super.key, required this.table, required this.prov});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Cleaning status banner ───────────────────────
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -591,6 +793,7 @@ class CleaningSection extends StatelessWidget {
             border: Border.all(color: TC.cleaning.withOpacity(0.2)),
           ),
           child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('🧹', style: TextStyle(fontSize: 28)),
               SizedBox(width: 14),
@@ -606,10 +809,15 @@ class CleaningSection extends StatelessWidget {
                         color: TC.cleaning,
                       ),
                     ),
-                    SizedBox(height: 3),
+                    SizedBox(height: 4),
                     Text(
-                      'Table will be available shortly',
-                      style: TextStyle(fontSize: 12, color: TC.textSec),
+                      'Staff are cleaning this table.\n'
+                      'Tap "Mark as Available" once it is clean and ready for new guests.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: TC.textSec,
+                        height: 1.4,
+                      ),
                     ),
                   ],
                 ),
@@ -617,7 +825,38 @@ class CleaningSection extends StatelessWidget {
             ],
           ),
         ),
+
+        // ── What does "cleaning" mean? ───────────────────
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('ℹ️', style: TextStyle(fontSize: 13)),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '"Cleaning" status is automatically set when a table is cleared after '
+                  'guests leave. It prevents new guests from being seated at a dirty table. '
+                  'Tap the button below once the table is wiped and reset.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: TC.textSec,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 16),
+        // ── Mark available button ────────────────────────
         SizedBox(
           width: double.infinity,
           child: ActionBtn(

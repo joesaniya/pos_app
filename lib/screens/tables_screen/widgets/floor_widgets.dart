@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
+import 'package:pos_app/screens/tables_screen/widgets/seated_duration_timer.dart'; // ← NEW
 
 
 // ═════════════════════════════════════════════════════════════
@@ -30,7 +31,11 @@ class TableHeader extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(Icons.table_bar_rounded, color: Colors.white, size: 22),
+            child: const Icon(
+              Icons.table_bar_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -54,30 +59,94 @@ class TableHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (prov.totalReserved > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: TC.reservedBg,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: TC.reserved.withOpacity(0.3)),
-              ),
-              child: Row(
+          // ── Today / Tomorrow quick counts ───────────────
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (prov.totalReserved > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: TC.reservedBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: TC.reserved.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('📅', style: TextStyle(fontSize: 12)),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${prov.totalReserved} reserved',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: TC.reserved,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('📅', style: TextStyle(fontSize: 13)),
+                  _MiniDayBadge(
+                    label: 'Today',
+                    count: prov.todayReservationCount,
+                    color: TC.accent,
+                    bg: TC.accentLight,
+                  ),
                   const SizedBox(width: 5),
-                  Text(
-                    '${prov.totalReserved} reserved',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: TC.reserved,
-                    ),
+                  _MiniDayBadge(
+                    label: 'Tmrw',
+                    count: prov.tomorrowReservationCount,
+                    color: TC.reserved,
+                    bg: TC.reservedBg,
                   ),
                 ],
               ),
-            ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _MiniDayBadge extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color, bg;
+
+  const _MiniDayBadge({
+    required this.label,
+    required this.count,
+    required this.color,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: count > 0 ? bg : TC.surfaceWarm,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(
+          color: count > 0 ? color.withOpacity(0.3) : TC.border,
+        ),
+      ),
+      child: Text(
+        '$label: $count',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: count > 0 ? color : TC.textMute,
+        ),
       ),
     );
   }
@@ -163,6 +232,50 @@ class EndingSoonBanner extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  NEW: LONG-SEATED BANNER
+// ─────────────────────────────────────────────────────────────
+class LongSeatedBanner extends StatelessWidget {
+  final TablesProvider prov;
+  const LongSeatedBanner({super.key, required this.prov});
+
+  @override
+  Widget build(BuildContext context) {
+    final long = prov.longSeatedTables;
+    if (long.isEmpty) return const SizedBox.shrink();
+
+    final names = long.map((t) => t.tableName).join(', ');
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: TC.nonAcBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TC.nonAcAmber.withOpacity(0.5)),
+      ),
+      child: Row(
+        children: [
+          const Text('⏱️', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${long.length} table${long.length > 1 ? 's' : ''} seated 2h+: $names',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: TC.nonAcAmber,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ═════════════════════════════════════════════════════════════
 //  SUMMARY BAR
 // ═════════════════════════════════════════════════════════════
@@ -178,9 +291,24 @@ class SummaryBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
         children: [
-          MetricPill(emoji: '✅', label: 'Available', value: '${prov.totalAvailable}', color: TC.available),
-          MetricPill(emoji: '🍽️', label: 'Occupied', value: '${prov.totalOccupied}', color: TC.occupied),
-          MetricPill(emoji: '📅', label: 'Reserved', value: '${prov.totalReserved}', color: TC.reserved),
+          MetricPill(
+            emoji: '✅',
+            label: 'Available',
+            value: '${prov.totalAvailable}',
+            color: TC.available,
+          ),
+          MetricPill(
+            emoji: '🍽️',
+            label: 'Occupied',
+            value: '${prov.totalOccupied}',
+            color: TC.occupied,
+          ),
+          MetricPill(
+            emoji: '📅',
+            label: 'Reserved',
+            value: '${prov.totalReserved}',
+            color: TC.reserved,
+          ),
           MetricPill(
             emoji: '🧹',
             label: 'Cleaning',
@@ -190,7 +318,15 @@ class SummaryBar extends StatelessWidget {
           MetricPill(
             emoji: '📊',
             label: 'Occupancy',
-            value: '${(prov.occupancyRate * 100).toStringAsFixed(0)}%',
+            value:
+                '${(prov.occupancyRate * 100).toStringAsFixed(0)}%',
+            color: TC.accent,
+          ),
+          // ── NEW: Today's bookings metric ──────────────
+          MetricPill(
+            emoji: '☀️',
+            label: 'Today',
+            value: '${prov.todayReservationCount}',
             color: TC.accent,
           ),
         ],
@@ -220,7 +356,11 @@ class MetricPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: TC.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
@@ -243,7 +383,11 @@ class MetricPill extends StatelessWidget {
               ),
               Text(
                 label,
-                style: const TextStyle(fontSize: 10, color: TC.textSec, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: TC.textSec,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -275,8 +419,9 @@ class SectionTabs extends StatelessWidget {
           final label = s == null ? 'All Floors' : s.label;
           final floor = s == null ? '' : ' · ${s.floor}';
           final color = s == null ? TC.accent : sectionColor(s);
-          final count =
-              s != null ? prov.allTables.where((t) => t.section == s).length : null;
+          final count = s != null
+              ? prov.allTables.where((t) => t.section == s).length
+              : null;
 
           return Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -284,7 +429,10 @@ class SectionTabs extends StatelessWidget {
               onTap: () => prov.setSection(s),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: isSel ? color : Colors.transparent,
                   borderRadius: BorderRadius.circular(20),
@@ -311,9 +459,14 @@ class SectionTabs extends StatelessWidget {
                     if (count != null) ...[
                       const SizedBox(width: 5),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
-                          color: isSel ? Colors.white.withOpacity(0.25) : TC.border,
+                          color: isSel
+                              ? Colors.white.withOpacity(0.25)
+                              : TC.border,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
@@ -368,14 +521,18 @@ class StatusFilterRow extends StatelessWidget {
               onTap: () => prov.setStatus(s),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: isSel
                       ? (s == null ? TC.textPri : statusBg(s))
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSel ? (s == null ? TC.textPri : color) : TC.border,
+                    color:
+                        isSel ? (s == null ? TC.textPri : color) : TC.border,
                   ),
                 ),
                 child: Text(
@@ -383,7 +540,9 @@ class StatusFilterRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: isSel ? (s == null ? Colors.white : color) : TC.textMute,
+                    color: isSel
+                        ? (s == null ? Colors.white : color)
+                        : TC.textMute,
                   ),
                 ),
               ),

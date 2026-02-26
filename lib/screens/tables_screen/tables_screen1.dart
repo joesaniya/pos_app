@@ -9,6 +9,7 @@ import 'package:pos_app/screens/tables_screen/widgets/view_toggle_widgets.dart';
 import 'package:provider/provider.dart';
 import 'widgets/floor_widgets.dart';
 import 'widgets/shared_widgets.dart';
+import 'widgets/today_reservations_widget.dart';   // ← NEW
 import 'views/table_calendar_view.dart';
 
 // ═════════════════════════════════════════════════════════════
@@ -52,7 +53,10 @@ class _TablesBodyState extends State<_TablesBody> {
                 children: [
                   CircularProgressIndicator(color: TC.accent),
                   const SizedBox(height: 16),
-                  const Text('Loading tables…', style: TextStyle(color: TC.textSec)),
+                  const Text(
+                    'Loading tables…',
+                    style: TextStyle(color: TC.textSec),
+                  ),
                 ],
               ),
             ),
@@ -61,9 +65,10 @@ class _TablesBodyState extends State<_TablesBody> {
 
         return Scaffold(
           backgroundColor: TC.bg,
-          floatingActionButton: _currentView == TabView.floor && prov.canManageTables
-              ? AddTableFAB(onTap: () => _openAddTable(ctx, prov))
-              : null,
+          floatingActionButton:
+              _currentView == TabView.floor && prov.canManageTables
+                  ? AddTableFAB(onTap: () => _openAddTable(ctx, prov))
+                  : null,
           body: SafeArea(
             child: RefreshIndicator(
               color: TC.accent,
@@ -82,6 +87,8 @@ class _TablesBodyState extends State<_TablesBody> {
                   ),
                   UpcomingBanner(prov: prov),
                   EndingSoonBanner(prov: prov),
+                  // ── NEW: long-seated alert banner ─────────────
+                  LongSeatedBanner(prov: prov),
                   Expanded(
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 250),
@@ -100,6 +107,12 @@ class _TablesBodyState extends State<_TablesBody> {
                             key: const ValueKey('tables'),
                             children: [
                               SummaryBar(prov: prov),
+                              // ── NEW: Today/Tomorrow strip ─────
+                              TodayReservationStrip(
+                                prov: prov,
+                                onViewAll: () =>
+                                    _openTodayReservations(ctx, prov),
+                              ),
                               SectionTabs(prov: prov),
                               StatusFilterRow(prov: prov),
                               Expanded(
@@ -137,6 +150,18 @@ class _TablesBodyState extends State<_TablesBody> {
       builder: (_) => ChangeNotifierProvider.value(
         value: prov,
         child: AddEditTableSheet(provider: prov),
+      ),
+    );
+  }
+
+  void _openTodayReservations(BuildContext ctx, TablesProvider prov) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: prov,
+        child: TodayReservationsSheet(prov: prov),
       ),
     );
   }

@@ -4,6 +4,7 @@ import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 import 'package:provider/provider.dart';
 import '../widgets/shared_widgets.dart';
+import '../widgets/seated_duration_timer.dart';   // ← NEW
 import 'reservation_sheet.dart';
 import 'add_edit_table_sheet.dart';
 
@@ -37,7 +38,10 @@ class TableDetailSheet extends StatelessWidget {
               width: 36,
               height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 4),
-              decoration: BoxDecoration(color: TC.border, borderRadius: BorderRadius.circular(2)),
+              decoration: BoxDecoration(
+                color: TC.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -67,33 +71,48 @@ class TableDetailSheet extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            if (table.isPremium) const Text('⭐', style: TextStyle(fontSize: 14)),
+                            if (table.isPremium)
+                              const Text('⭐', style: TextStyle(fontSize: 14)),
                           ],
                         ),
                         const SizedBox(height: 3),
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: secBg,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 '${table.section.emoji} ${table.section.label}',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: secCol),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: secCol,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 6),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: sb,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 table.status.label,
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: sc),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: sc,
+                                ),
                               ),
                             ),
                           ],
@@ -111,7 +130,10 @@ class TableDetailSheet extends StatelessWidget {
                           backgroundColor: Colors.transparent,
                           builder: (_) => ChangeNotifierProvider.value(
                             value: prov,
-                            child: AddEditTableSheet(provider: prov, editTable: table),
+                            child: AddEditTableSheet(
+                              provider: prov,
+                              editTable: table,
+                            ),
                           ),
                         );
                       },
@@ -122,7 +144,11 @@ class TableDetailSheet extends StatelessWidget {
                           borderRadius: BorderRadius.circular(11),
                           border: Border.all(color: TC.border),
                         ),
-                        child: const Icon(Icons.edit_outlined, size: 18, color: TC.textSec),
+                        child: const Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: TC.textSec,
+                        ),
                       ),
                     ),
                 ],
@@ -136,11 +162,23 @@ class TableDetailSheet extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      InfoTile(label: 'Capacity', value: '${table.capacity} seats', emoji: '👥'),
+                      InfoTile(
+                        label: 'Capacity',
+                        value: '${table.capacity} seats',
+                        emoji: '👥',
+                      ),
                       const SizedBox(width: 10),
-                      InfoTile(label: 'Floor', value: table.section.floor, emoji: '🏢'),
+                      InfoTile(
+                        label: 'Floor',
+                        value: table.section.floor,
+                        emoji: '🏢',
+                      ),
                       const SizedBox(width: 10),
-                      InfoTile(label: 'Shape', value: table.shape.name.capitalize(), emoji: '⬜'),
+                      InfoTile(
+                        label: 'Shape',
+                        value: table.shape.name.capitalize(),
+                        emoji: '⬜',
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -163,12 +201,16 @@ class TableDetailSheet extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  STATUS SECTIONS
+//  OCCUPIED SECTION  (now with live seated duration timer)
 // ─────────────────────────────────────────────────────────────
 class OccupiedSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const OccupiedSection({super.key, required this.table, required this.prov});
+  const OccupiedSection({
+    super.key,
+    required this.table,
+    required this.prov,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -176,6 +218,18 @@ class OccupiedSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SheetSection('Current Occupancy'),
+
+        // ── Live seated duration timer ───────────────────
+        if (table.occupiedSince != null) ...[
+          SeatedDurationTimer(
+            occupiedSince: table.occupiedSince,
+            showWarning: true,
+            warningMinutes: 90,
+            dangerMinutes: 150,
+          ),
+          const SizedBox(height: 12),
+        ],
+
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -185,17 +239,40 @@ class OccupiedSection extends StatelessWidget {
           ),
           child: Column(
             children: [
-              DetailRow(icon: '👤', label: 'Customer', value: table.currentCustomerName ?? '—'),
+              DetailRow(
+                icon: '👤',
+                label: 'Customer',
+                value: table.currentCustomerName ?? '—',
+              ),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '🧾', label: 'Order', value: table.currentOrderId ?? '—'),
+              DetailRow(
+                icon: '🧾',
+                label: 'Order',
+                value: table.currentOrderId ?? '—',
+              ),
               const Divider(height: 20, color: TC.divider),
               DetailRow(
                 icon: '💰',
                 label: 'Bill so far',
-                value: table.currentOrderTotal != null ? '₹${table.currentOrderTotal!.toInt()}' : '—',
+                value: table.currentOrderTotal != null
+                    ? '₹${table.currentOrderTotal!.toInt()}'
+                    : '—',
               ),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '⏱️', label: 'Occupied for', value: table.occupiedDuration),
+              // ── Seated since timestamp ────────────────
+              if (table.occupiedSince != null) ...[
+                DetailRow(
+                  icon: '🕐',
+                  label: 'Seated since',
+                  value: _fmtTime(table.occupiedSince!),
+                ),
+                const Divider(height: 20, color: TC.divider),
+              ],
+              DetailRow(
+                icon: '⏱️',
+                label: 'Duration',
+                value: table.occupiedDuration,
+              ),
             ],
           ),
         ),
@@ -212,12 +289,27 @@ class OccupiedSection extends StatelessWidget {
       ],
     );
   }
+
+  String _fmtTime(DateTime dt) {
+    final h = dt.hour;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final suffix = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:$m $suffix';
+  }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  RESERVATION SECTION
+// ─────────────────────────────────────────────────────────────
 class ReservationSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const ReservationSection({super.key, required this.table, required this.prov});
+  const ReservationSection({
+    super.key,
+    required this.table,
+    required this.prov,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -237,17 +329,37 @@ class ReservationSection extends StatelessWidget {
             children: [
               DetailRow(icon: '👤', label: 'Guest', value: res.customerName),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '📱', label: 'Phone', value: res.phone ?? '—'),
+              DetailRow(
+                icon: '📱',
+                label: 'Phone',
+                value: res.phone ?? '—',
+              ),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '👥', label: 'Party size', value: '${res.guestCount} guests'),
+              DetailRow(
+                icon: '👥',
+                label: 'Party size',
+                value: '${res.guestCount} guests',
+              ),
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '🟢', label: 'Check-in', value: '${res.dateLabel} at ${res.timeLabel}'),
+              DetailRow(
+                icon: '🟢',
+                label: 'Check-in',
+                value: '${res.dateLabel} at ${res.timeLabel}',
+              ),
               if (res.checkOut != null) ...[
                 const Divider(height: 20, color: TC.divider),
-                DetailRow(icon: '🔴', label: 'Check-out', value: res.checkOutTimeLabel),
+                DetailRow(
+                  icon: '🔴',
+                  label: 'Check-out',
+                  value: res.checkOutTimeLabel,
+                ),
               ],
               const Divider(height: 20, color: TC.divider),
-              DetailRow(icon: '⏰', label: 'Arrives', value: res.countdownLabel),
+              DetailRow(
+                icon: '⏰',
+                label: 'Arrives',
+                value: res.countdownLabel,
+              ),
               if (res.notes != null && res.notes!.isNotEmpty) ...[
                 const Divider(height: 20, color: TC.divider),
                 DetailRow(icon: '📝', label: 'Notes', value: res.notes!),
@@ -297,7 +409,11 @@ class ReservationSection extends StatelessWidget {
                 backgroundColor: Colors.transparent,
                 builder: (_) => ChangeNotifierProvider.value(
                   value: prov,
-                  child: ReservationSheet(tableId: table.id, provider: prov, existing: res),
+                  child: ReservationSheet(
+                    tableId: table.id,
+                    provider: prov,
+                    existing: res,
+                  ),
                 ),
               );
             },
@@ -312,10 +428,14 @@ class ReservationSection extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: TC.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           'Cancel Reservation?',
-          style: TextStyle(fontWeight: FontWeight.w800, color: TC.textPri),
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: TC.textPri,
+          ),
         ),
         content: Text(
           'The reservation for ${table.reservation?.customerName} will be removed.',
@@ -324,7 +444,10 @@ class ReservationSection extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Keep', style: TextStyle(color: TC.textSec)),
+            child: const Text(
+              'Keep',
+              style: TextStyle(color: TC.textSec),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -335,7 +458,9 @@ class ReservationSection extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFDC2626),
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
             child: const Text('Cancel'),
           ),
@@ -345,10 +470,17 @@ class ReservationSection extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  AVAILABLE SECTION
+// ─────────────────────────────────────────────────────────────
 class AvailableSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const AvailableSection({super.key, required this.table, required this.prov});
+  const AvailableSection({
+    super.key,
+    required this.table,
+    required this.prov,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -372,7 +504,11 @@ class AvailableSection extends StatelessWidget {
                   children: [
                     Text(
                       'Table is Ready',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: TC.available),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: TC.available,
+                      ),
                     ),
                     SizedBox(height: 3),
                     Text(
@@ -402,7 +538,10 @@ class AvailableSection extends StatelessWidget {
                     backgroundColor: Colors.transparent,
                     builder: (_) => ChangeNotifierProvider.value(
                       value: prov,
-                      child: ReservationSheet(tableId: table.id, provider: prov),
+                      child: ReservationSheet(
+                        tableId: table.id,
+                        provider: prov,
+                      ),
                     ),
                   );
                 },
@@ -427,10 +566,17 @@ class AvailableSection extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  CLEANING SECTION
+// ─────────────────────────────────────────────────────────────
 class CleaningSection extends StatelessWidget {
   final RestaurantTable table;
   final TablesProvider prov;
-  const CleaningSection({super.key, required this.table, required this.prov});
+  const CleaningSection({
+    super.key,
+    required this.table,
+    required this.prov,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -454,7 +600,11 @@ class CleaningSection extends StatelessWidget {
                   children: [
                     Text(
                       'Being Cleaned',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: TC.cleaning),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: TC.cleaning,
+                      ),
                     ),
                     SizedBox(height: 3),
                     Text(

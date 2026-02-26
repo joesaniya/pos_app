@@ -1,17 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 🔐 Permissions — ADD HERE -->
+    <!-- 🔐 INTERNET -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <!-- For Android 12 and below -->
+    <!-- 📦 Storage / Media -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- For Android 13+ (API 33+) -->
     <uses-permission
         android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <!-- 🔔 Local Notifications / Alarms -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
+    <!-- Exact alarm permissions -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 
     <application
         android:label="pos_app"

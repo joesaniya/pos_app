@@ -5,7 +5,7 @@ import 'package:pos_app/providers/tables_provider.dart';
 import 'package:provider/provider.dart';
 
 // ═══════════════════════════════════════════════════════════════
-//  DESIGN TOKENS  —  warm cream / terracotta / forest green
+//  DESIGN TOKENS
 // ═══════════════════════════════════════════════════════════════
 class TC {
   static const bg = Color(0xFFFAF8F4);
@@ -102,6 +102,11 @@ Color _statusBg(TableStatus s) {
 }
 
 // ═════════════════════════════════════════════════════════════
+//  VIEW ENUM
+// ═════════════════════════════════════════════════════════════
+enum _TabView { floor, calendar, history }
+
+// ═════════════════════════════════════════════════════════════
 //  ENTRY POINT
 // ═════════════════════════════════════════════════════════════
 class TablesScreen extends StatelessWidget {
@@ -125,37 +130,14 @@ class _TablesBody extends StatefulWidget {
   State<_TablesBody> createState() => _TablesBodyState();
 }
 
-class _TablesBodyState extends State<_TablesBody>
-    with SingleTickerProviderStateMixin {
-  bool _calendarMode = false;
-  late final AnimationController _toggleAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _toggleAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 220),
-    );
-  }
-
-  @override
-  void dispose() {
-    _toggleAnim.dispose();
-    super.dispose();
-  }
-
-  void _switchMode(bool toCalendar) {
-    setState(() => _calendarMode = toCalendar);
-    toCalendar ? _toggleAnim.forward() : _toggleAnim.reverse();
-  }
+class _TablesBodyState extends State<_TablesBody> {
+  _TabView _currentView = _TabView.floor;
 
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return Consumer<TablesProvider>(
       builder: (ctx, prov, _) {
-        // Show full-screen loader on first fetch
         if (prov.isLoading && prov.allTables.isEmpty) {
           return Scaffold(
             backgroundColor: TC.bg,
@@ -177,11 +159,10 @@ class _TablesBodyState extends State<_TablesBody>
 
         return Scaffold(
           backgroundColor: TC.bg,
-          floatingActionButton: _calendarMode
-              ? null
-              : (prov.canManageTables
-                    ? _AddTableFAB(onTap: () => _openAddTable(ctx, prov))
-                    : null),
+          floatingActionButton:
+              _currentView == _TabView.floor && prov.canManageTables
+              ? _AddTableFAB(onTap: () => _openAddTable(ctx, prov))
+              : null,
           body: SafeArea(
             child: RefreshIndicator(
               color: TC.accent,
@@ -190,11 +171,16 @@ class _TablesBodyState extends State<_TablesBody>
                 children: [
                   _Header(prov: prov),
                   _ViewToggle(
-                    isCalendar: _calendarMode,
-                    onChanged: _switchMode,
+                    current: _currentView,
+                    onChanged: (v) {
+                      setState(() => _currentView = v);
+                      if (v == _TabView.history) {
+                        prov.loadHistory(reset: true);
+                      }
+                    },
                   ),
-                  // Upcoming soon banner
                   _UpcomingBanner(prov: prov),
+                  _EndingSoonBanner(prov: prov),
                   Expanded(
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 250),
@@ -208,24 +194,29 @@ class _TablesBodyState extends State<_TablesBody>
                           child: child,
                         ),
                       ),
-                      child: _calendarMode
-                          ? _CalendarView(
-                              key: const ValueKey('cal'),
-                              prov: prov,
-                            )
-                          : Column(
-                              key: const ValueKey('tables'),
-                              children: [
-                                _SummaryBar(prov: prov),
-                                _SectionTabs(prov: prov),
-                                _StatusFilterRow(prov: prov),
-                                Expanded(
-                                  child: prov.filteredTables.isEmpty
-                                      ? const _EmptyState()
-                                      : _TableGrid(prov: prov),
-                                ),
-                              ],
+                      child: switch (_currentView) {
+                        _TabView.floor => Column(
+                          key: const ValueKey('tables'),
+                          children: [
+                            _SummaryBar(prov: prov),
+                            _SectionTabs(prov: prov),
+                            _StatusFilterRow(prov: prov),
+                            Expanded(
+                              child: prov.filteredTables.isEmpty
+                                  ? const _EmptyState()
+                                  : _TableGrid(prov: prov),
                             ),
+                          ],
+                        ),
+                        _TabView.calendar => _CalendarView(
+                          key: const ValueKey('cal'),
+                          prov: prov,
+                        ),
+                        _TabView.history => _HistoryView(
+                          key: const ValueKey('history'),
+                          prov: prov,
+                        ),
+                      },
                     ),
                   ),
                 ],
@@ -251,7 +242,7 @@ class _TablesBodyState extends State<_TablesBody>
 }
 
 // ─────────────────────────────────────────────────────────────
-//  UPCOMING BANNER  — shows if reservations arriving in 30 min
+//  UPCOMING BANNER
 // ─────────────────────────────────────────────────────────────
 class _UpcomingBanner extends StatelessWidget {
   final TablesProvider prov;
@@ -266,7 +257,7 @@ class _UpcomingBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF4DC),
+        color: TC.nonAcBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TC.nonAcAmber.withOpacity(0.4)),
       ),
@@ -284,14 +275,43 @@ class _UpcomingBanner extends StatelessWidget {
               ),
             ),
           ),
-          GestureDetector(
-            onTap: () {},
-            child: const Text(
-              'View →',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: TC.nonAcAmber,
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  ENDING SOON BANNER  — 15-min checkout warning
+// ─────────────────────────────────────────────────────────────
+class _EndingSoonBanner extends StatelessWidget {
+  final TablesProvider prov;
+  const _EndingSoonBanner({required this.prov});
+
+  @override
+  Widget build(BuildContext context) {
+    final ending = prov.endingSoonTables;
+    if (ending.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: TC.occupiedBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TC.occupied.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Text('🔔', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${ending.length} reservation${ending.length > 1 ? 's' : ''} ending within 15 minutes',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: TC.occupied,
               ),
             ),
           ),
@@ -348,7 +368,7 @@ class _Header extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${prov.totalTables} tables · ${prov.totalAvailable} available now'
+                  '${prov.totalTables} tables · ${prov.totalAvailable} available'
                   '${prov.currentBusinessName.isNotEmpty ? ' · ${prov.currentBusinessName}' : ''}',
                   style: const TextStyle(fontSize: 12, color: TC.textSec),
                 ),
@@ -385,12 +405,12 @@ class _Header extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  VIEW TOGGLE
+//  VIEW TOGGLE  (3 tabs)
 // ═════════════════════════════════════════════════════════════
 class _ViewToggle extends StatelessWidget {
-  final bool isCalendar;
-  final ValueChanged<bool> onChanged;
-  const _ViewToggle({required this.isCalendar, required this.onChanged});
+  final _TabView current;
+  final ValueChanged<_TabView> onChanged;
+  const _ViewToggle({required this.current, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -407,16 +427,22 @@ class _ViewToggle extends StatelessWidget {
         child: Row(
           children: [
             _ToggleTab(
-              label: 'Floor View',
+              label: 'Floor',
               icon: Icons.grid_view_rounded,
-              selected: !isCalendar,
-              onTap: () => onChanged(false),
+              selected: current == _TabView.floor,
+              onTap: () => onChanged(_TabView.floor),
             ),
             _ToggleTab(
               label: 'Calendar',
               icon: Icons.calendar_month_rounded,
-              selected: isCalendar,
-              onTap: () => onChanged(true),
+              selected: current == _TabView.calendar,
+              onTap: () => onChanged(_TabView.calendar),
+            ),
+            _ToggleTab(
+              label: 'History',
+              icon: Icons.history_rounded,
+              selected: current == _TabView.history,
+              onTap: () => onChanged(_TabView.history),
             ),
           ],
         ),
@@ -460,12 +486,12 @@ class _ToggleTab extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 15, color: selected ? TC.accent : TC.textMute),
-              const SizedBox(width: 6),
+              Icon(icon, size: 14, color: selected ? TC.accent : TC.textMute),
+              const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: selected ? TC.accent : TC.textMute,
                 ),
@@ -518,7 +544,6 @@ class _SummaryBar extends StatelessWidget {
                 '${prov.allTables.where((t) => t.status == TableStatus.cleaning).length}',
             color: TC.cleaning,
           ),
-          // Occupancy % pill
           _MetricPill(
             emoji: '📊',
             label: 'Occupancy',
@@ -614,12 +639,9 @@ class _SectionTabs extends StatelessWidget {
           final label = s == null ? 'All Floors' : s.label;
           final floor = s == null ? '' : ' · ${s.floor}';
           final color = s == null ? TC.accent : _sectionColor(s);
-
-          // Count badge
-          int? count;
-          if (s != null) {
-            count = prov.allTables.where((t) => t.section == s).length;
-          }
+          final count = s != null
+              ? prov.allTables.where((t) => t.section == s).length
+              : null;
 
           return Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -901,12 +923,13 @@ class _TableCard extends StatelessWidget {
     final secCol = _sectionColor(table.section);
     final isActive = table.status == TableStatus.occupied;
 
-    // Highlight if reservation arriving soon
     final isSoon =
         table.status == TableStatus.reserved &&
         table.reservation != null &&
         table.reservation!.reservedFor.difference(DateTime.now()).inMinutes <=
             30;
+
+    final isEndingSoon = table.reservation?.isEndingSoon ?? false;
 
     return GestureDetector(
       onTap: onTap,
@@ -915,10 +938,12 @@ class _TableCard extends StatelessWidget {
           color: TC.surface,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: isSoon
+            color: isEndingSoon
+                ? TC.occupied.withOpacity(0.5)
+                : isSoon
                 ? TC.nonAcAmber.withOpacity(0.5)
                 : (isActive ? sc.withOpacity(0.3) : TC.border),
-            width: (isSoon || isActive) ? 1.5 : 1,
+            width: (isSoon || isActive || isEndingSoon) ? 1.5 : 1,
           ),
           boxShadow: [
             BoxShadow(
@@ -958,7 +983,6 @@ class _TableCard extends StatelessWidget {
                   child: const Text('🪟', style: TextStyle(fontSize: 10)),
                 ),
               ),
-            // Soon badge
             if (isSoon)
               Positioned(
                 top: 10,
@@ -969,7 +993,7 @@ class _TableCard extends StatelessWidget {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF4DC),
+                    color: TC.nonAcBg,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: TC.nonAcAmber.withOpacity(0.5)),
                   ),
@@ -983,7 +1007,30 @@ class _TableCard extends StatelessWidget {
                   ),
                 ),
               ),
-
+            if (isEndingSoon)
+              Positioned(
+                top: 10,
+                left: 14,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: TC.occupiedBg,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: TC.occupied.withOpacity(0.5)),
+                  ),
+                  child: Text(
+                    'Ending',
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: TC.occupied,
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -1083,6 +1130,14 @@ class _TableCard extends StatelessWidget {
                       text: table.reservation?.countdownLabel ?? '',
                       color: TC.reserved,
                     ),
+                    if (table.reservation?.checkOut != null) ...[
+                      const SizedBox(height: 3),
+                      _CardInfoRow(
+                        icon: Icons.logout_outlined,
+                        text: 'Out: ${table.reservation!.checkOutTimeLabel}',
+                        color: TC.textSec,
+                      ),
+                    ],
                   ] else if (table.status == TableStatus.available) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1126,8 +1181,6 @@ class _TableCard extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Section color strip
             Positioned(
               left: 0,
               top: 18,
@@ -1271,13 +1324,6 @@ class _CalendarViewState extends State<_CalendarView> {
     );
   }
 
-  void _prevMonth() => setState(
-    () => _displayMonth = DateTime(_displayMonth.year, _displayMonth.month - 1),
-  );
-  void _nextMonth() => setState(
-    () => _displayMonth = DateTime(_displayMonth.year, _displayMonth.month + 1),
-  );
-
   @override
   Widget build(BuildContext context) {
     final reservedDates = _reservedDates;
@@ -1305,7 +1351,6 @@ class _CalendarViewState extends State<_CalendarView> {
             ),
             child: Column(
               children: [
-                // Month nav
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 16, 12, 8),
                   child: Row(
@@ -1369,17 +1414,26 @@ class _CalendarViewState extends State<_CalendarView> {
                         ),
                       _NavArrow(
                         icon: Icons.chevron_left_rounded,
-                        onTap: _prevMonth,
+                        onTap: () => setState(
+                          () => _displayMonth = DateTime(
+                            _displayMonth.year,
+                            _displayMonth.month - 1,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 4),
                       _NavArrow(
                         icon: Icons.chevron_right_rounded,
-                        onTap: _nextMonth,
+                        onTap: () => setState(
+                          () => _displayMonth = DateTime(
+                            _displayMonth.year,
+                            _displayMonth.month + 1,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                // Day labels
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
@@ -1408,10 +1462,7 @@ class _CalendarViewState extends State<_CalendarView> {
             ),
           ),
         ),
-
         const SizedBox(height: 14),
-
-        // Selected date header
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(
@@ -1484,9 +1535,7 @@ class _CalendarViewState extends State<_CalendarView> {
             ],
           ),
         ),
-
         const SizedBox(height: 10),
-
         Expanded(
           child: todayRes.isEmpty
               ? _CalendarEmptyDay(date: _selectedDate, todayDate: todayDate)
@@ -1598,13 +1647,15 @@ class _CalendarViewState extends State<_CalendarView> {
   }
 
   void _openAddReservation(BuildContext context) {
-    final availTables = widget.prov.allTables
-        .where((t) => t.status == TableStatus.available)
+    // Show ALL tables — time-slot booking means any table can be reserved
+    // for a non-overlapping window even if currently marked reserved/occupied
+    final allTables = widget.prov.allTables
+        .where((t) => t.status != TableStatus.cleaning)
         .toList();
-    if (availTables.isEmpty) {
+    if (allTables.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No available tables to reserve'),
+          content: Text('No tables available'),
           backgroundColor: TC.occupied,
         ),
       );
@@ -1618,7 +1669,7 @@ class _CalendarViewState extends State<_CalendarView> {
         value: widget.prov,
         child: _CalendarReserveSheet(
           provider: widget.prov,
-          availableTables: availTables,
+          availableTables: allTables,
           initialDate: _selectedDate,
         ),
       ),
@@ -1654,7 +1705,6 @@ class _CalendarViewState extends State<_CalendarView> {
   ][m];
 }
 
-// ── Nav Arrow ───────────────────────────────────────────────
 class _NavArrow extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1677,6 +1727,856 @@ class _NavArrow extends StatelessWidget {
   }
 }
 
+// ═════════════════════════════════════════════════════════════
+//  HISTORY VIEW  — Professional redesign with stats + grouping
+// ═════════════════════════════════════════════════════════════
+class _HistoryView extends StatefulWidget {
+  final TablesProvider prov;
+  const _HistoryView({Key? key, required this.prov}) : super(key: key);
+
+  @override
+  State<_HistoryView> createState() => _HistoryViewState();
+}
+
+class _HistoryViewState extends State<_HistoryView> {
+  final _scrollCtrl = ScrollController();
+  DateTime _fromDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _toDate = DateTime.now().add(const Duration(days: 1));
+  String? _filterStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.prov.loadHistory(from: _fromDate, to: _toDate, reset: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >=
+        _scrollCtrl.position.maxScrollExtent - 200) {
+      if (!widget.prov.historyLoading && widget.prov.historyHasMore) {
+        widget.prov.loadHistory();
+      }
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 60)),
+      initialDateRange: DateTimeRange(start: _fromDate, end: _toDate),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: TC.accent,
+            onPrimary: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() {
+        _fromDate = picked.start;
+        _toDate = picked.end.add(const Duration(days: 1));
+      });
+      widget.prov.loadHistory(from: _fromDate, to: _toDate, reset: true);
+    }
+  }
+
+  // Group history items by date
+  Map<String, List<ReservationHistoryItem>> _groupByDate(
+    List<ReservationHistoryItem> items,
+  ) {
+    final map = <String, List<ReservationHistoryItem>>{};
+    for (final item in items) {
+      final key = _dayKey(item.reservedFor);
+      map.putIfAbsent(key, () => []).add(item);
+    }
+    return map;
+  }
+
+  String _dayKey(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d = DateTime(dt.year, dt.month, dt.day);
+    if (d == today) return 'Today';
+    if (d == today.subtract(const Duration(days: 1))) return 'Yesterday';
+    const m = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${m[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final history = widget.prov.history;
+    final filtered = _filterStatus == null
+        ? history
+        : history.where((h) => h.status == _filterStatus).toList();
+
+    // Stats from filtered list
+    final total = filtered.length;
+    final seated = filtered.where((h) => h.status == 'seated').length;
+    final cancelled = filtered.where((h) => h.status == 'cancelled').length;
+    final noshow = filtered.where((h) => h.status == 'noshow').length;
+    final active = filtered.where((h) => h.status == 'active').length;
+
+    final grouped = _groupByDate(filtered);
+    final dateKeys = grouped.keys.toList();
+
+    // Build flat list for ListView: date-header + cards
+    final flatItems = <dynamic>[];
+    for (final key in dateKeys) {
+      flatItems.add(key); // String = date header
+      flatItems.addAll(grouped[key]!);
+    }
+    if (widget.prov.historyHasMore) flatItems.add('__loader__');
+
+    return Column(
+      children: [
+        // ── Top controls ──────────────────────────────────────
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          decoration: BoxDecoration(
+            color: TC.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: TC.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              // Date range row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: _pickDateRange,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: TC.surfaceWarm,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: TC.border),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.calendar_month_rounded,
+                              size: 15,
+                              color: TC.accent,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${_fmtDate(_fromDate)} – ${_fmtDate(_toDate.subtract(const Duration(days: 1)))}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: TC.textPri,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.expand_more_rounded,
+                              size: 14,
+                              color: TC.textMute,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => widget.prov.loadHistory(
+                        from: _fromDate,
+                        to: _toDate,
+                        reset: true,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: TC.accentLight,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Icon(
+                          Icons.refresh_rounded,
+                          color: TC.accent,
+                          size: 17,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Filter chips
+              SizedBox(
+                height: 34,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+                  children: [
+                    _HChip(
+                      label: 'All',
+                      count: total,
+                      selected: _filterStatus == null,
+                      color: TC.textSec,
+                      onTap: () => setState(() => _filterStatus = null),
+                    ),
+                    _HChip(
+                      label: 'Active',
+                      count: active,
+                      selected: _filterStatus == 'active',
+                      color: TC.reserved,
+                      onTap: () => setState(() => _filterStatus = 'active'),
+                    ),
+                    _HChip(
+                      label: 'Seated',
+                      count: seated,
+                      selected: _filterStatus == 'seated',
+                      color: TC.available,
+                      onTap: () => setState(() => _filterStatus = 'seated'),
+                    ),
+                    _HChip(
+                      label: 'Cancelled',
+                      count: cancelled,
+                      selected: _filterStatus == 'cancelled',
+                      color: TC.occupied,
+                      onTap: () => setState(() => _filterStatus = 'cancelled'),
+                    ),
+                    _HChip(
+                      label: 'No-show',
+                      count: noshow,
+                      selected: _filterStatus == 'noshow',
+                      color: TC.cleaning,
+                      onTap: () => setState(() => _filterStatus = 'noshow'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // ── Stats Row ─────────────────────────────────────────
+        if (filtered.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                _StatPill(label: 'Total', value: '$total', color: TC.textSec),
+                const SizedBox(width: 8),
+                _StatPill(
+                  label: 'Seated',
+                  value: '$seated',
+                  color: TC.available,
+                ),
+                const SizedBox(width: 8),
+                _StatPill(
+                  label: 'Cancelled',
+                  value: '$cancelled',
+                  color: TC.occupied,
+                ),
+                const SizedBox(width: 8),
+                _StatPill(
+                  label: 'No-show',
+                  value: '$noshow',
+                  color: TC.cleaning,
+                ),
+              ],
+            ),
+          ),
+        // ── List ──────────────────────────────────────────────
+        Expanded(
+          child: flatItems.isEmpty && !widget.prov.historyLoading
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(22),
+                        decoration: const BoxDecoration(
+                          color: TC.surfaceWarm,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Text('📋', style: TextStyle(fontSize: 38)),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'No records found',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: TC.textPri,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      const Text(
+                        'Try a different date range or filter',
+                        style: TextStyle(fontSize: 12, color: TC.textSec),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scrollCtrl,
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                  itemCount: flatItems.length,
+                  itemBuilder: (ctx, i) {
+                    final item = flatItems[i];
+                    if (item == '__loader__') {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: TC.accent,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                      );
+                    }
+                    if (item is String) {
+                      // Date header
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 16, bottom: 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: TC.surfaceWarm,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: TC.border),
+                              ),
+                              child: Text(
+                                item,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: TC.textSec,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Container(height: 1, color: TC.divider),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${grouped[item]!.length}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: TC.textMute,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return _HistoryCard(item: item as ReservationHistoryItem);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  String _fmtDate(DateTime dt) {
+    const m = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${dt.day} ${m[dt.month - 1]}';
+  }
+}
+
+// Small stat pill for history header
+class _StatPill extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _StatPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: TC.textMute,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Filter chip with count badge
+class _HChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+  const _HChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+          decoration: BoxDecoration(
+            color: selected ? color.withOpacity(0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? color : TC.border,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? color : TC.textMute,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: selected ? color.withOpacity(0.18) : TC.surfaceWarm,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: selected ? color : TC.textMute,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryCard extends StatelessWidget {
+  final ReservationHistoryItem item;
+  const _HistoryCard({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = switch (item.status) {
+      'seated' => TC.available,
+      'cancelled' => TC.occupied,
+      'noshow' => TC.cleaning,
+      _ => TC.reserved,
+    };
+    final statusLabel = switch (item.status) {
+      'seated' => 'Seated',
+      'cancelled' => 'Cancelled',
+      'noshow' => 'No-show',
+      _ => 'Upcoming',
+    };
+    final statusIcon = switch (item.status) {
+      'seated' => Icons.check_circle_outline_rounded,
+      'cancelled' => Icons.cancel_outlined,
+      'noshow' => Icons.person_off_outlined,
+      _ => Icons.event_available_outlined,
+    };
+
+    final sectionEnum = TableSection.values.firstWhere(
+      (e) => e.name == item.section,
+      orElse: () => TableSection.ac,
+    );
+    final secColor = _sectionColor(sectionEnum);
+    final secBg = _sectionBg(sectionEnum);
+
+    // Time slot display
+    final inTime = _fmtTime(item.reservedFor);
+    final outTime = item.checkOut != null ? _fmtTime(item.checkOut!) : null;
+    final slotLabel = outTime != null ? '$inTime → $outTime' : inTime;
+    final dur = item.checkOut != null
+        ? item.checkOut!.difference(item.reservedFor).inMinutes
+        : null;
+    final durLabel = dur != null
+        ? (dur >= 60
+              ? '${(dur / 60).toStringAsFixed(dur % 60 == 0 ? 0 : 1)}h'
+              : '${dur}m')
+        : null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: TC.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: TC.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            // ── Left time slot bar ───────────────────────────
+            Container(
+              width: 68,
+              decoration: BoxDecoration(
+                color: statusColor.withOpacity(0.07),
+                borderRadius: const BorderRadius.horizontal(
+                  left: Radius.circular(14),
+                ),
+                border: Border(
+                  right: BorderSide(color: statusColor.withOpacity(0.15)),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.schedule_rounded,
+                    size: 13,
+                    color: statusColor.withOpacity(0.8),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    inTime,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: statusColor,
+                      height: 1.2,
+                    ),
+                  ),
+                  if (outTime != null) ...[
+                    const SizedBox(height: 1),
+                    Icon(
+                      Icons.arrow_downward_rounded,
+                      size: 9,
+                      color: statusColor.withOpacity(0.5),
+                    ),
+                    Text(
+                      outTime,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: statusColor,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                  if (durLabel != null) ...[
+                    const SizedBox(height: 3),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.13),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        durLabel,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // ── Main content ─────────────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        // Table badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: secBg,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: secColor.withOpacity(0.25),
+                            ),
+                          ),
+                          child: Text(
+                            '${sectionEnum.emoji} T${item.tableNumber.toString().padLeft(2, '0')}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: secColor,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // Status badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(statusIcon, size: 10, color: statusColor),
+                              const SizedBox(width: 3),
+                              Text(
+                                statusLabel,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: statusColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                        // Guest count
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.people_outline,
+                              size: 11,
+                              color: TC.textMute,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${item.guestCount}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: TC.textSec,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      item.customerName,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: TC.textPri,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        if (item.phone != null) ...[
+                          const Icon(
+                            Icons.phone_outlined,
+                            size: 11,
+                            color: TC.textMute,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            item.phone!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: TC.textSec,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        const Icon(
+                          Icons.person_outline,
+                          size: 11,
+                          color: TC.textMute,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          item.createdByName,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: TC.textMute,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                    if (item.notes != null && item.notes!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.notes_rounded,
+                            size: 11,
+                            color: TC.textMute,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              item.notes!,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: TC.textSec,
+                                fontStyle: FontStyle.italic,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _fmtTime(DateTime dt) {
+    final h = dt.hour;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final s = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:$m $s';
+  }
+}
+
+class _HistBadge extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _HistBadge({required this.icon, required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 11, color: TC.textMute),
+        const SizedBox(width: 3),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 11,
+            color: TC.textSec,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 //  RESERVATION TIMELINE CARD
 // ─────────────────────────────────────────────────────────────
@@ -1693,17 +2593,22 @@ class _ReservationTimelineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final res = table.reservation!;
-    final sectionColor = _sectionColor(table.section);
-    final sectionBg = _sectionBg(table.section);
+    final secColor = _sectionColor(table.section);
+    final secBg = _sectionBg(table.section);
     final diff = res.reservedFor.difference(DateTime.now());
     final isOverdue = diff.isNegative;
     final isSoon = !isOverdue && diff.inMinutes <= 30;
-    final timeColor = isOverdue
+    final isEnding = res.isEndingSoon;
+    final timeColor = isEnding
+        ? TC.occupied
+        : isOverdue
         ? TC.occupied
         : isSoon
         ? const Color(0xFFB8730A)
         : TC.reserved;
-    final timeBg = isOverdue
+    final timeBg = isEnding
+        ? TC.occupiedBg
+        : isOverdue
         ? TC.occupiedBg
         : isSoon
         ? const Color(0xFFFFF4DC)
@@ -1717,8 +2622,10 @@ class _ReservationTimelineCard extends StatelessWidget {
           color: TC.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSoon ? timeColor.withOpacity(0.4) : TC.border,
-            width: isSoon ? 1.5 : 1,
+            color: (isSoon || isEnding)
+                ? timeColor.withOpacity(0.4)
+                : TC.border,
+            width: (isSoon || isEnding) ? 1.5 : 1,
           ),
           boxShadow: [
             BoxShadow(
@@ -1731,7 +2638,6 @@ class _ReservationTimelineCard extends StatelessWidget {
         child: IntrinsicHeight(
           child: Row(
             children: [
-              // Time column
               Container(
                 width: 72,
                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1762,10 +2668,20 @@ class _ReservationTimelineCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (res.checkOut != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        '→${res.checkOutTimeLabel}',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: timeColor.withOpacity(0.7),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              // Content
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
@@ -1790,10 +2706,10 @@ class _ReservationTimelineCard extends StatelessWidget {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: sectionBg,
+                              color: secBg,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: sectionColor.withOpacity(0.25),
+                                color: secColor.withOpacity(0.25),
                               ),
                             ),
                             child: Text(
@@ -1801,7 +2717,7 @@ class _ReservationTimelineCard extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
-                                color: sectionColor,
+                                color: secColor,
                               ),
                             ),
                           ),
@@ -1847,7 +2763,6 @@ class _ReservationTimelineCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Actions
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: Column(
@@ -1919,9 +2834,6 @@ class _ResBadge extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  CALENDAR EMPTY DAY
-// ─────────────────────────────────────────────────────────────
 class _CalendarEmptyDay extends StatelessWidget {
   final DateTime date, todayDate;
   const _CalendarEmptyDay({required this.date, required this.todayDate});
@@ -1986,15 +2898,19 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
   final _noteCtrl = TextEditingController();
   late String _tableId;
   int _guestCount = 2;
-  late DateTime _reservedFor;
+  late DateTime _checkIn;
+  DateTime? _checkOut;
   bool _isLoading = false;
+  bool _isChecking = false;
+  String? _availError;
 
   @override
   void initState() {
     super.initState();
     _tableId = widget.availableTables.first.id;
     final d = widget.initialDate;
-    _reservedFor = DateTime(d.year, d.month, d.day, DateTime.now().hour + 1, 0);
+    _checkIn = DateTime(d.year, d.month, d.day, DateTime.now().hour + 1, 0);
+    _checkOut = _checkIn.add(const Duration(hours: 2));
   }
 
   @override
@@ -2005,32 +2921,69 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
     super.dispose();
   }
 
-  Future<void> _pickTime() async {
+  Future<void> _pickTime(bool isCheckIn) async {
     final t = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(_reservedFor),
+      initialTime: TimeOfDay.fromDateTime(
+        isCheckIn ? _checkIn : (_checkOut ?? _checkIn),
+      ),
     );
-    if (t != null)
-      setState(
-        () => _reservedFor = DateTime(
-          _reservedFor.year,
-          _reservedFor.month,
-          _reservedFor.day,
-          t.hour,
-          t.minute,
-        ),
-      );
+    if (t != null) {
+      setState(() {
+        if (isCheckIn) {
+          _checkIn = DateTime(
+            _checkIn.year,
+            _checkIn.month,
+            _checkIn.day,
+            t.hour,
+            t.minute,
+          );
+        } else {
+          final base = _checkOut ?? _checkIn;
+          _checkOut = DateTime(
+            base.year,
+            base.month,
+            base.day,
+            t.hour,
+            t.minute,
+          );
+        }
+        _availError = null;
+      });
+    }
   }
 
-  Future<void> _submit() async {
+  Future<void> _checkAndSubmit() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _isChecking = true;
+      _availError = null;
+    });
+
+    final available = await widget.provider.checkAvailability(
+      tableId: _tableId,
+      checkIn: _checkIn,
+      checkOut: _checkOut ?? _checkIn.add(const Duration(hours: 2)),
+    );
+
+    setState(() => _isChecking = false);
+
+    if (!available) {
+      setState(
+        () => _availError =
+            'Table already booked for this time slot. Please choose another time.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     final res = Reservation(
       id: 'res_${DateTime.now().millisecondsSinceEpoch}',
       customerName: _nameCtrl.text.trim(),
       phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
       guestCount: _guestCount,
-      reservedFor: _reservedFor,
+      reservedFor: _checkIn,
+      checkOut: _checkOut,
       notes: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       createdAt: DateTime.now(),
     );
@@ -2077,7 +3030,7 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
-                      height: 48,
+                      height: 72,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: widget.availableTables.length,
@@ -2089,7 +3042,12 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                           return Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: GestureDetector(
-                              onTap: () => setState(() => _tableId = t.id),
+                              onTap: () {
+                                setState(() {
+                                  _tableId = t.id;
+                                  _availError = null;
+                                });
+                              },
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 150),
                                 padding: const EdgeInsets.symmetric(
@@ -2104,31 +3062,80 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                                     width: isSel ? 1.5 : 1,
                                   ),
                                 ),
-                                child: Row(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      t.section.emoji,
-                                      style: const TextStyle(fontSize: 14),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          t.section.emoji,
+                                          style: const TextStyle(fontSize: 14),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          t.tableName,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            color: isSel ? secCol : TC.textSec,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '· ${t.capacity}p',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isSel
+                                                ? secCol.withOpacity(0.7)
+                                                : TC.textMute,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      t.tableName,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w800,
-                                        color: isSel ? secCol : TC.textSec,
+                                    if (t.status == TableStatus.reserved &&
+                                        t.reservation != null) ...[
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.lock_clock_rounded,
+                                            size: 10,
+                                            color: TC.reserved.withOpacity(0.7),
+                                          ),
+                                          const SizedBox(width: 3),
+                                          Text(
+                                            '${t.reservation!.timeLabel}${t.reservation!.checkOut != null ? " – ${t.reservation!.checkOutTimeLabel}" : ""}',
+                                            style: const TextStyle(
+                                              fontSize: 9,
+                                              color: TC.reserved,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '· ${t.capacity}p',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: isSel
-                                            ? secCol.withOpacity(0.7)
-                                            : TC.textMute,
+                                    ] else if (t.status ==
+                                        TableStatus.occupied) ...[
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.restaurant_rounded,
+                                            size: 10,
+                                            color: TC.occupied.withOpacity(0.7),
+                                          ),
+                                          const SizedBox(width: 3),
+                                          const Text(
+                                            'Occupied now',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              color: TC.occupied,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -2146,65 +3153,167 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                           (v == null || v.isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: 12),
+                    _FormField(
+                      label: 'Phone',
+                      hint: '+91 98765...',
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                    ),
+                    const SizedBox(height: 12),
+                    // Check-in / Check-out row
                     Row(
                       children: [
                         Expanded(
-                          child: _FormField(
-                            label: 'Phone',
-                            hint: '+91 98765...',
-                            controller: _phoneCtrl,
-                            keyboardType: TextInputType.phone,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Check-in *',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: TC.textSec,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              GestureDetector(
+                                onTap: () => _pickTime(true),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 13,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: TC.surfaceWarm,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: TC.border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Text(
+                                        '🟢',
+                                        style: TextStyle(fontSize: 14),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _fmtTime(_checkIn),
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: TC.textPri,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Time *',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: TC.textSec,
-                                letterSpacing: 0.3,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Check-out',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: TC.textSec,
+                                  letterSpacing: 0.3,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 6),
-                            GestureDetector(
-                              onTap: _pickTime,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 13,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: TC.surfaceWarm,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: TC.border),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Text(
-                                      '🕐',
-                                      style: TextStyle(fontSize: 15),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _formatTime(_reservedFor),
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: TC.textPri,
+                              const SizedBox(height: 6),
+                              GestureDetector(
+                                onTap: () => _pickTime(false),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 13,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: TC.surfaceWarm,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: TC.border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Text(
+                                        '🔴',
+                                        style: TextStyle(fontSize: 14),
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _checkOut != null
+                                            ? _fmtTime(_checkOut!)
+                                            : 'Optional',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: _checkOut != null
+                                              ? TC.textPri
+                                              : TC.textMute,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Quick Duration',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: TC.textSec,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _DurationChips(
+                      checkIn: _checkIn,
+                      checkOut: _checkOut,
+                      onCheckOutChanged: (t) => setState(() {
+                        _checkOut = t;
+                        _availError = null;
+                      }),
+                    ),
+                    if (_availError != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: TC.occupiedBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: TC.occupied.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text('⚠️', style: TextStyle(fontSize: 14)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _availError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: TC.occupied,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     const Text(
                       'Party Size',
@@ -2260,7 +3369,9 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _submit,
+                        onPressed: (_isLoading || _isChecking)
+                            ? null
+                            : _checkAndSubmit,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: TC.accent,
                           foregroundColor: Colors.white,
@@ -2270,7 +3381,7 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                           ),
                           elevation: 0,
                         ),
-                        child: _isLoading
+                        child: (_isLoading || _isChecking)
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
@@ -2279,9 +3390,11 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text(
-                                'Confirm Reservation',
-                                style: TextStyle(
+                            : Text(
+                                _isChecking
+                                    ? 'Checking Availability...'
+                                    : 'Confirm Reservation',
+                                style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -2298,7 +3411,7 @@ class _CalendarReserveSheetState extends State<_CalendarReserveSheet> {
     );
   }
 
-  String _formatTime(DateTime dt) {
+  String _fmtTime(DateTime dt) {
     final h = dt.hour;
     final m = dt.minute.toString().padLeft(2, '0');
     final s = h >= 12 ? 'PM' : 'AM';
@@ -2597,10 +3710,18 @@ class _ReservationSection extends StatelessWidget {
               ),
               const Divider(height: 20, color: TC.divider),
               _DetailRow(
-                icon: '📅',
-                label: 'Scheduled',
+                icon: '🟢',
+                label: 'Check-in',
                 value: '${res.dateLabel} at ${res.timeLabel}',
               ),
+              if (res.checkOut != null) ...[
+                const Divider(height: 20, color: TC.divider),
+                _DetailRow(
+                  icon: '🔴',
+                  label: 'Check-out',
+                  value: res.checkOutTimeLabel,
+                ),
+              ],
               const Divider(height: 20, color: TC.divider),
               _DetailRow(
                 icon: '⏰',
@@ -2619,7 +3740,7 @@ class _ReservationSection extends StatelessWidget {
           children: [
             Expanded(
               child: _ActionBtn(
-                label: 'Cancel Reservation',
+                label: 'Cancel',
                 emoji: '✖️',
                 color: const Color(0xFFDC2626),
                 outlined: true,
@@ -2862,7 +3983,7 @@ class _CleaningSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  RESERVATION SHEET  (add / edit)
+//  RESERVATION SHEET  (add / edit) — enhanced with check-in/out
 // ─────────────────────────────────────────────────────────────
 class _ReservationSheet extends StatefulWidget {
   final String tableId;
@@ -2881,8 +4002,11 @@ class _ReservationSheetState extends State<_ReservationSheet> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameCtrl, _phoneCtrl, _notesCtrl;
   late int _guestCount;
-  late DateTime _reservedFor;
+  late DateTime _checkIn;
+  DateTime? _checkOut;
   bool _isLoading = false;
+  bool _isChecking = false;
+  String? _availError;
 
   bool get isEdit => widget.existing != null;
 
@@ -2894,11 +4018,12 @@ class _ReservationSheetState extends State<_ReservationSheet> {
     _phoneCtrl = TextEditingController(text: e?.phone ?? '');
     _notesCtrl = TextEditingController(text: e?.notes ?? '');
     _guestCount = e?.guestCount ?? 2;
-    _reservedFor =
+    _checkIn =
         e?.reservedFor ??
         DateTime.now()
             .add(const Duration(hours: 1))
             .copyWith(second: 0, microsecond: 0, millisecond: 0);
+    _checkOut = e?.checkOut ?? _checkIn.add(const Duration(hours: 2));
   }
 
   @override
@@ -2909,51 +4034,95 @@ class _ReservationSheetState extends State<_ReservationSheet> {
     super.dispose();
   }
 
-  Future<void> _pickTime() async {
+  Future<void> _pickTime(bool isCheckIn) async {
     final t = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(_reservedFor),
+      initialTime: TimeOfDay.fromDateTime(
+        isCheckIn ? _checkIn : (_checkOut ?? _checkIn),
+      ),
     );
     if (t != null)
-      setState(
-        () => _reservedFor = DateTime(
-          _reservedFor.year,
-          _reservedFor.month,
-          _reservedFor.day,
-          t.hour,
-          t.minute,
-        ),
-      );
+      setState(() {
+        if (isCheckIn) {
+          _checkIn = DateTime(
+            _checkIn.year,
+            _checkIn.month,
+            _checkIn.day,
+            t.hour,
+            t.minute,
+          );
+        } else {
+          final base = _checkOut ?? _checkIn;
+          _checkOut = DateTime(
+            base.year,
+            base.month,
+            base.day,
+            t.hour,
+            t.minute,
+          );
+        }
+        _availError = null;
+      });
   }
 
   Future<void> _pickDate() async {
     final d = await showDatePicker(
       context: context,
-      initialDate: _reservedFor,
+      initialDate: _checkIn,
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 60)),
     );
     if (d != null)
-      setState(
-        () => _reservedFor = DateTime(
+      setState(() {
+        _checkIn = DateTime(
           d.year,
           d.month,
           d.day,
-          _reservedFor.hour,
-          _reservedFor.minute,
-        ),
-      );
+          _checkIn.hour,
+          _checkIn.minute,
+        );
+        if (_checkOut != null)
+          _checkOut = DateTime(
+            d.year,
+            d.month,
+            d.day,
+            _checkOut!.hour,
+            _checkOut!.minute,
+          );
+      });
   }
 
-  Future<void> _submit() async {
+  Future<void> _checkAndSubmit() async {
     if (!_formKey.currentState!.validate()) return;
+    // Always check availability (time-slot logic: same table can be reserved
+    // for different non-overlapping time windows)
+    setState(() {
+      _isChecking = true;
+      _availError = null;
+    });
+    final available = await widget.provider.checkAvailability(
+      tableId: widget.tableId,
+      checkIn: _checkIn,
+      checkOut: _checkOut ?? _checkIn.add(const Duration(hours: 2)),
+      excludeReservationId: widget.existing?.id,
+    );
+    setState(() => _isChecking = false);
+    if (!available) {
+      setState(
+        () => _availError =
+            'This table already has a booking during that time. Choose a different slot.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     final res = Reservation(
       id: widget.existing?.id ?? 'res_${DateTime.now().millisecondsSinceEpoch}',
       customerName: _nameCtrl.text.trim(),
       phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
       guestCount: _guestCount,
-      reservedFor: _reservedFor,
+      reservedFor: _checkIn,
+      checkOut: _checkOut,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
       createdAt: widget.existing?.createdAt ?? DateTime.now(),
     );
@@ -3053,8 +4222,49 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                       }),
                     ),
                     const SizedBox(height: 14),
+                    // Date row
                     const Text(
-                      'Date & Time *',
+                      'Date *',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: TC.textSec,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _pickDate,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
+                        decoration: BoxDecoration(
+                          color: TC.surfaceWarm,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: TC.border),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text('📅', style: TextStyle(fontSize: 16)),
+                            const SizedBox(width: 8),
+                            Text(
+                              _formatDate(_checkIn),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: TC.textPri,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    // Check-in / Check-out times
+                    const Text(
+                      'Check-in & Check-out *',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -3067,7 +4277,7 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                       children: [
                         Expanded(
                           child: GestureDetector(
-                            onTap: _pickDate,
+                            onTap: () => _pickTime(true),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 14,
@@ -3081,17 +4291,30 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                               child: Row(
                                 children: [
                                   const Text(
-                                    '📅',
+                                    '🟢',
                                     style: TextStyle(fontSize: 16),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text(
-                                    _formatDate(_reservedFor),
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: TC.textPri,
-                                    ),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Check-in',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: TC.textMute,
+                                        ),
+                                      ),
+                                      Text(
+                                        _fmtTime(_checkIn),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: TC.textPri,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -3101,7 +4324,7 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: GestureDetector(
-                            onTap: _pickTime,
+                            onTap: () => _pickTime(false),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 14,
@@ -3115,17 +4338,34 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                               child: Row(
                                 children: [
                                   const Text(
-                                    '🕐',
+                                    '🔴',
                                     style: TextStyle(fontSize: 16),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text(
-                                    _formatTime(_reservedFor),
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: TC.textPri,
-                                    ),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Check-out',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: TC.textMute,
+                                        ),
+                                      ),
+                                      Text(
+                                        _checkOut != null
+                                            ? _fmtTime(_checkOut!)
+                                            : 'Optional',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: _checkOut != null
+                                              ? TC.textPri
+                                              : TC.textMute,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -3134,6 +4374,54 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Quick Duration',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: TC.textSec,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _DurationChips(
+                      checkIn: _checkIn,
+                      checkOut: _checkOut,
+                      onCheckOutChanged: (t) => setState(() {
+                        _checkOut = t;
+                        _availError = null;
+                      }),
+                    ),
+                    if (_availError != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: TC.occupiedBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: TC.occupied.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text('⚠️', style: TextStyle(fontSize: 14)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _availError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: TC.occupied,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     _FormField(
                       label: 'Special Notes',
@@ -3144,7 +4432,9 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _submit,
+                        onPressed: (_isLoading || _isChecking)
+                            ? null
+                            : _checkAndSubmit,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: TC.accent,
                           foregroundColor: Colors.white,
@@ -3154,7 +4444,7 @@ class _ReservationSheetState extends State<_ReservationSheet> {
                           ),
                           elevation: 0,
                         ),
-                        child: _isLoading
+                        child: (_isLoading || _isChecking)
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
@@ -3184,7 +4474,7 @@ class _ReservationSheetState extends State<_ReservationSheet> {
     );
   }
 
-  String _formatTime(DateTime dt) {
+  String _fmtTime(DateTime dt) {
     final h = dt.hour;
     final m = dt.minute.toString().padLeft(2, '0');
     final s = h >= 12 ? 'PM' : 'AM';
@@ -3302,7 +4592,6 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Section
                     const Text(
                       'Section',
                       style: TextStyle(
@@ -3359,8 +4648,6 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 18),
-
-                    // Capacity
                     const Text(
                       'Seating Capacity',
                       style: TextStyle(
@@ -3405,8 +4692,6 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 18),
-
-                    // Shape
                     const Text(
                       'Table Shape',
                       style: TextStyle(
@@ -3452,7 +4737,6 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 18),
-
                     _ToggleRow(
                       label: 'Window View',
                       subtitle: 'Table has a window or scenic view',
@@ -3468,7 +4752,6 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
                       value: _isPremium,
                       onChanged: (v) => setState(() => _isPremium = v),
                     ),
-
                     const SizedBox(height: 22),
                     Row(
                       children: [
@@ -3551,6 +4834,77 @@ class _AddEditTableSheetState extends State<_AddEditTableSheet> {
             child: const Text('Delete'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DURATION QUICK-SELECT CHIPS
+// ─────────────────────────────────────────────────────────────
+class _DurationChips extends StatelessWidget {
+  final DateTime checkIn;
+  final DateTime? checkOut;
+  final ValueChanged<DateTime?> onCheckOutChanged;
+
+  const _DurationChips({
+    required this.checkIn,
+    required this.checkOut,
+    required this.onCheckOutChanged,
+  });
+
+  static const _presets = [
+    ('10 min', 10),
+    ('20 min', 20),
+    ('30 min', 30),
+    ('1 hr', 60),
+    ('2 hr', 120),
+    ('3 hr', 180),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: _presets.map((p) {
+          final label = p.$1;
+          final mins = p.$2;
+          final target = checkIn.add(Duration(minutes: mins));
+          final isSel =
+              checkOut != null &&
+              checkOut!.difference(checkIn).inMinutes == mins;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => onCheckOutChanged(target),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: isSel ? TC.reserved.withOpacity(0.12) : TC.surfaceWarm,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSel ? TC.reserved : TC.border,
+                    width: isSel ? 1.5 : 1,
+                  ),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: isSel ? TC.reserved : TC.textSec,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -4018,7 +5372,6 @@ extension StringExt on String {
   String capitalize() =>
       isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
 }
-
 
 
 /*import 'package:flutter/material.dart';

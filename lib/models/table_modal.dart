@@ -66,8 +66,12 @@ class Reservation {
   final String customerName;
   final String? phone;
   final int guestCount;
-  final DateTime reservedFor;
+  final DateTime reservedFor;   // check-in / start time
+  final DateTime? checkIn;      // actual arrival (seated)
+  final DateTime? checkOut;     // planned / actual departure
   final String? notes;
+  final String status;          // active | seated | cancelled | noshow
+  final bool warningSent;
   final DateTime createdAt;
 
   const Reservation({
@@ -76,7 +80,11 @@ class Reservation {
     this.phone,
     required this.guestCount,
     required this.reservedFor,
+    this.checkIn,
+    this.checkOut,
     this.notes,
+    this.status = 'active',
+    this.warningSent = false,
     required this.createdAt,
   });
 
@@ -85,7 +93,11 @@ class Reservation {
     String? phone,
     int? guestCount,
     DateTime? reservedFor,
+    DateTime? checkIn,
+    DateTime? checkOut,
     String? notes,
+    String? status,
+    bool? warningSent,
   }) =>
       Reservation(
         id: id,
@@ -93,13 +105,26 @@ class Reservation {
         phone: phone ?? this.phone,
         guestCount: guestCount ?? this.guestCount,
         reservedFor: reservedFor ?? this.reservedFor,
+        checkIn: checkIn ?? this.checkIn,
+        checkOut: checkOut ?? this.checkOut,
         notes: notes ?? this.notes,
+        status: status ?? this.status,
+        warningSent: warningSent ?? this.warningSent,
         createdAt: createdAt,
       );
 
   String get timeLabel {
     final h = reservedFor.hour;
     final m = reservedFor.minute.toString().padLeft(2, '0');
+    final suffix = h >= 12 ? 'PM' : 'AM';
+    final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$hour12:$m $suffix';
+  }
+
+  String get checkOutTimeLabel {
+    if (checkOut == null) return '—';
+    final h = checkOut!.hour;
+    final m = checkOut!.minute.toString().padLeft(2, '0');
     final suffix = h >= 12 ? 'PM' : 'AM';
     final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '$hour12:$m $suffix';
@@ -121,6 +146,74 @@ class Reservation {
     if (diff.inMinutes < 60) return 'in ${diff.inMinutes}m';
     if (diff.inHours < 24) return 'in ${diff.inHours}h';
     return 'in ${diff.inDays}d';
+  }
+
+  /// Minutes left until check-out (if set)
+  int? get minutesUntilCheckOut {
+    if (checkOut == null) return null;
+    final diff = checkOut!.difference(DateTime.now());
+    return diff.inMinutes;
+  }
+
+  bool get isEndingSoon {
+    final mins = minutesUntilCheckOut;
+    if (mins == null) return false;
+    return mins >= 0 && mins <= 15;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RESERVATION HISTORY ITEM  (for history screen)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class ReservationHistoryItem {
+  final String id;
+  final int tableNumber;
+  final String section;
+  final String customerName;
+  final String? phone;
+  final int guestCount;
+  final DateTime reservedFor;
+  final DateTime? checkIn;
+  final DateTime? checkOut;
+  final String? notes;
+  final String status;
+  final String createdByName;
+  final DateTime createdAt;
+
+  const ReservationHistoryItem({
+    required this.id,
+    required this.tableNumber,
+    required this.section,
+    required this.customerName,
+    this.phone,
+    required this.guestCount,
+    required this.reservedFor,
+    this.checkIn,
+    this.checkOut,
+    this.notes,
+    required this.status,
+    required this.createdByName,
+    required this.createdAt,
+  });
+
+  factory ReservationHistoryItem.fromMap(Map<String, dynamic> row) {
+    final tableData = row['restaurant_tables'];
+    return ReservationHistoryItem(
+      id:            row['id'] ?? '',
+      tableNumber:   tableData?['table_number'] ?? 0,
+      section:       tableData?['section'] ?? '',
+      customerName:  row['customer_name'] ?? '',
+      phone:         row['phone'],
+      guestCount:    row['guest_count'] ?? 0,
+      reservedFor:   DateTime.parse(row['reserved_for']).toLocal(),
+      checkIn:       row['check_in'] != null ? DateTime.parse(row['check_in']).toLocal() : null,
+      checkOut:      row['check_out'] != null ? DateTime.parse(row['check_out']).toLocal() : null,
+      notes:         row['notes'],
+      status:        row['status'] ?? 'active',
+      createdByName: row['created_by_name'] ?? 'Staff',
+      createdAt:     DateTime.parse(row['created_at']).toLocal(),
+    );
   }
 }
 

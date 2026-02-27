@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -28,7 +30,9 @@ class TableDetailSheet extends StatelessWidget {
     final sb = statusBg(table.status);
     final secCol = sectionColor(table.section);
     final secBg = sectionBg(table.section);
-
+    log(
+      'reserved by: ${table.reservation?.createdByName} (${table.reservation?.createdByRole})==>',
+    );
     return DraggableScrollableSheet(
       initialChildSize: 0.75,
       maxChildSize: 0.92,

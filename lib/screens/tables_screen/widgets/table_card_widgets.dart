@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -161,6 +162,7 @@ class SectionGroup extends StatelessWidget {
     RestaurantTable table,
     TablesProvider prov,
   ) {
+    log('opening details for ${table.tableName} (id: ${table.id})');
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,

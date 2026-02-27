@@ -34,6 +34,7 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
   bool _isLoading = false;
   bool _isChecking = false;
   String? _availError;
+  String? _pastError;
 
   @override
   void initState() {
@@ -52,26 +53,72 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
     super.dispose();
   }
 
+  bool _isPast(DateTime dt) => dt.isBefore(DateTime.now());
+
+  // ── Phone validation: at least 10 digits ──────────────
+  String? _validatePhone(String? value) {
+    if (value == null || value.trim().isEmpty) return null; // optional
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 10) {
+      return 'Enter a valid phone number (min 10 digits)';
+    }
+    return null;
+  }
+
   Future<void> _pickTime(bool isCheckIn) async {
     final t = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(isCheckIn ? _checkIn : (_checkOut ?? _checkIn)),
+      initialTime: TimeOfDay.fromDateTime(
+        isCheckIn ? _checkIn : (_checkOut ?? _checkIn),
+      ),
     );
     if (t != null) {
       setState(() {
+        _pastError = null;
+        _availError = null;
         if (isCheckIn) {
-          _checkIn = DateTime(_checkIn.year, _checkIn.month, _checkIn.day, t.hour, t.minute);
+          final candidate = DateTime(
+            _checkIn.year,
+            _checkIn.month,
+            _checkIn.day,
+            t.hour,
+            t.minute,
+          );
+          if (_isPast(candidate)) {
+            final clamped = DateTime.now().add(const Duration(minutes: 5));
+            _checkIn = clamped.copyWith(
+              second: 0,
+              millisecond: 0,
+              microsecond: 0,
+            );
+            _pastError =
+                'Check-in time cannot be in the past. Set to earliest available time.';
+          } else {
+            _checkIn = candidate;
+          }
         } else {
           final base = _checkOut ?? _checkIn;
-          _checkOut = DateTime(base.year, base.month, base.day, t.hour, t.minute);
+          _checkOut = DateTime(
+            base.year,
+            base.month,
+            base.day,
+            t.hour,
+            t.minute,
+          );
         }
-        _availError = null;
       });
     }
   }
 
   Future<void> _checkAndSubmit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_isPast(_checkIn)) {
+      setState(
+        () => _pastError =
+            'Cannot reserve a past date or time. Please pick a future time.',
+      );
+      return;
+    }
     setState(() {
       _isChecking = true;
       _availError = null;
@@ -86,8 +133,10 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
     setState(() => _isChecking = false);
 
     if (!available) {
-      setState(() => _availError =
-          'Table already booked for this time slot. Please choose another time.');
+      setState(
+        () => _availError =
+            'Table already booked for this time slot. Please choose another time.',
+      );
       return;
     }
 
@@ -109,7 +158,9 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: TC.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
@@ -155,14 +206,17 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
                       label: 'Guest Name *',
                       hint: 'Full name',
                       controller: _nameCtrl,
-                      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: 12),
+                    // ── Phone with 10-digit validation ─────────────────
                     FormFieldWidget(
                       label: 'Phone',
                       hint: '+91 98765...',
                       controller: _phoneCtrl,
                       keyboardType: TextInputType.phone,
+                      validator: _validatePhone,
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -173,7 +227,7 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                   Text(
+                    const Text(
                       'Quick Duration',
                       style: TextStyle(
                         fontSize: 12,
@@ -191,32 +245,13 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
                         _availError = null;
                       }),
                     ),
+                    if (_pastError != null) ...[
+                      const SizedBox(height: 8),
+                      _ErrorBox(message: _pastError!),
+                    ],
                     if (_availError != null) ...[
                       const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: TC.occupiedBg,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: TC.occupied.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Text('⚠️', style: TextStyle(fontSize: 14)),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _availError!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: TC.occupied,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      _ErrorBox(message: _availError!),
                     ],
                     const SizedBox(height: 12),
                     const Text(
@@ -273,23 +308,33 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: (_isLoading || _isChecking) ? null : _checkAndSubmit,
+                        onPressed: (_isLoading || _isChecking)
+                            ? null
+                            : _checkAndSubmit,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: TC.accent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                           elevation: 0,
                         ),
                         child: (_isLoading || _isChecking)
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text(
                                 'Confirm Reservation',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                       ),
                     ),
@@ -310,7 +355,15 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: TC.textSec, letterSpacing: 0.3)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: TC.textSec,
+            letterSpacing: 0.3,
+          ),
+        ),
         const SizedBox(height: 6),
         GestureDetector(
           onTap: () => _pickTime(isCheckIn),
@@ -350,11 +403,16 @@ class _CalendarReserveSheetState extends State<CalendarReserveSheet> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
 class _TableSelector extends StatelessWidget {
   final List<RestaurantTable> tables;
   final String selectedId;
   final ValueChanged<String> onChanged;
-  const _TableSelector({required this.tables, required this.selectedId, required this.onChanged});
+  const _TableSelector({
+    required this.tables,
+    required this.selectedId,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -374,11 +432,17 @@ class _TableSelector extends StatelessWidget {
               onTap: () => onChanged(t.id),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: isSel ? secBg : TC.surfaceWarm,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isSel ? secCol : TC.border, width: isSel ? 1.5 : 1),
+                  border: Border.all(
+                    color: isSel ? secCol : TC.border,
+                    width: isSel ? 1.5 : 1,
+                  ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -386,7 +450,10 @@ class _TableSelector extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(t.section.emoji, style: const TextStyle(fontSize: 14)),
+                        Text(
+                          t.section.emoji,
+                          style: const TextStyle(fontSize: 14),
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           t.tableName,
@@ -399,19 +466,33 @@ class _TableSelector extends StatelessWidget {
                         const SizedBox(width: 4),
                         Text(
                           '· ${t.capacity}p',
-                          style: TextStyle(fontSize: 11, color: isSel ? secCol.withOpacity(0.7) : TC.textMute),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isSel
+                                ? secCol.withOpacity(0.7)
+                                : TC.textMute,
+                          ),
                         ),
                       ],
                     ),
-                    if (t.status == TableStatus.reserved && t.reservation != null) ...[
+                    if (t.status == TableStatus.reserved &&
+                        t.reservation != null) ...[
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          Icon(Icons.lock_clock_rounded, size: 10, color: TC.reserved.withOpacity(0.7)),
+                          Icon(
+                            Icons.lock_clock_rounded,
+                            size: 10,
+                            color: TC.reserved.withOpacity(0.7),
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             '${t.reservation!.timeLabel}${t.reservation!.checkOut != null ? " – ${t.reservation!.checkOutTimeLabel}" : ""}',
-                            style: const TextStyle(fontSize: 9, color: TC.reserved, fontWeight: FontWeight.w700),
+                            style: const TextStyle(
+                              fontSize: 9,
+                              color: TC.reserved,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ],
                       ),
@@ -419,9 +500,20 @@ class _TableSelector extends StatelessWidget {
                       const SizedBox(height: 3),
                       const Row(
                         children: [
-                          Icon(Icons.restaurant_rounded, size: 10, color: TC.occupied),
+                          Icon(
+                            Icons.restaurant_rounded,
+                            size: 10,
+                            color: TC.occupied,
+                          ),
                           SizedBox(width: 3),
-                          Text('Occupied now', style: TextStyle(fontSize: 9, color: TC.occupied, fontWeight: FontWeight.w700)),
+                          Text(
+                            'Occupied now',
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: TC.occupied,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -431,6 +523,38 @@ class _TableSelector extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  final String message;
+  const _ErrorBox({required this.message});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: TC.occupiedBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: TC.occupied.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Text('⚠️', style: TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontSize: 12,
+                color: TC.occupied,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

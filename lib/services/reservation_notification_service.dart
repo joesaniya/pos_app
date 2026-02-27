@@ -1,19 +1,37 @@
+// ignore_for_file: avoid_print
+
+import 'dart:developer';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest_all.dart' as tzData;
 import 'package:pos_app/models/table_modal.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NOTIFICATION ID RANGES  (prevents collision across tables)
+//  zonedSchedule() signature in THIS version (from the error message):
 //
-//  1000–1999 : check-in reminder  ~30 min before arrival
-//  2000–2999 : check-in reminder  ~15 min before arrival
-//  3000–3999 : check-out warning  ~15 min before check-out
-//  4000–4999 : long-seated alert  (repeats every 30 min after threshold)
+//  Future<void> zonedSchedule({
+//    required int id,
+//    required TZDateTime scheduledDate,         ← named, NOT positional
+//    required NotificationDetails notificationDetails,
+//    required AndroidScheduleMode androidScheduleMode,
+//    String? title,
+//    String? body,
+//    ...
+//  })
 //
-//  IDs are  base + tableNumber  so each table gets its own slot.
+//  show() and cancel() are also ALL named in this version.
 // ─────────────────────────────────────────────────────────────────────────────
+//  NOTIFICATION ID RANGES
+//  1000–1999 : check-in ~30 min
+//  2000–2999 : check-in ~15 min
+//  3000–3999 : check-out ~15 min
+//  4000–4999 : long-seated (runtime)
+//  5000–5999 : check-in ~20 min
+// ─────────────────────────────────────────────────────────────────────────────
+
 class ReservationNotificationService {
-  // ── Singleton ────────────────────────────────────────────────────────────
   static final ReservationNotificationService _instance =
       ReservationNotificationService._internal();
   factory ReservationNotificationService() => _instance;
@@ -23,11 +41,23 @@ class ReservationNotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+  bool _tzInitialized = false;
 
-  /// Tracks keys that have already fired this session → no duplicate pops.
   final Set<String> _sentKeys = {};
 
-  // ── Android channel definitions ──────────────────────────────────────────
+  String get _today {
+    final n = DateTime.now();
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+  }
+
+  // ── ID helpers ────────────────────────────────────────────────────────────
+  static int checkIn30Id(int t) => 1000 + t;
+  static int checkIn20Id(int t) => 5000 + t;
+  static int checkIn15Id(int t) => 2000 + t;
+  static int checkOutId(int t) => 3000 + t;
+  static int longSeatedId(int t) => 4000 + t;
+
+  // ── Android channel definitions ───────────────────────────────────────────
   static const _chCheckIn = AndroidNotificationDetails(
     'ch_checkin',
     'Check-in Reminders',
@@ -64,11 +94,20 @@ class ReservationNotificationService {
     presentSound: true,
   );
 
-  // ── Initialize ───────────────────────────────────────────────────────────
+  // ── Initialize ────────────────────────────────────────────────────────────
   Future<void> initialize() async {
     if (_initialized) return;
     try {
-      // v20.x: `settings` is a NAMED parameter
+      if (!_tzInitialized) {
+        tzData.initializeTimeZones();
+        try {
+          tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
+        } catch (_) {
+          tz.setLocalLocation(tz.UTC);
+        }
+        _tzInitialized = true;
+      }
+
       await _plugin.initialize(
         settings: const InitializationSettings(
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -80,29 +119,77 @@ class ReservationNotificationService {
         ),
       );
 
-      // Android 13+ (API 33) — request POST_NOTIFICATIONS permission at runtime
       await _plugin
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.requestNotificationsPermission();
 
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestExactAlarmsPermission();
+
       _initialized = true;
-      debugPrint('[Notif] ✅ Initialized successfully');
+      debugPrint('[Notif] ✅ Initialized');
     } catch (e) {
-      debugPrint('[Notif] ⚠️ Init error (non-fatal): $e');
+      debugPrint('[Notif] ⚠️ Init error: $e');
     }
   }
 
-  // ── Core send helper ─────────────────────────────────────────────────────
-  Future<void> _send({
+  // ── Schedule (fires even when app is killed) ──────────────────────────────
+  //
+  //  Using ALL named parameters as shown in the error:
+  //    required int id
+  //    required TZDateTime scheduledDate
+  //    required NotificationDetails notificationDetails
+  //    required AndroidScheduleMode androidScheduleMode
+  //    String? title
+  //    String? body
+  //
+  Future<void> _scheduleAt({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime fireAt,
+    required AndroidNotificationDetails androidDetails,
+  }) async {
+    if (!_initialized) return;
+    if (fireAt.isBefore(DateTime.now())) {
+      debugPrint('[Notif] ⏭ Skipped past time: "$title"');
+      return;
+    }
+    try {
+      final tzTime = tz.TZDateTime.from(fireAt, tz.local);
+      await _plugin.zonedSchedule(
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: tzTime,
+        notificationDetails: NotificationDetails(
+          android: androidDetails,
+          iOS: _ios,
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        // exactAllowWhileIdle → fires even during Android Doze mode
+      );
+      log('[Notif] ⏰ Scheduled "$title" at $fireAt');
+    } catch (e) {
+      debugPrint('[Notif] ⚠️ Schedule error: $e');
+    }
+  }
+
+  // ── Immediate send (long-seated, called from WorkManager + foreground) ────
+  Future<void> sendImmediate({
     required int id,
     required String title,
     required String body,
     required AndroidNotificationDetails androidDetails,
   }) async {
+    if (!_initialized) await initialize();
     if (!_initialized) return;
     try {
-      // v20.x: id / title / body / notificationDetails are all NAMED parameters
       await _plugin.show(
         id: id,
         title: title,
@@ -112,122 +199,163 @@ class ReservationNotificationService {
           iOS: _ios,
         ),
       );
-      debugPrint('[Notif] ✅ Sent "$title"');
+      debugPrint('[Notif] 🔔 Sent: "$title"');
     } catch (e) {
       debugPrint('[Notif] ⚠️ Send error: $e');
     }
   }
 
-  // ── De-duplicated notify ─────────────────────────────────────────────────
-  Future<void> _maybeNotify({
-    required String key,
-    required bool active,
-    required int id,
-    required String title,
-    required String body,
-    required AndroidNotificationDetails androidDetails,
-  }) async {
-    if (!active) return;
-    if (_sentKeys.contains(key)) return;
-    _sentKeys.add(key);
-    await _send(id: id, title: title, body: body, androidDetails: androidDetails);
+  // ── Cancel a single scheduled notification ────────────────────────────────
+  Future<void> _cancelId(int id) async {
+    try {
+      await _plugin.cancel(id: id);
+    } catch (_) {}
   }
 
-  // ── Main scan — called every minute by TablesProvider ───────────────────
-  Future<void> checkAll({
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Schedule all reminders for a reservation
+  //  Call from TablesProvider.addReservation() and updateReservation()
+  // ══════════════════════════════════════════════════════════════════════════
+  Future<void> scheduleReservationReminders({
+    required RestaurantTable table,
+    required Reservation reservation,
+    required String businessName,
+  }) async {
+    if (!_initialized) await initialize();
+    if (!_initialized) return;
+
+    // Cancel old alarms first (handles edits)
+    await cancelReservationScheduled(reservation.id, table.tableNumber);
+
+    final resTime = reservation.reservedFor;
+    final biz = businessName.isNotEmpty ? '\n$businessName' : '';
+    final tName = table.tableName;
+    final guestInfo =
+        '${reservation.customerName} · ${reservation.guestCount} guests · ${reservation.timeLabel}$biz';
+
+    // 30-min check-in reminder
+    await _scheduleAt(
+      id: checkIn30Id(table.tableNumber),
+      title: '🟡 Guest arriving in 30 min — $tName',
+      body: guestInfo,
+      fireAt: resTime.subtract(const Duration(minutes: 30)),
+      androidDetails: _chCheckIn,
+    );
+
+    // 20-min check-in reminder
+    await _scheduleAt(
+      id: checkIn20Id(table.tableNumber),
+      title: '🟠 Guest arriving in 20 min — $tName',
+      body: guestInfo,
+      fireAt: resTime.subtract(const Duration(minutes: 20)),
+      androidDetails: _chCheckIn,
+    );
+
+    // 15-min check-in reminder
+    await _scheduleAt(
+      id: checkIn15Id(table.tableNumber),
+      title: '🔔 Guest arriving in 15 min — $tName',
+      body: guestInfo,
+      fireAt: resTime.subtract(const Duration(minutes: 15)),
+      androidDetails: _chCheckIn,
+    );
+
+    await _scheduleAt(
+      id: checkIn15Id(table.tableNumber),
+      title: '🔔 Guest arriving in 5 min — $tName',
+      body: guestInfo,
+      fireAt: resTime.subtract(const Duration(minutes: 5)),
+      androidDetails: _chCheckIn,
+    );
+
+    // 15-min check-out warning
+    if (reservation.checkOut != null) {
+      await _scheduleAt(
+        id: checkOutId(table.tableNumber),
+        title: '🔴 Reservation ending in 15 min — $tName',
+        body:
+            '${reservation.customerName} · Check-out at ${reservation.checkOutTimeLabel}$biz',
+        fireAt: reservation.checkOut!.subtract(const Duration(minutes: 15)),
+        androidDetails: _chCheckOut,
+      );
+    }
+
+    debugPrint('[Notif] ✅ All alarms set for reservation ${reservation.id}');
+  }
+
+  // ── Cancel all OS alarms for a reservation ────────────────────────────────
+  Future<void> cancelReservationScheduled(
+    String reservationId,
+    int tableNumber,
+  ) async {
+    await _cancelId(checkIn30Id(tableNumber));
+    await _cancelId(checkIn20Id(tableNumber));
+    await _cancelId(checkIn15Id(tableNumber));
+    await _cancelId(checkOutId(tableNumber));
+    debugPrint('[Notif] 🗑️ Cancelled alarms for table $tableNumber');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Long-seated check — called by WorkManager (background) + foreground timer
+  // ══════════════════════════════════════════════════════════════════════════
+  Future<void> checkLongSeated({
     required List<RestaurantTable> tables,
     required String businessName,
-    int longSeatedMinutes = 120,
+    int longSeatedMinutes = 240,
   }) async {
-    // Auto-initialize if missed (defensive)
-    if (!_initialized) {
-      await initialize();
-      if (!_initialized) return; // still failed, abort
-    }
+    if (!_initialized) await initialize();
+    if (!_initialized) return;
 
     final now = DateTime.now();
     final biz = businessName.isNotEmpty ? '\n$businessName' : '';
 
     for (final table in tables) {
-      final res = table.reservation;
-
-      // ─── CHECK-IN reminders ────────────────────────────────────────────
-      // Only applies to tables with status = reserved AND reservation is today
-      if (res != null && table.status == TableStatus.reserved) {
-        final diffMins = res.reservedFor.difference(now).inMinutes;
-
-        // ~30 min before  (window: 28–32 min)
-        await _maybeNotify(
-          key: 'ci30_${res.id}',
-          active: diffMins >= 28 && diffMins <= 32,
-          id: 1000 + table.tableNumber,
-          title: '🟡 Guest in ~30 min — ${table.tableName}',
-          body:
-              '${res.customerName} · ${res.guestCount} guests · ${res.timeLabel}$biz',
-          androidDetails: _chCheckIn,
-        );
-
-        // ~15 min before  (window: 13–17 min)
-        await _maybeNotify(
-          key: 'ci15_${res.id}',
-          active: diffMins >= 13 && diffMins <= 17,
-          id: 2000 + table.tableNumber,
-          title: '🔔 Guest in ~15 min — ${table.tableName}',
-          body:
-              '${res.customerName} · ${res.guestCount} guests · ${res.timeLabel}$biz',
-          androidDetails: _chCheckIn,
-        );
-
-        // ─── CHECK-OUT warning (~15 min before check-out) ─────────────
-        final minsToOut = res.minutesUntilCheckOut;
-        await _maybeNotify(
-          key: 'co15_${res.id}',
-          active: minsToOut != null && minsToOut >= 13 && minsToOut <= 17,
-          id: 3000 + table.tableNumber,
-          title: '🔴 Reservation ending in 15 min — ${table.tableName}',
-          body:
-              '${res.customerName} · Check-out at ${res.checkOutTimeLabel}$biz',
-          androidDetails: _chCheckOut,
-        );
-      }
-
-      // ─── LONG-SEATED alert ─────────────────────────────────────────────
-      // Fires at threshold, then re-fires every 30 min (2h → 2h30 → 3h…)
       if (table.status == TableStatus.occupied && table.occupiedSince != null) {
         final seatedMins = now.difference(table.occupiedSince!).inMinutes;
-
         if (seatedMins >= longSeatedMinutes) {
-          // Bucket = 0 at threshold, 30 after 30 more min, 60 after 60 more, …
           final bucket = ((seatedMins - longSeatedMinutes) ~/ 30) * 30;
           final totalMins = longSeatedMinutes + bucket;
           final h = totalMins ~/ 60;
           final m = totalMins % 60;
           final label = m > 0 ? '${h}h ${m}m' : '${h}h';
-          final key = 'ls_${table.id}_$totalMins';
+          final key = '${_today}_ls_${table.id}_$totalMins';
 
-          await _maybeNotify(
-            key: key,
-            active: true,
-            id: 4000 + table.tableNumber,
-            title: '⏱️ Long stay — ${table.tableName} ($label)',
-            body:
-                '${table.currentCustomerName ?? 'Guest'} seated for $label$biz',
-            androidDetails: _chLongSeated,
-          );
+          if (!_sentKeys.contains(key)) {
+            _sentKeys.add(key);
+            await sendImmediate(
+              id: longSeatedId(table.tableNumber),
+              title: '⏱️ Long stay — ${table.tableName} ($label)',
+              body:
+                  '${table.currentCustomerName ?? 'Guest'} seated for $label$biz',
+              androidDetails: _chLongSeated,
+            );
+          }
         }
       }
     }
   }
 
-  // ── Lifecycle helpers ────────────────────────────────────────────────────
+  // Legacy alias — keeps TablesProvider.checkAll() calls working
+  Future<void> checkAll({
+    required List<RestaurantTable> tables,
+    required String businessName,
+    int longSeatedMinutes = 240,
+  }) => checkLongSeated(
+    tables: tables,
+    businessName: businessName,
+    longSeatedMinutes: longSeatedMinutes,
+  );
 
-  /// Call when a reservation is cancelled, marked no-show, or guest is seated.
-  /// Clears that reservation's notification keys so they can re-fire if needed.
-  void clearReservationKeys(String reservationId) {
-    _sentKeys.removeWhere((k) => k.contains(reservationId));
-    debugPrint('[Notif] Cleared keys for reservation $reservationId');
+  void clearReservationKeys(String reservationId) =>
+      _sentKeys.removeWhere((k) => k.contains(reservationId));
+
+  void resetSentKeys() => _sentKeys.clear();
+
+  Future<void> cancelAll() async {
+    await _plugin.cancelAll();
+    debugPrint('[Notif] Cancelled all');
   }
 
-  /// Reset ALL sent keys — call on new business day or app restart.
-  void resetSentKeys() => _sentKeys.clear();
+  // Expose channel for WorkManager background isolate
+  static AndroidNotificationDetails get longSeatedChannel => _chLongSeated;
 }

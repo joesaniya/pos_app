@@ -10,7 +10,6 @@ const _kTables = 'restaurant_tables';
 const _kReservations = 'table_reservations';
 const _kView = 'vw_tables_with_reservation';
 
-// ─────────────────────────────────────────────────────────────
 class _UserCtx {
   final String uid, name, role, businessId, businessName;
   final String? email;
@@ -49,7 +48,6 @@ class TablesProvider extends ChangeNotifier {
   Timer? _notifTimer;
   RealtimeChannel? _channel;
 
-  // ── Constructor ────────────────────────────────────────
   TablesProvider() {
     _init();
   }
@@ -60,7 +58,6 @@ class TablesProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   List<RestaurantTable> get allTables => List.unmodifiable(_tables);
-
   List<ReservationHistoryItem> get history => List.unmodifiable(_history);
   bool get historyLoading => _historyLoading;
   bool get historyHasMore => _historyHasMore;
@@ -92,8 +89,7 @@ class TablesProvider extends ChangeNotifier {
       _tables.where((t) => t.status == TableStatus.reserved).length;
   int get totalTables => _tables.length;
 
-  // ── NEW: date-based reservation helpers ───────────────
-  /// Returns all tables that have a reservation on [date]
+  // ── Date-based reservation helpers ────────────────────
   List<RestaurantTable> reservationsForDate(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
     return _tables.where((t) {
@@ -112,12 +108,10 @@ class TablesProvider extends ChangeNotifier {
   }
 
   int get todayReservationCount => reservationsForDate(DateTime.now()).length;
-
   int get tomorrowReservationCount =>
       reservationsForDate(DateTime.now().add(const Duration(days: 1))).length;
 
-  /// Tables where guests have been seated ≥ [minutes]
-  List<RestaurantTable> get longSeatedTables => longOccupiedTables(120);
+  List<RestaurantTable> get longSeatedTables => longOccupiedTables(240);
 
   Map<TableSection, int> get availablePerSection {
     final m = <TableSection, int>{};
@@ -146,6 +140,7 @@ class TablesProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _notif.initialize();
+      _notif.resetSentKeys();
       await _loadUserCtx();
       if (_userCtx != null) {
         await _fetchTables();
@@ -177,7 +172,7 @@ class TablesProvider extends ChangeNotifier {
     );
   }
 
-  // ── Notification timer (every 1 min) ──────────────────
+  // ── Notification timer (long-seated — runtime only) ────
   void _startNotifTimer() {
     _notifTimer?.cancel();
     _runNotifCheck();
@@ -190,7 +185,7 @@ class TablesProvider extends ChangeNotifier {
   void _runNotifCheck() => _notif.checkAll(
     tables: _tables,
     businessName: _userCtx?.businessName ?? '',
-    longSeatedMinutes: 120,
+    longSeatedMinutes: 240,
   );
 
   // ── Realtime ───────────────────────────────────────────
@@ -236,8 +231,6 @@ class TablesProvider extends ChangeNotifier {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
     try {
-      // NOTE: the view vw_tables_with_reservation must expose res_status column.
-      // If it doesn't, add it: SELECT tr.status AS res_status in the view definition.
       final rows = await _sb
           .from(_kView)
           .select()
@@ -267,8 +260,6 @@ class TablesProvider extends ChangeNotifier {
           reservedFor.month == today.month &&
           reservedFor.day == today.day;
 
-      // Only attach reservation to the floor card if it's TODAY and still active/seated
-      // Past/future reservations are hidden from the floor grid (use Calendar view instead)
       if (isToday && (resStatus == 'active' || resStatus == 'seated')) {
         reservation = Reservation(
           id: row['reservation_id'],
@@ -405,7 +396,6 @@ class TablesProvider extends ChangeNotifier {
   // ══════════════════════════════════════════════════════
   Future<void> seatGuests(String tableId, String customerName) async {
     try {
-      // Clear check-in reminder keys when guest is seated
       final t = _tables.where((t) => t.id == tableId).firstOrNull;
       if (t?.reservation != null)
         _notif.clearReservationKeys(t!.reservation!.id);
@@ -499,6 +489,9 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
+  // ── Add Reservation ─────────────────────────────────────
+  // After inserting, immediately schedule OS-level reminders so they fire
+  // even when the app is completely closed.
   Future<void> addReservation(String tableId, Reservation res) async {
     try {
       final ctx = _userCtx!;
@@ -527,12 +520,24 @@ class TablesProvider extends ChangeNotifier {
           })
           .eq('id', tableId);
       await _fetchTables();
+
+      // Schedule OS-level alarms (fires even when app is killed)
+      final table = _tables.where((t) => t.id == tableId).firstOrNull;
+      if (table != null) {
+        await _notif.scheduleReservationReminders(
+          table: table,
+          reservation: res,
+          businessName: ctx.businessName,
+        );
+      }
     } catch (e) {
       _error = 'Add reservation error: $e';
       notifyListeners();
     }
   }
 
+  // ── Update Reservation ──────────────────────────────────
+  // Re-schedules OS alarms with the new times.
   Future<void> updateReservation(String tableId, Reservation updated) async {
     try {
       await _sb
@@ -549,6 +554,16 @@ class TablesProvider extends ChangeNotifier {
           })
           .eq('id', updated.id);
       await _fetchTables();
+
+      // Re-schedule OS alarms with updated times
+      final table = _tables.where((t) => t.id == tableId).firstOrNull;
+      if (table != null) {
+        await _notif.scheduleReservationReminders(
+          table: table,
+          reservation: updated,
+          businessName: _userCtx?.businessName ?? '',
+        );
+      }
     } catch (e) {
       _error = 'Update reservation error: $e';
       notifyListeners();
@@ -556,16 +571,20 @@ class TablesProvider extends ChangeNotifier {
   }
 
   void cancelReservation(String tableId) {
-    // Clear any pending notification keys for this table's reservation
     final t = _tables.where((t) => t.id == tableId).firstOrNull;
-    if (t?.reservation != null) _notif.clearReservationKeys(t!.reservation!.id);
+    if (t?.reservation != null) {
+      _notif.clearReservationKeys(t!.reservation!.id);
+      _notif.cancelReservationScheduled(t.reservation!.id, t.tableNumber);
+    }
     _cancelAsync(tableId);
   }
 
-  /// No-show: guest never arrived — cancels reservation & frees the table
   void markNoShow(String tableId) {
     final t = _tables.where((t) => t.id == tableId).firstOrNull;
-    if (t?.reservation != null) _notif.clearReservationKeys(t!.reservation!.id);
+    if (t?.reservation != null) {
+      _notif.clearReservationKeys(t!.reservation!.id);
+      _notif.cancelReservationScheduled(t.reservation!.id, t.tableNumber);
+    }
     _noShowAsync(tableId);
   }
 
@@ -623,6 +642,10 @@ class TablesProvider extends ChangeNotifier {
 
   // ══════════════════════════════════════════════════════
   //  HISTORY
+  //
+  //  FIX: Default date range now includes future dates (today → +60 days)
+  //  so reservations like "March 4th" are visible without custom date select.
+  //  The caller can still pass custom from/to for filtering.
   // ══════════════════════════════════════════════════════
   void resetHistory() {
     _history.clear();
@@ -651,10 +674,14 @@ class TablesProvider extends ChangeNotifier {
     }
     _historyLoading = true;
     notifyListeners();
+
     try {
+      // FIX: Default range is last 30 days → next 60 days so future
+      // reservations (e.g. March bookings) are always included.
       final fromDate =
           _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
-      final toDate = _historyTo ?? DateTime.now().add(const Duration(days: 1));
+      final toDate = _historyTo ?? DateTime.now().add(const Duration(days: 60));
+
       final rows = await _sb
           .from(_kReservations)
           .select('*, restaurant_tables(table_number, section)')
@@ -663,6 +690,7 @@ class TablesProvider extends ChangeNotifier {
           .lte('reserved_for', toDate.toUtc().toIso8601String())
           .order('reserved_for', ascending: false)
           .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
+
       final items = (rows as List)
           .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
           .toList();
@@ -677,9 +705,7 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-  // ══════════════════════════════════════════════════════
-  //  HELPERS
-  // ══════════════════════════════════════════════════════
+  // ── Helpers ────────────────────────────────────────────
   void _setLoading(bool v) {
     _isLoading = v;
     notifyListeners();
@@ -691,10 +717,8 @@ class TablesProvider extends ChangeNotifier {
       ? 1
       : _tables.map((t) => t.tableNumber).reduce((a, b) => a > b ? a : b) + 1;
 
-  // ── Advanced getters ───────────────────────────────────
   List<RestaurantTable> get todayReservations =>
       reservationsForDate(DateTime.now());
-
   double get occupancyRate =>
       _tables.isEmpty ? 0 : totalOccupied / _tables.length;
 

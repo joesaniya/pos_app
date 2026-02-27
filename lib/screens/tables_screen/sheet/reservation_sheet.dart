@@ -31,6 +31,7 @@ class _ReservationSheetState extends State<ReservationSheet> {
   bool _isLoading = false;
   bool _isChecking = false;
   String? _availError;
+  String? _pastError;
 
   bool get isEdit => widget.existing != null;
 
@@ -42,7 +43,8 @@ class _ReservationSheetState extends State<ReservationSheet> {
     _phoneCtrl = TextEditingController(text: e?.phone ?? '');
     _notesCtrl = TextEditingController(text: e?.notes ?? '');
     _guestCount = e?.guestCount ?? 2;
-    _checkIn = e?.reservedFor ??
+    _checkIn =
+        e?.reservedFor ??
         DateTime.now()
             .add(const Duration(hours: 1))
             .copyWith(second: 0, microsecond: 0, millisecond: 0);
@@ -57,20 +59,60 @@ class _ReservationSheetState extends State<ReservationSheet> {
     super.dispose();
   }
 
+  bool _isPast(DateTime dt) => dt.isBefore(DateTime.now());
+
+  // ── Phone number validator ─────────────────────────────
+  // Strips all non-digits then checks length is at least 10.
+  String? _validatePhone(String? value) {
+    if (value == null || value.trim().isEmpty) return null; // optional field
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 10) {
+      return 'Enter a valid phone number (min 10 digits)';
+    }
+    return null;
+  }
+
   Future<void> _pickTime(bool isCheckIn) async {
     final t = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(isCheckIn ? _checkIn : (_checkOut ?? _checkIn)),
+      initialTime: TimeOfDay.fromDateTime(
+        isCheckIn ? _checkIn : (_checkOut ?? _checkIn),
+      ),
     );
     if (t != null) {
       setState(() {
+        _pastError = null;
+        _availError = null;
         if (isCheckIn) {
-          _checkIn = DateTime(_checkIn.year, _checkIn.month, _checkIn.day, t.hour, t.minute);
+          final candidate = DateTime(
+            _checkIn.year,
+            _checkIn.month,
+            _checkIn.day,
+            t.hour,
+            t.minute,
+          );
+          if (_isPast(candidate)) {
+            final clamped = DateTime.now().add(const Duration(minutes: 5));
+            _checkIn = clamped.copyWith(
+              second: 0,
+              millisecond: 0,
+              microsecond: 0,
+            );
+            _pastError =
+                'Check-in time cannot be in the past. Set to earliest available time.';
+          } else {
+            _checkIn = candidate;
+          }
         } else {
           final base = _checkOut ?? _checkIn;
-          _checkOut = DateTime(base.year, base.month, base.day, t.hour, t.minute);
+          _checkOut = DateTime(
+            base.year,
+            base.month,
+            base.day,
+            t.hour,
+            t.minute,
+          );
         }
-        _availError = null;
       });
     }
   }
@@ -79,21 +121,42 @@ class _ReservationSheetState extends State<ReservationSheet> {
     final d = await showDatePicker(
       context: context,
       initialDate: _checkIn,
+      // Allow today onward, up to 60 days ahead
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 60)),
     );
     if (d != null) {
       setState(() {
-        _checkIn = DateTime(d.year, d.month, d.day, _checkIn.hour, _checkIn.minute);
+        _checkIn = DateTime(
+          d.year,
+          d.month,
+          d.day,
+          _checkIn.hour,
+          _checkIn.minute,
+        );
         if (_checkOut != null) {
-          _checkOut = DateTime(d.year, d.month, d.day, _checkOut!.hour, _checkOut!.minute);
+          _checkOut = DateTime(
+            d.year,
+            d.month,
+            d.day,
+            _checkOut!.hour,
+            _checkOut!.minute,
+          );
         }
+        _pastError = null;
       });
     }
   }
 
   Future<void> _checkAndSubmit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_isPast(_checkIn)) {
+      setState(
+        () => _pastError =
+            'Cannot reserve a past date or time. Please pick a future time.',
+      );
+      return;
+    }
     setState(() {
       _isChecking = true;
       _availError = null;
@@ -106,8 +169,10 @@ class _ReservationSheetState extends State<ReservationSheet> {
     );
     setState(() => _isChecking = false);
     if (!available) {
-      setState(() => _availError =
-          'This table already has a booking during that time. Choose a different slot.');
+      setState(
+        () => _availError =
+            'This table already has a booking during that time. Choose a different slot.',
+      );
       return;
     }
 
@@ -131,7 +196,9 @@ class _ReservationSheetState extends State<ReservationSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: TC.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
@@ -145,7 +212,9 @@ class _ReservationSheetState extends State<ReservationSheet> {
             SheetTopBar(
               emoji: '📅',
               title: isEdit ? 'Edit Reservation' : 'New Reservation',
-              subtitle: isEdit ? 'Update details below' : 'Reserve this table for a guest',
+              subtitle: isEdit
+                  ? 'Update details below'
+                  : 'Reserve this table for a guest',
               color: TC.reserved,
             ),
             Flexible(
@@ -158,14 +227,17 @@ class _ReservationSheetState extends State<ReservationSheet> {
                       label: 'Guest Name *',
                       hint: 'Enter full name',
                       controller: _nameCtrl,
-                      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: 14),
+                    // ── Phone with validation ──────────────────────────────
                     FormFieldWidget(
                       label: 'Phone Number',
                       hint: '+91 98765 43210',
                       controller: _phoneCtrl,
                       keyboardType: TextInputType.phone,
+                      validator: _validatePhone,
                     ),
                     const SizedBox(height: 14),
                     const Text(
@@ -226,7 +298,10 @@ class _ReservationSheetState extends State<ReservationSheet> {
                     GestureDetector(
                       onTap: _pickDate,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
                         decoration: BoxDecoration(
                           color: TC.surfaceWarm,
                           borderRadius: BorderRadius.circular(12),
@@ -243,6 +318,12 @@ class _ReservationSheetState extends State<ReservationSheet> {
                                 fontWeight: FontWeight.w700,
                                 color: TC.textPri,
                               ),
+                            ),
+                            const Spacer(),
+                            const Icon(
+                              Icons.edit_calendar_outlined,
+                              size: 16,
+                              color: TC.textMute,
                             ),
                           ],
                         ),
@@ -285,6 +366,10 @@ class _ReservationSheetState extends State<ReservationSheet> {
                         _availError = null;
                       }),
                     ),
+                    if (_pastError != null) ...[
+                      const SizedBox(height: 8),
+                      _AvailErrorBox(message: _pastError!),
+                    ],
                     if (_availError != null) ...[
                       const SizedBox(height: 8),
                       _AvailErrorBox(message: _availError!),
@@ -299,23 +384,35 @@ class _ReservationSheetState extends State<ReservationSheet> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: (_isLoading || _isChecking) ? null : _checkAndSubmit,
+                        onPressed: (_isLoading || _isChecking)
+                            ? null
+                            : _checkAndSubmit,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: TC.accent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                           elevation: 0,
                         ),
                         child: (_isLoading || _isChecking)
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
                               )
                             : Text(
-                                isEdit ? 'Update Reservation' : 'Confirm Reservation',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                                isEdit
+                                    ? 'Update Reservation'
+                                    : 'Confirm Reservation',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                       ),
                     ),
@@ -349,7 +446,10 @@ class _ReservationSheetState extends State<ReservationSheet> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontSize: 10, color: TC.textMute)),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 10, color: TC.textMute),
+                ),
                 Text(
                   time != null ? _fmtTime(time) : 'Optional',
                   style: TextStyle(
@@ -380,8 +480,21 @@ class _ReservationSheetState extends State<ReservationSheet> {
     final rDate = DateTime(dt.year, dt.month, dt.day);
     if (rDate == today) return 'Today';
     if (rDate == today.add(const Duration(days: 1))) return 'Tomorrow';
-    const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${m[dt.month - 1]} ${dt.day}';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 }
 
@@ -404,7 +517,11 @@ class _AvailErrorBox extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(fontSize: 12, color: TC.occupied, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 12,
+                color: TC.occupied,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

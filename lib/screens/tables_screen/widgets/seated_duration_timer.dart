@@ -16,8 +16,8 @@ class SeatedDurationTimer extends StatefulWidget {
     super.key,
     required this.occupiedSince,
     this.showWarning = true,
-    this.warningMinutes = 90,
-    this.dangerMinutes = 150,
+    this.warningMinutes = 240,  // amber at 4 hours
+    this.dangerMinutes = 270,   // red at 4.5 hours
   });
 
   @override
@@ -124,7 +124,7 @@ class _SeatedDurationTimerState extends State<SeatedDurationTimer> {
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                mins >= widget.dangerMinutes ? 'Very long' : 'Long stay',
+                mins >= widget.dangerMinutes ? '4.5h+ stay' : '4h+ stay',
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
@@ -150,8 +150,8 @@ class SeatedDurationChip extends StatefulWidget {
   const SeatedDurationChip({
     super.key,
     required this.occupiedSince,
-    this.warningMinutes = 90,
-    this.dangerMinutes = 150,
+    this.warningMinutes = 240,  // amber at 4 hours
+    this.dangerMinutes = 270,   // red at 4.5 hours
   });
 
   @override

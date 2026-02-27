@@ -46,6 +46,7 @@ class SplashProvider with ChangeNotifier {
       await _storage.setFirstLaunchDone();
     }
     log('First launch: $_isFirstLaunch');
+    notifyListeners();
   }
 
   Future<void> _checkLoginStatus() async {

@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -8,30 +9,57 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-
     <uses-permission
         android:name="android.permission.READ_MEDIA_IMAGES" />
 
-    <!-- 🔔 Local Notifications / Alarms -->
+    <!-- 🔔 Notifications & Alarms -->
     <uses-permission android:name="android.permission.VIBRATE"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <!--
         POST_NOTIFICATIONS — REQUIRED on Android 13+ (API 33+)
-        Without this, flutter_local_notifications will silently fail
-        and NO notifications will appear on Android 13+ devices.
+        Without this, flutter_local_notifications silently fails.
+        Runtime request is handled by requestNotificationsPermission()
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- Exact alarm permissions -->
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!--
+        SCHEDULE_EXACT_ALARM + USE_EXACT_ALARM
+        Required for zonedSchedule() to fire at the EXACT time even when
+        the app is killed, screen is locked, or phone is in Doze mode.
+        Without these, Android may delay the alarm by up to 15 minutes.
+    -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+
+    <!--
+        RECEIVE_BOOT_COMPLETED
+        Allows ScheduledNotificationBootReceiver to re-schedule pending
+        zonedSchedule() alarms after the phone reboots.
+        Without this, ALL scheduled reminders are lost on device restart.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
+    <!--
+        FOREGROUND_SERVICE + DATA_SYNC
+        Required for WorkManager to run as a foreground service on Android 12+.
+        Used by the long-seated background check task.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+
+    <!--
+        REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+        Prevents aggressive battery-saving on Xiaomi / Huawei / OnePlus / Samsung
+        from killing WorkManager background tasks.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <application
         android:label="pos_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
+        <!-- ── Main Flutter activity ──────────────────────────────────── -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -52,28 +80,76 @@
             </intent-filter>
         </activity>
 
-        <!-- UCrop -->
+        <!-- ── UCrop (image cropper — existing) ──────────────────────── -->
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
 
-        <!-- Firebase Recaptcha -->
+        <!-- ── Firebase Recaptcha (existing) ─────────────────────────── -->
         <activity
             android:name="com.google.firebase.auth.internal.RecaptchaActivity"
             android:launchMode="singleTask"
             tools:replace="android:launchMode"/>
 
+        <!-- ═══════════════════════════════════════════════════════════════
+             flutter_local_notifications — SCHEDULED NOTIFICATION RECEIVERS
+             ═══════════════════════════════════════════════════════════════
+
+             ScheduledNotificationReceiver
+               Receives the AlarmManager broadcast and shows the notification.
+               THIS is what makes zonedSchedule() fire when the app is killed.
+               Android OS wakes up this receiver at the scheduled time,
+               completely independently of whether the app is alive.
+
+             ScheduledNotificationBootReceiver
+               Re-schedules all pending alarms after the phone reboots.
+               Without this, every device restart wipes all pending reminders.
+               Covers 4 boot action variants for full device compatibility.
+        ═══════════════════════════════════════════════════════════════ -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- ═══════════════════════════════════════════════════════════════
+             WorkManager — FOREGROUND SERVICE DECLARATION
+             Required on Android 12+ (API 31+) when WorkManager runs tasks
+             as foreground services (used for long-seated background checks).
+             foregroundServiceType must match the permission declared above.
+        ═══════════════════════════════════════════════════════════════ -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"/>
+
+        <!-- Flutter embedding version (existing) -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
+
     </application>
 
-    <!-- Text processing query -->
+    <!-- ── Intent queries ─────────────────────────────────────────────── -->
     <queries>
+        <!-- Text processing (existing) -->
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Required for flutter_local_notifications on some Android versions -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
         </intent>
     </queries>
 

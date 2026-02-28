@@ -14,7 +14,13 @@ import 'package:pos_app/screens/widgets/filter_widgets.dart';
 import 'package:pos_app/theme/app_colors.dart';
 
 /// Roles allowed to add / edit / delete items.
-const Set<String> _editableRoles = {'staff', 'admin', 'system', 'owner'};
+const Set<String> _editableRoles = {
+  // 'staff',
+  'admin',
+  'system',
+  'owner',
+  'manager',
+};
 
 bool _canEdit(String? role) =>
     role != null && _editableRoles.contains(role.toLowerCase());

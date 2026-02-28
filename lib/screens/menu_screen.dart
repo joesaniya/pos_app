@@ -28,7 +28,10 @@ List<Color> _gradientFor(SupabaseMenuCategory cat) {
 }
 
 /// Roles that are allowed to add / edit / delete menu items.
-const Set<String> _editableRoles = {'staff', 'admin', 'system', 'owner'};
+const Set<String> _editableRoles = {
+  // 'staff',
+  'admin', 'system', 'owner', 'manager',
+};
 
 bool _canEdit(String? role) =>
     role != null && _editableRoles.contains(role.toLowerCase());

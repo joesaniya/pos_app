@@ -22,7 +22,7 @@ class PageSwitcher extends StatelessWidget {
           body: IndexedStack(
             index: navigationProvider.selectedIndex,
             children: const [
-              AnalyticsDashboardScreen(),
+              DashboardScreen(),
               OrdersScreen(),
               TablesScreen(),
               MenuScreen(),

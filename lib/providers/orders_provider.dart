@@ -2,8 +2,12 @@
 // ROOT FIX: User profile (businessId, businessName, name, role) was being
 // read from SharedPreferences which was never populated from Firebase Firestore.
 // Now loads directly from Firestore 'users' collection using Firebase Auth UID.
+//
 // RESTART FIX: init() now falls back to StorageService if Firestore is slow,
 // and OrdersScreen always calls init() so businessId is guaranteed on restart.
+//
+// ROLE FIX: role + uid are re-checked before fetchOrders so staff never
+// accidentally receive all orders when uid/role are empty on cold start.
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
@@ -71,7 +75,9 @@ class OrdersProvider extends ChangeNotifier {
 
   int countByStatus(OrderStatus s) =>
       _orders.where((o) => o.status == s).length;
+
   int get todayTotal => _orders.length;
+
   double get todayRevenue => _orders
       .where((o) => o.status == OrderStatus.completed)
       .fold(0.0, (s, o) => s + o.totalAmount);
@@ -87,18 +93,18 @@ class OrdersProvider extends ChangeNotifier {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> init() async {
-    // Step 1: try Firestore
+    // Step 1: try Firestore first
     await _loadUserFromFirestore();
 
-    // Step 2: fallback to StorageService if Firestore was too slow / empty
+    // Step 2: fallback to StorageService if Firestore was slow / returned empty
     if (_businessId.isEmpty) {
       final stored = await StorageService.instance.getUserData();
       final storedBiz = stored['businessId'] as String? ?? '';
       if (storedBiz.isNotEmpty) {
-        _uid          = stored['uid']          as String? ?? _uid;
-        _name         = stored['name']         as String? ?? '';
-        _role         = stored['role']         as String? ?? 'staff';
-        _businessId   = storedBiz;
+        _uid = stored['uid'] as String? ?? _uid;
+        _name = stored['name'] as String? ?? '';
+        _role = stored['role'] as String? ?? 'staff';
+        _businessId = storedBiz;
         _businessName = stored['businessName'] as String? ?? '';
         debugPrint(
           '📦 init: loaded from StorageService fallback biz=$_businessId',
@@ -143,9 +149,9 @@ class OrdersProvider extends ChangeNotifier {
       final data = doc.data()!;
       debugPrint('📦 _loadUserFromFirestore: raw data=$data');
 
-      _name         = data['name']         as String? ?? '';
-      _role         = data['role']         as String? ?? 'staff';
-      _businessId   = data['businessId']   as String? ?? '';
+      _name = data['name'] as String? ?? '';
+      _role = data['role'] as String? ?? 'staff';
+      _businessId = data['businessId'] as String? ?? '';
       _businessName = data['businessName'] as String? ?? '';
 
       debugPrint(
@@ -156,16 +162,16 @@ class OrdersProvider extends ChangeNotifier {
       // ── Persist to StorageService so other providers can read it ──────────
       final token = await firebaseUser.getIdToken() ?? '';
       await StorageService.instance.saveUserData(
-        uid:          _uid,
-        token:        token,
-        name:         _name,
-        email:        data['email']        as String? ?? '',
-        phone:        data['phone']        as String? ?? '',
-        role:         _role,
-        businessId:   _businessId,
+        uid: _uid,
+        token: token,
+        name: _name,
+        email: data['email'] as String? ?? '',
+        phone: data['phone'] as String? ?? '',
+        role: _role,
+        businessId: _businessId,
         businessName: _businessName,
         profilePhoto: data['profilePhoto'] as String? ?? '',
-        isActive:     data['isActive']     as bool?   ?? true,
+        isActive: data['isActive'] as bool? ?? true,
       );
 
       debugPrint('📦 _loadUserFromFirestore: saved to StorageService ✅');
@@ -184,17 +190,32 @@ class OrdersProvider extends ChangeNotifier {
       return;
     }
 
+    // Guard: ensure role + uid are loaded so staff filter works correctly
+    if (_role.isEmpty || _uid.isEmpty) {
+      debugPrint('📦 fetchOrders: role/uid empty, reloading user...');
+      await _loadUserFromFirestore();
+      if (_role.isEmpty) {
+        final stored = await StorageService.instance.getUserData();
+        _uid = stored['uid'] as String? ?? _uid;
+        _role = stored['role'] as String? ?? 'staff';
+        _name = stored['name'] as String? ?? _name;
+        debugPrint('📦 fetchOrders: role from storage=$_role uid=$_uid');
+      }
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
       debugPrint(
-        '📦 fetchOrders: isAdminLevel=$isAdminLevel role=$_role biz=$_businessId',
+        '📦 fetchOrders: isAdminLevel=$isAdminLevel role=$_role '
+        'uid=$_uid biz=$_businessId',
       );
 
       _orders = await OrdersService.instance.fetchTodayOrders(
         businessId: _businessId,
+        // Only fetch all orders if truly admin level AND uid is confirmed
         staffUid: isAdminLevel ? null : _uid,
       );
 
@@ -246,11 +267,12 @@ class OrdersProvider extends ChangeNotifier {
     // Second fallback to StorageService
     if (_businessId.isEmpty) {
       final stored = await StorageService.instance.getUserData();
-      _uid          = stored['uid']          as String? ?? _uid;
-      _name         = stored['name']         as String? ?? _name;
-      _role         = stored['role']         as String? ?? _role;
-      _businessId   = stored['businessId']   as String? ?? '';
+      _uid = stored['uid'] as String? ?? _uid;
+      _name = stored['name'] as String? ?? _name;
+      _role = stored['role'] as String? ?? _role;
+      _businessId = stored['businessId'] as String? ?? '';
       _businessName = stored['businessName'] as String? ?? _businessName;
+      debugPrint('📦 createOrder: loaded from StorageService fallback');
     }
 
     if (_businessId.isEmpty) {
@@ -358,7 +380,11 @@ class OrdersProvider extends ChangeNotifier {
         final isNew = idx == -1;
         final oldStat = isNew ? null : _orders[idx].status;
 
-        if (!isAdminLevel && order.createdByUid != _uid) return;
+        // Role-based filter: staff only see their own orders
+        // Guard against empty _uid so staff don't accidentally see all
+        if (!isAdminLevel) {
+          if (_uid.isEmpty || order.createdByUid != _uid) return;
+        }
 
         if (isNew) {
           _orders.insert(0, order);
@@ -421,9 +447,7 @@ class OrdersProvider extends ChangeNotifier {
   }
 
   Future<void> markNotificationsRead() async {
-    await OrdersService.instance.markNotificationsRead(
-      businessId: _businessId,
-    );
+    await OrdersService.instance.markNotificationsRead(businessId: _businessId);
     _unreadCount = 0;
     notifyListeners();
   }

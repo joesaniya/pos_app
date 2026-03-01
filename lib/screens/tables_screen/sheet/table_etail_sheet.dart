@@ -1,12 +1,3 @@
-// lib/screens/tables_screen/table_detail_sheet.dart
-// ══════════════════════════════════════════════════════════════════════════════
-//  TABLE DETAIL SHEET  — v3
-//  • OccupiedSection now fetches ALL active orders for the table from Supabase
-//  • Shows every ordered item with quantity, price, veg badge, notes
-//  • Displays per-order sub-totals + grand-total bill card
-//  • Realtime subscription: re-fetches on any order/item INSERT/UPDATE
-//  • Syncs current_order_total back to restaurant_tables so floor view is live
-// ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:developer';
 

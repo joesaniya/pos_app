@@ -152,20 +152,6 @@ class _TablesBodyState extends State<_TablesBody> {
 
 // ═════════════════════════════════════════════════════════════
 //  FLOOR VIEW
-//
-//  ROOT CAUSE OF CRASH:
-//    TableGrid is a ListView.  Putting a ListView inside
-//    SliverToBoxAdapter gives it unbounded height → Flutter
-//    can't lay it out → "RenderBox was not laid out" + null
-//    check operator crashes.
-//
-//  FIX:
-//    Never put a scrollable (ListView / GridView) inside
-//    SliverToBoxAdapter.  Instead, _buildTableSlivers() returns
-//    the section headers and card grids as native slivers
-//    (SliverToBoxAdapter for headers, SliverGrid for cards).
-//    Everything sits inside one CustomScrollView with no nested
-//    scrollables anywhere.
 // ═════════════════════════════════════════════════════════════
 class _FloorView extends StatefulWidget {
   final TablesProvider prov;
@@ -196,13 +182,10 @@ class _FloorViewState extends State<_FloorView> {
 
     return RefreshIndicator(
       color: TC.accent,
-      // edgeOffset pushes the spinner below the pinned sticky header
       edgeOffset: 0,
       onRefresh: () => prov.refresh(),
       child: CustomScrollView(
         controller: _scrollCtrl,
-        // AlwaysScrollableScrollPhysics makes overscroll work even when
-        // content is shorter than the viewport (required for pull-to-refresh)
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           // ① Alert banners ──────────────────────────────────────
@@ -244,11 +227,6 @@ class _FloorViewState extends State<_FloorView> {
     );
   }
 
-  // ── Build table sections as slivers ────────────────────────────────────────
-  // Each TableSection becomes:
-  //   • SliverToBoxAdapter  → section header pill row
-  //   • SliverPadding       → wraps a SliverGrid of TableCard widgets
-  //   • SliverToBoxAdapter  → bottom gap between sections
   List<Widget> _buildTableSlivers(TablesProvider prov) {
     final sections = prov.selectedSection != null
         ? [prov.selectedSection!]
@@ -372,11 +350,6 @@ class _FloorViewState extends State<_FloorView> {
 
 // ─────────────────────────────────────────────────────────────
 //  STICKY TABS DELEGATE
-//  Keeps SectionTabs + StatusFilterRow pinned below the app-bar
-//  area while the table grid scrolls underneath.
-//
-//  Height must exactly match the rendered height of both widgets
-//  combined.  Adjust _h if you change padding inside those widgets.
 // ─────────────────────────────────────────────────────────────
 class _StickyTabsDelegate extends SliverPersistentHeaderDelegate {
   final TablesProvider prov;
@@ -399,7 +372,6 @@ class _StickyTabsDelegate extends SliverPersistentHeaderDelegate {
   ) {
     return Material(
       color: TC.bg,
-      // Show a subtle shadow when content scrolls beneath the header
       elevation: overlapsContent ? 3 : 0,
       shadowColor: Colors.black12,
       child: SizedBox(
@@ -415,12 +387,13 @@ class _StickyTabsDelegate extends SliverPersistentHeaderDelegate {
     );
   }
 
+ 
   @override
-  bool shouldRebuild(_StickyTabsDelegate old) => old.prov != prov;
+  bool shouldRebuild(_StickyTabsDelegate old) => true;
 }
 
-
-/*nt scrollimport 'package:flutter/material.dart';
+/*//nt scroll
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/sheet/add_edit_table_sheet.dart';
@@ -431,7 +404,7 @@ import 'package:pos_app/screens/tables_screen/widgets/view_toggle_widgets.dart';
 import 'package:provider/provider.dart';
 import 'widgets/floor_widgets.dart';
 import 'widgets/shared_widgets.dart';
-import 'widgets/today_reservations_widget.dart';   // ← NEW
+import 'widgets/today_reservations_widget.dart'; // ← NEW
 import 'views/table_calendar_view.dart';
 
 // ═════════════════════════════════════════════════════════════
@@ -489,8 +462,8 @@ class _TablesBodyState extends State<_TablesBody> {
           backgroundColor: TC.bg,
           floatingActionButton:
               _currentView == TabView.floor && prov.canManageTables
-                  ? AddTableFAB(onTap: () => _openAddTable(ctx, prov))
-                  : null,
+              ? AddTableFAB(onTap: () => _openAddTable(ctx, prov))
+              : null,
           body: SafeArea(
             child: RefreshIndicator(
               color: TC.accent,
@@ -526,32 +499,32 @@ class _TablesBodyState extends State<_TablesBody> {
                       ),
                       child: switch (_currentView) {
                         TabView.floor => Column(
-                            key: const ValueKey('tables'),
-                            children: [
-                              SummaryBar(prov: prov),
-                              // ── NEW: Today/Tomorrow strip ─────
-                              TodayReservationStrip(
-                                prov: prov,
-                                onViewAll: () =>
-                                    _openTodayReservations(ctx, prov),
-                              ),
-                              SectionTabs(prov: prov),
-                              StatusFilterRow(prov: prov),
-                              Expanded(
-                                child: prov.filteredTables.isEmpty
-                                    ? const EmptyState()
-                                    : TableGrid(prov: prov),
-                              ),
-                            ],
-                          ),
+                          key: const ValueKey('tables'),
+                          children: [
+                            SummaryBar(prov: prov),
+                            // ── NEW: Today/Tomorrow strip ─────
+                            TodayReservationStrip(
+                              prov: prov,
+                              onViewAll: () =>
+                                  _openTodayReservations(ctx, prov),
+                            ),
+                            SectionTabs(prov: prov),
+                            StatusFilterRow(prov: prov),
+                            Expanded(
+                              child: prov.filteredTables.isEmpty
+                                  ? const EmptyState()
+                                  : TableGrid(prov: prov),
+                            ),
+                          ],
+                        ),
                         TabView.calendar => CalendarView(
-                            key: const ValueKey('cal'),
-                            prov: prov,
-                          ),
+                          key: const ValueKey('cal'),
+                          prov: prov,
+                        ),
                         TabView.history => HistoryView(
-                            key: const ValueKey('history'),
-                            prov: prov,
-                          ),
+                          key: const ValueKey('history'),
+                          prov: prov,
+                        ),
                       },
                     ),
                   ),
@@ -587,4 +560,5 @@ class _TablesBodyState extends State<_TablesBody> {
       ),
     );
   }
-}*/
+}
+*/

@@ -8,6 +8,7 @@ import 'package:pos_app/providers/onboard_provider.dart';
 import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
+import 'package:pos_app/providers/report_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -34,6 +35,7 @@ class ProviderHelperClass {
     //screens
     ChangeNotifierProvider(create: (_) => PageSwitcherProvider()),
     ChangeNotifierProvider(create: (_) => AnalyticsProvider()),
+    ChangeNotifierProvider(create: (_) => ReportProvider()),
     ChangeNotifierProvider(create: (_) => DashboardProvider()),
     ChangeNotifierProvider(create: (_) => OrdersProvider()),
     ChangeNotifierProvider(create: (_) => TablesProvider()),

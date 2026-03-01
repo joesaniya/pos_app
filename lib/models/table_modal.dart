@@ -367,8 +367,17 @@ class RestaurantTable {
 
   /// e.g. "T06"
   String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
-
   String get occupiedDuration {
+    if (occupiedSince == null) return '—';
+    final diff = nowIST().difference(occupiedSince!);
+    final mins = diff.isNegative ? 0 : diff.inMinutes;
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${m}m';
+  }
+
+  String get occupiedDuration1 {
     if (occupiedSince == null) return '—';
     // ✅ FIX: use nowIST() — occupiedSince is already in IST from provider
     final diff = nowIST().difference(occupiedSince!);
@@ -379,14 +388,14 @@ class RestaurantTable {
     return '${diff.inMinutes}m';
   }
 
-  String get occupiedDuration1 {
-    if (occupiedSince == null) return '';
-    final diff = DateTime.now().difference(occupiedSince!);
-    if (diff.inHours > 0) {
-      return '${diff.inHours}h ${diff.inMinutes.remainder(60)}m';
-    }
-    return '${diff.inMinutes}m';
-  }
+  // String get occupiedDuration1 {
+  //   if (occupiedSince == null) return '';
+  //   final diff = DateTime.now().difference(occupiedSince!);
+  //   if (diff.inHours > 0) {
+  //     return '${diff.inHours}h ${diff.inMinutes.remainder(60)}m';
+  //   }
+  //   return '${diff.inMinutes}m';
+  // }
 
   /// Minutes the table has been occupied (0 if not occupied)
   int get occupiedMinutes {

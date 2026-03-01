@@ -308,10 +308,7 @@ class TablesProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  // ── Fetch tables (Floor view) ──────────────────────────
-  // NOTE: isToday check in _rowToTable is intentional — Floor view table
-  // cards only show today's reservation. Calendar uses _calendarReservations.
-  Future<void> _fetchTables() async {
+Future<void> _fetchTables() async {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
     try {

@@ -2,6 +2,8 @@
 //  ENUMS
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'package:pos_app/utils/ist_utils.dart';
+
 enum TableStatus { available, occupied, reserved, cleaning }
 
 extension TableStatusExt on TableStatus {
@@ -366,8 +368,18 @@ class RestaurantTable {
   /// e.g. "T06"
   String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
 
-  /// Human-readable duration since the table became occupied
   String get occupiedDuration {
+    if (occupiedSince == null) return '—';
+    // ✅ FIX: use nowIST() — occupiedSince is already in IST from provider
+    final diff = nowIST().difference(occupiedSince!);
+    if (diff.isNegative) return '0m'; // guard against clock skew
+    final h = diff.inHours;
+    final m = diff.inMinutes.remainder(60);
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${diff.inMinutes}m';
+  }
+
+  String get occupiedDuration1 {
     if (occupiedSince == null) return '';
     final diff = DateTime.now().difference(occupiedSince!);
     if (diff.inHours > 0) {

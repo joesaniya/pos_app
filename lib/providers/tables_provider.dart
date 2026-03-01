@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:pos_app/utils/ist_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -86,18 +87,17 @@ class TablesProvider extends ChangeNotifier {
         return false;
       if (_selectedStatus != null && t.status != _selectedStatus) return false;
       return true;
-    }).toList()
-      ..sort((a, b) {
-        const p = {
-          TableStatus.occupied: 0,
-          TableStatus.reserved: 1,
-          TableStatus.available: 2,
-          TableStatus.cleaning: 3,
-        };
-        final pa = p[a.status] ?? 4, pb = p[b.status] ?? 4;
-        if (pa != pb) return pa.compareTo(pb);
-        return a.tableNumber.compareTo(b.tableNumber);
-      });
+    }).toList()..sort((a, b) {
+      const p = {
+        TableStatus.occupied: 0,
+        TableStatus.reserved: 1,
+        TableStatus.available: 2,
+        TableStatus.cleaning: 3,
+      };
+      final pa = p[a.status] ?? 4, pb = p[b.status] ?? 4;
+      if (pa != pb) return pa.compareTo(pb);
+      return a.tableNumber.compareTo(b.tableNumber);
+    });
   }
 
   int get totalAvailable =>
@@ -120,22 +120,28 @@ class TablesProvider extends ChangeNotifier {
         r.reservedFor.day,
       );
       return rd == d;
-    }).toList()
-      ..sort((a, b) => a.reservedFor.compareTo(b.reservedFor));
+    }).toList()..sort((a, b) => a.reservedFor.compareTo(b.reservedFor));
   }
 
   // ── FIX: counts now use _calendarReservations ──────────
   // Previously always returned 0 because _tables only has today's reservations.
-  int get todayReservationCount =>
-      reservationsForDate(DateTime.now()).length;
+  int get todayReservationCount => reservationsForDate(DateTime.now()).length;
   int get tomorrowReservationCount =>
       reservationsForDate(DateTime.now().add(const Duration(days: 1))).length;
 
   /// Which dates in a given month have ≥1 reservation — for calendar dot indicators.
   Set<DateTime> reservationDatesInMonth(int year, int month) {
     return _calendarReservations
-        .where((r) => r.reservedFor.year == year && r.reservedFor.month == month)
-        .map((r) => DateTime(r.reservedFor.year, r.reservedFor.month, r.reservedFor.day))
+        .where(
+          (r) => r.reservedFor.year == year && r.reservedFor.month == month,
+        )
+        .map(
+          (r) => DateTime(
+            r.reservedFor.year,
+            r.reservedFor.month,
+            r.reservedFor.day,
+          ),
+        )
         .toSet();
   }
 
@@ -172,10 +178,7 @@ class TablesProvider extends ChangeNotifier {
       await _loadUserCtx();
       if (_userCtx != null) {
         // FIX: fetch tables AND upcoming reservations in parallel
-        await Future.wait([
-          _fetchTables(),
-          _fetchCalendarReservations(),
-        ]);
+        await Future.wait([_fetchTables(), _fetchCalendarReservations()]);
         _subscribeRealtime();
         _startNotifTimer();
       }
@@ -261,10 +264,10 @@ class TablesProvider extends ChangeNotifier {
   }
 
   void _runNotifCheck() => _notif.checkAll(
-        tables: _tables,
-        businessName: _userCtx?.businessName ?? '',
-        longSeatedMinutes: 240,
-      );
+    tables: _tables,
+    businessName: _userCtx?.businessName ?? '',
+    longSeatedMinutes: 240,
+  );
 
   // ── Realtime ───────────────────────────────────────────
   void _subscribeRealtime() {
@@ -328,9 +331,137 @@ class TablesProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+  // ═══════════════════════════════════════════════════════════════
+  //  PATCH FOR: lib/providers/tables_provider.dart
+  //
+  //  STEP 1: Add this import near the top:
+  //    import 'package:pos_app/utils/ist_utils.dart';
+  //
+  //  STEP 2: Replace the entire _rowToTable method with this:
+  // ═══════════════════════════════════════════════════════════════
+
+  RestaurantTable _rowToTable(Map<String, dynamic> row) {
+    Reservation? reservation;
+
+    if (row['reservation_id'] != null) {
+      // ✅ FIX: always parse Supabase UTC → IST explicitly
+      final reservedFor = parseToIST(row['res_reserved_for'] as String);
+      final resStatus = (row['res_status'] ?? 'active') as String;
+
+      // Compare dates in IST
+      final todayIST = nowIST();
+      final isToday =
+          reservedFor.year == todayIST.year &&
+          reservedFor.month == todayIST.month &&
+          reservedFor.day == todayIST.day;
+
+      if (isToday && (resStatus == 'active' || resStatus == 'seated')) {
+        reservation = Reservation(
+          id: row['reservation_id'] as String,
+          customerName: row['res_customer_name'] as String? ?? '',
+          phone: row['res_phone'] as String?,
+          guestCount: row['res_guest_count'] as int? ?? 2,
+          reservedFor: reservedFor,
+          checkIn: row['res_check_in'] != null
+              ? parseToIST(row['res_check_in'] as String)
+              : null,
+          checkOut: row['res_check_out'] != null
+              ? parseToIST(row['res_check_out'] as String)
+              : null,
+          notes: row['res_notes'] as String?,
+          warningSent: row['res_warning_sent'] as bool? ?? false,
+          createdAt: parseToIST(row['res_created_at'] as String),
+          createdByName: row['res_created_by_name'] as String?,
+          createdByRole: row['res_created_by_role'] as String?,
+        );
+      }
+    }
+
+    return RestaurantTable(
+      id: row['id'] as String,
+      tableNumber: row['table_number'] as int,
+      capacity: row['capacity'] as int,
+      status: _parseStatus(row['status'] as String),
+      section: _parseSection(row['section'] as String),
+      shape: _parseShape((row['shape'] ?? 'square') as String),
+      hasWindow: row['has_window'] as bool? ?? false,
+      isPremium: row['is_premium'] as bool? ?? false,
+      currentCustomerName: row['current_customer_name'] as String?,
+      currentOrderId: row['current_order_id'] as String?,
+      currentOrderTotal: row['current_order_total'] != null
+          ? (row['current_order_total'] as num).toDouble()
+          : null,
+
+      // ✅ KEY FIX: parse occupied_since as UTC → IST
+      // Old code: DateTime.parse(row['occupied_since']).toLocal()
+      // Problem:  .toLocal() uses DEVICE timezone — unreliable
+      // Fix:      parseToIST() hardcodes +5:30 regardless of device
+      occupiedSince: row['occupied_since'] != null
+          ? parseToIST(row['occupied_since'] as String)
+          : null,
+
+      reservation: reservation,
+    );
+  }
+
+  RestaurantTable _rowToTable_ordertimefix(Map<String, dynamic> row) {
+    Reservation? reservation;
+    if (row['reservation_id'] != null) {
+      // ✅ FIX: parse as UTC → IST explicitly
+      final reservedFor = parseToIST(row['res_reserved_for'] as String);
+      final resStatus = (row['res_status'] ?? 'active') as String;
+      final todayIST = nowIST();
+      final isToday =
+          reservedFor.year == todayIST.year &&
+          reservedFor.month == todayIST.month &&
+          reservedFor.day == todayIST.day;
+
+      if (isToday && (resStatus == 'active' || resStatus == 'seated')) {
+        reservation = Reservation(
+          id: row['reservation_id'],
+          customerName: row['res_customer_name'] ?? '',
+          phone: row['res_phone'],
+          guestCount: row['res_guest_count'] ?? 2,
+          reservedFor: reservedFor,
+          checkIn: row['res_check_in'] != null
+              ? parseToIST(row['res_check_in'] as String)
+              : null,
+          checkOut: row['res_check_out'] != null
+              ? parseToIST(row['res_check_out'] as String)
+              : null,
+          notes: row['res_notes'],
+          warningSent: row['res_warning_sent'] ?? false,
+          createdAt: parseToIST(row['res_created_at'] as String),
+          createdByName: row['res_created_by_name'],
+          createdByRole: row['res_created_by_role'],
+        );
+      }
+    }
+
+    return RestaurantTable(
+      id: row['id'],
+      tableNumber: row['table_number'],
+      capacity: row['capacity'],
+      status: _parseStatus(row['status']),
+      section: _parseSection(row['section']),
+      shape: _parseShape(row['shape'] ?? 'square'),
+      hasWindow: row['has_window'] ?? false,
+      isPremium: row['is_premium'] ?? false,
+      currentCustomerName: row['current_customer_name'],
+      currentOrderId: row['current_order_id'],
+      currentOrderTotal: row['current_order_total'] != null
+          ? (row['current_order_total'] as num).toDouble()
+          : null,
+      // ✅ FIX: parse occupied_since as UTC → IST
+      occupiedSince: row['occupied_since'] != null
+          ? parseToIST(row['occupied_since'] as String)
+          : null,
+      reservation: reservation,
+    );
+  }
 
   // ── Row → Model ────────────────────────────────────────
-  RestaurantTable _rowToTable(Map<String, dynamic> row) {
+  RestaurantTable _rowToTable1(Map<String, dynamic> row) {
     Reservation? reservation;
     if (row['reservation_id'] != null) {
       final reservedFor = DateTime.parse(row['res_reserved_for']).toLocal();
@@ -384,17 +515,17 @@ class TablesProvider extends ChangeNotifier {
   }
 
   TableStatus _parseStatus(String s) => TableStatus.values.firstWhere(
-        (e) => e.name == s,
-        orElse: () => TableStatus.available,
-      );
+    (e) => e.name == s,
+    orElse: () => TableStatus.available,
+  );
   TableSection _parseSection(String s) => TableSection.values.firstWhere(
-        (e) => e.name == s,
-        orElse: () => TableSection.ac,
-      );
+    (e) => e.name == s,
+    orElse: () => TableSection.ac,
+  );
   TableShape _parseShape(String s) => TableShape.values.firstWhere(
-        (e) => e.name == s,
-        orElse: () => TableShape.square,
-      );
+    (e) => e.name == s,
+    orElse: () => TableShape.square,
+  );
 
   // ── Model → Row ────────────────────────────────────────
   Map<String, dynamic> _tableToRow(RestaurantTable t, {bool isCreate = false}) {
@@ -751,8 +882,7 @@ class TablesProvider extends ChangeNotifier {
     try {
       final fromDate =
           _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
-      final toDate =
-          _historyTo ?? DateTime.now().add(const Duration(days: 60));
+      final toDate = _historyTo ?? DateTime.now().add(const Duration(days: 60));
 
       final rows = await _sb
           .from(_kReservations)
@@ -761,10 +891,7 @@ class TablesProvider extends ChangeNotifier {
           .gte('reserved_for', fromDate.toUtc().toIso8601String())
           .lte('reserved_for', toDate.toUtc().toIso8601String())
           .order('reserved_for', ascending: false)
-          .range(
-            _historyPage * _pageSize,
-            (_historyPage + 1) * _pageSize - 1,
-          );
+          .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
 
       final items = (rows as List)
           .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
@@ -821,11 +948,10 @@ class TablesProvider extends ChangeNotifier {
       final r = t.reservation;
       if (r == null) return false;
       return r.reservedFor.isAfter(now) && r.reservedFor.isBefore(cutoff);
-    }).toList()
-      ..sort(
-        (a, b) =>
-            a.reservation!.reservedFor.compareTo(b.reservation!.reservedFor),
-      );
+    }).toList()..sort(
+      (a, b) =>
+          a.reservation!.reservedFor.compareTo(b.reservation!.reservedFor),
+    );
   }
 
   List<RestaurantTable> get endingSoonTables =>

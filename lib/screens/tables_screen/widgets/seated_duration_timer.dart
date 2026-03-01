@@ -1,4 +1,228 @@
+// lib/screens/tables_screen/widgets/seated_duration_timer.dart
+
 import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:pos_app/screens/tables_screen/table_theme.dart';
+import 'package:pos_app/utils/ist_utils.dart';
+
+// ═════════════════════════════════════════════════════════════
+//  LIVE SEATED DURATION TIMER
+// ═════════════════════════════════════════════════════════════
+class SeatedDurationTimer extends StatefulWidget {
+  final DateTime? occupiedSince; // already converted to IST by provider
+  final bool showWarning;
+  final int warningMinutes;
+  final int dangerMinutes;
+
+  const SeatedDurationTimer({
+    super.key,
+    required this.occupiedSince,
+    this.showWarning = true,
+    this.warningMinutes = 240,
+    this.dangerMinutes = 270,
+  });
+
+  @override
+  State<SeatedDurationTimer> createState() => _SeatedDurationTimerState();
+}
+
+class _SeatedDurationTimerState extends State<SeatedDurationTimer> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Tick every minute to refresh duration
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  int get _elapsedMinutes {
+    if (widget.occupiedSince == null) return 0;
+    // ✅ Use IST now — not device DateTime.now()
+    final diff = nowIST().difference(widget.occupiedSince!);
+    return diff.isNegative ? 0 : diff.inMinutes;
+  }
+
+  String get _label {
+    final mins = _elapsedMinutes;
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.occupiedSince == null) return const SizedBox.shrink();
+
+    final mins = _elapsedMinutes;
+
+    final Color color;
+    final Color bg;
+    final String emoji;
+
+    if (widget.showWarning && mins >= widget.dangerMinutes) {
+      color = TC.occupied;
+      bg = TC.occupiedBg;
+      emoji = '🔴';
+    } else if (widget.showWarning && mins >= widget.warningMinutes) {
+      color = TC.nonAcAmber;
+      bg = TC.nonAcBg;
+      emoji = '🟠';
+    } else {
+      color = TC.available;
+      bg = TC.availableBg;
+      emoji = '🟢';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Seated for',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: color.withOpacity(0.8),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                _label,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: color,
+                  letterSpacing: -0.3,
+                ),
+              ),
+            ],
+          ),
+          if (widget.showWarning && mins >= widget.warningMinutes) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                mins >= widget.dangerMinutes ? '4.5h+ stay' : '4h+ stay',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+//  COMPACT DURATION CHIP  (for table cards on floor view)
+// ═════════════════════════════════════════════════════════════
+class SeatedDurationChip extends StatefulWidget {
+  final DateTime? occupiedSince; // already converted to IST by provider
+  final int warningMinutes;
+  final int dangerMinutes;
+
+  const SeatedDurationChip({
+    super.key,
+    required this.occupiedSince,
+    this.warningMinutes = 240,
+    this.dangerMinutes = 270,
+  });
+
+  @override
+  State<SeatedDurationChip> createState() => _SeatedDurationChipState();
+}
+
+class _SeatedDurationChipState extends State<SeatedDurationChip> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.occupiedSince == null) return const SizedBox.shrink();
+
+    // ✅ Use IST now
+    final diff = nowIST().difference(widget.occupiedSince!);
+    final mins = diff.isNegative ? 0 : diff.inMinutes;
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    final label = h > 0 ? '${h}h ${m.toString().padLeft(2, '0')}m' : '${m}m';
+
+    final Color color = mins >= widget.dangerMinutes
+        ? TC.occupied
+        : mins >= widget.warningMinutes
+        ? TC.nonAcAmber
+        : TC.textSec;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.schedule_outlined, size: 11, color: color.withOpacity(0.7)),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+        if (mins >= widget.warningMinutes) ...[
+          const SizedBox(width: 3),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+
+/*import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 
@@ -217,4 +441,4 @@ class _SeatedDurationChipState extends State<SeatedDurationChip> {
       ],
     );
   }
-}
+}*/

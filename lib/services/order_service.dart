@@ -1,6 +1,7 @@
 // lib/services/orders_service.dart
 // Supabase backend service for all order operations
 
+import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,14 +29,14 @@ class OrdersService {
         .eq('business_id', businessId);
 
     if (status != null) query = query.eq('status', status);
-    if (from != null)   query = query.gte('created_at', from.toIso8601String());
-    if (to != null)     query = query.lt('created_at', to.toIso8601String());
+    if (from != null) query = query.gte('created_at', from.toIso8601String());
+    if (to != null) query = query.lt('created_at', to.toIso8601String());
 
-    final data = await query
-        .order('created_at', ascending: false)
-        .limit(limit);
+    final data = await query.order('created_at', ascending: false).limit(limit);
 
-    return (data as List).map((j) => Order.fromJson(j as Map<String, dynamic>)).toList();
+    return (data as List)
+        .map((j) => Order.fromJson(j as Map<String, dynamic>))
+        .toList();
   }
 
   /// Orders for a specific staff member
@@ -53,11 +54,13 @@ class OrdersService {
         .eq('created_by_uid', staffUid);
 
     if (status != null) query = query.eq('status', status);
-    if (from != null)   query = query.gte('created_at', from.toIso8601String());
-    if (to != null)     query = query.lt('created_at', to.toIso8601String());
+    if (from != null) query = query.gte('created_at', from.toIso8601String());
+    if (to != null) query = query.lt('created_at', to.toIso8601String());
 
     final data = await query.order('created_at', ascending: false);
-    return (data as List).map((j) => Order.fromJson(j as Map<String, dynamic>)).toList();
+    return (data as List)
+        .map((j) => Order.fromJson(j as Map<String, dynamic>))
+        .toList();
   }
 
   /// Active orders for a specific table
@@ -73,11 +76,56 @@ class OrdersService {
         .inFilter('status', ['pending', 'preparing', 'ready'])
         .order('created_at', ascending: true);
 
-    return (data as List).map((j) => Order.fromJson(j as Map<String, dynamic>)).toList();
+    return (data as List)
+        .map((j) => Order.fromJson(j as Map<String, dynamic>))
+        .toList();
   }
 
-  /// Today's orders for a business — used for live order screen
   Future<List<Order>> fetchTodayOrders({
+    required String businessId,
+    String? staffUid,
+  }) async {
+    // ✅ FIX: Use IST (UTC+5:30) to determine "today's" boundaries
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+
+    final istStartOfDay = DateTime(nowIst.year, nowIst.month, nowIst.day);
+    final istEndOfDay = istStartOfDay.add(const Duration(days: 1));
+
+    final utcStart = istStartOfDay.subtract(
+      const Duration(hours: 5, minutes: 30),
+    );
+    final utcEnd = istEndOfDay.subtract(const Duration(hours: 5, minutes: 30));
+
+    debugPrint(
+      '📦 fetchTodayOrders: IST today=${nowIst.toIso8601String()}'
+      ' | UTC range: ${utcStart.toIso8601String()} → ${utcEnd.toIso8601String()}',
+    );
+
+    // ✅ FIX: Apply ALL filters on the PostgrestFilterBuilder BEFORE
+    // any transform operations. Never chain .eq() after .order().
+    var query = Supabase.instance.client
+        .from('orders')
+        .select('*, order_items(*)');
+
+    // Apply filters while still a PostgrestFilterBuilder
+    var filtered = query
+        .eq('business_id', businessId)
+        .gte('created_at', utcStart.toIso8601String())
+        .lt('created_at', utcEnd.toIso8601String());
+
+    // Conditionally add staffUid filter (still on FilterBuilder)
+    if (staffUid != null) {
+      filtered = filtered.eq('created_by_uid', staffUid);
+    }
+
+    // Apply transform (order) LAST — after all filters
+    final data = await filtered.order('created_at', ascending: false);
+
+    return (data as List).map((e) => Order.fromJson(e)).toList();
+  }
+
+  Future<List<Order>> fetchTodayOrdersUST({
     required String businessId,
     String? staffUid, // null = all staff
   }) async {
@@ -95,7 +143,9 @@ class OrdersService {
     if (staffUid != null) query = query.eq('created_by_uid', staffUid);
 
     final data = await query.order('created_at', ascending: false);
-    return (data as List).map((j) => Order.fromJson(j as Map<String, dynamic>)).toList();
+    return (data as List)
+        .map((j) => Order.fromJson(j as Map<String, dynamic>))
+        .toList();
   }
 
   // ══════════════════════════════════════════════════════
@@ -122,53 +172,66 @@ class OrdersService {
     final totalAmount = subtotal + taxAmount;
 
     // Insert order
-    final orderData = await _db.from('orders').insert({
-      'business_id':      businessId,
-      'business_name':    businessName,
-      'status':           'pending',
-      'order_type':       orderType.value,
-      'table_id':         tableId,
-      'table_number':     tableNumber,
-      'customer_name':    customerName,
-      'customer_phone':   customerPhone,
-      'subtotal':         subtotal,
-      'tax_amount':       taxAmount,
-      'tax_rate':         taxRate,
-      'total_amount':     totalAmount,
-      'notes':            notes,
-      'created_by_uid':   createdByUid,
-      'created_by_name':  createdByName,
-      'created_by_role':  createdByRole,
-    }).select().single();
+    final orderData = await _db
+        .from('orders')
+        .insert({
+          'business_id': businessId,
+          'business_name': businessName,
+          'status': 'pending',
+          'order_type': orderType.value,
+          'table_id': tableId,
+          'table_number': tableNumber,
+          'customer_name': customerName,
+          'customer_phone': customerPhone,
+          'subtotal': subtotal,
+          'tax_amount': taxAmount,
+          'tax_rate': taxRate,
+          'total_amount': totalAmount,
+          'notes': notes,
+          'created_by_uid': createdByUid,
+          'created_by_name': createdByName,
+          'created_by_role': createdByRole,
+        })
+        .select()
+        .single();
 
     final orderId = orderData['id'] as String;
 
     // Insert order items
     if (cartItems.isNotEmpty) {
-      await _db.from('order_items').insert(
-        cartItems.map((c) => {
-          'order_id':      orderId,
-          'menu_item_id':  c.menuItemId,
-          'item_name':     c.itemName,
-          'item_price':    c.itemPrice,
-          'category_name': c.categoryName,
-          'is_veg':        c.isVeg,
-          'quantity':      c.quantity,
-          'subtotal':      c.subtotal,
-          'notes':         c.notes,
-        }).toList(),
-      );
+      await _db
+          .from('order_items')
+          .insert(
+            cartItems
+                .map(
+                  (c) => {
+                    'order_id': orderId,
+                    'menu_item_id': c.menuItemId,
+                    'item_name': c.itemName,
+                    'item_price': c.itemPrice,
+                    'category_name': c.categoryName,
+                    'is_veg': c.isVeg,
+                    'quantity': c.quantity,
+                    'subtotal': c.subtotal,
+                    'notes': c.notes,
+                  },
+                )
+                .toList(),
+          );
     }
 
     // If dine-in, update the table's current order info
     if (tableId != null) {
-      await _db.from('restaurant_tables').update({
-        'current_order_id':    orderId,
-        'current_order_total': totalAmount,
-        'current_customer_name': customerName,
-        'status':              'occupied',
-        'occupied_since':      DateTime.now().toIso8601String(),
-      }).eq('id', tableId);
+      await _db
+          .from('restaurant_tables')
+          .update({
+            'current_order_id': orderId,
+            'current_order_total': totalAmount,
+            'current_customer_name': customerName,
+            'status': 'occupied',
+            'occupied_since': DateTime.now().toIso8601String(),
+          })
+          .eq('id', tableId);
     }
 
     // Fetch the full order with items
@@ -194,9 +257,9 @@ class OrdersService {
     final now = DateTime.now().toIso8601String();
 
     final updateMap = <String, dynamic>{
-      'status':           newStatus.value,
-      'updated_by_uid':   updatedByUid,
-      'updated_by_name':  updatedByName,
+      'status': newStatus.value,
+      'updated_by_uid': updatedByUid,
+      'updated_by_name': updatedByName,
     };
 
     switch (newStatus) {
@@ -296,7 +359,10 @@ class OrdersService {
                   .maybeSingle();
 
               if (full != null) {
-                onEvent(Order.fromJson(full as Map<String, dynamic>), payload.eventType.name);
+                onEvent(
+                  Order.fromJson(full as Map<String, dynamic>),
+                  payload.eventType.name,
+                );
               }
             } catch (e) {
               // ignore realtime errors silently
@@ -340,12 +406,15 @@ class OrdersService {
     required DateTime to,
     String? staffUid,
   }) async {
-    final data = await _db.rpc('fn_revenue_summary', params: {
-      'p_business_id': businessId,
-      'p_from':        from.toIso8601String(),
-      'p_to':          to.toIso8601String(),
-      'p_staff_uid':   staffUid,
-    });
+    final data = await _db.rpc(
+      'fn_revenue_summary',
+      params: {
+        'p_business_id': businessId,
+        'p_from': from.toIso8601String(),
+        'p_to': to.toIso8601String(),
+        'p_staff_uid': staffUid,
+      },
+    );
 
     final row = (data as List).isNotEmpty
         ? data[0] as Map<String, dynamic>
@@ -353,10 +422,10 @@ class OrdersService {
 
     return {
       'total_revenue': (row['total_revenue'] as num? ?? 0).toDouble(),
-      'total_orders':  (row['total_orders'] as num? ?? 0).toInt(),
-      'avg_order':     (row['avg_order'] as num? ?? 0).toDouble(),
-      'completed':     (row['completed'] as num? ?? 0).toInt(),
-      'cancelled':     (row['cancelled'] as num? ?? 0).toInt(),
+      'total_orders': (row['total_orders'] as num? ?? 0).toInt(),
+      'avg_order': (row['avg_order'] as num? ?? 0).toDouble(),
+      'completed': (row['completed'] as num? ?? 0).toInt(),
+      'cancelled': (row['cancelled'] as num? ?? 0).toInt(),
     };
   }
 
@@ -367,7 +436,9 @@ class OrdersService {
   }) async {
     final data = await _db
         .from('orders')
-        .select('created_by_uid, created_by_name, created_by_role, total_amount, table_id, status')
+        .select(
+          'created_by_uid, created_by_name, created_by_role, total_amount, table_id, status',
+        )
         .eq('business_id', businessId)
         .gte('created_at', from.toIso8601String())
         .lt('created_at', to.toIso8601String());
@@ -378,28 +449,37 @@ class OrdersService {
       final uid = row['created_by_uid'] as String? ?? 'unknown';
       if (!grouped.containsKey(uid)) {
         grouped[uid] = {
-          'uid':     uid,
-          'name':    row['created_by_name'] ?? 'Unknown',
-          'role':    row['created_by_role'] ?? 'staff',
-          'orders':  0,
+          'uid': uid,
+          'name': row['created_by_name'] ?? 'Unknown',
+          'role': row['created_by_role'] ?? 'staff',
+          'orders': 0,
           'revenue': 0.0,
-          'tables':  <String?>{},
+          'tables': <String?>{},
         };
       }
       grouped[uid]!['orders'] = (grouped[uid]!['orders'] as int) + 1;
-      grouped[uid]!['revenue'] = (grouped[uid]!['revenue'] as double) +
+      grouped[uid]!['revenue'] =
+          (grouped[uid]!['revenue'] as double) +
           ((row['total_amount'] as num? ?? 0).toDouble());
       (grouped[uid]!['tables'] as Set<String?>).add(row['table_id'] as String?);
     }
 
-    return grouped.values.map((e) => {
-      'uid':     e['uid'],
-      'name':    e['name'],
-      'role':    e['role'],
-      'orders':  e['orders'],
-      'revenue': e['revenue'],
-      'tables':  (e['tables'] as Set<String?>).where((t) => t != null).length,
-    }).toList()
-      ..sort((a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double));
+    return grouped.values
+        .map(
+          (e) => {
+            'uid': e['uid'],
+            'name': e['name'],
+            'role': e['role'],
+            'orders': e['orders'],
+            'revenue': e['revenue'],
+            'tables': (e['tables'] as Set<String?>)
+                .where((t) => t != null)
+                .length,
+          },
+        )
+        .toList()
+      ..sort(
+        (a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double),
+      );
   }
 }

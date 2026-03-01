@@ -342,8 +342,19 @@ class Order {
 
   // ── Computed ────────────────────────────────────────────
   int get totalItems => items.fold(0, (s, i) => s + i.quantity);
+// In Order model — wherever timeLabel is defined:
+String get timeLabel {
+  // ✅ Convert UTC createdAt to IST for display
+  final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
+  final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  final diff = now.difference(ist);
 
-  String get timeLabel {
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${ist.day}/${ist.month}';
+}
+  String get timeLabelUST {
     final diff = DateTime.now().difference(createdAt);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     return '${diff.inHours}h ago';

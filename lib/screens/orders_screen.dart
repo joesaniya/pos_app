@@ -655,12 +655,31 @@ class _OrderCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: const Text(
+                        /* child: const Text(
                           'Cancel',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
+                        ),*/
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.close_rounded,
+                              color: OC.cancelled,
+                              size: 16,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: OC.cancelled,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -679,13 +698,31 @@ class _OrderCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: Text(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              status.emoji,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              status.nextLabel,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        /*  child: Text(
                           status.nextLabel,
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                           ),
-                        ),
+                        ),*/
                       ),
                     ),
                 ],

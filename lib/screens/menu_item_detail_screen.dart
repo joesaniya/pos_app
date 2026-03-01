@@ -56,7 +56,7 @@ class MenuItemDetailScreen extends StatelessWidget {
                     _buildAllergens(),
                     SizedBox(height: AppSizes.paddingLarge),
                   ],
-                  _buildAddToOrderSection(context),
+                  // _buildAddToOrderSection(context),
                   const SizedBox(height: 32),
                 ],
               ),

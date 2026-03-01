@@ -50,7 +50,13 @@ const List<Map<String, String>> _colorPresets = [
 ];
 
 /// Roles that may create or edit categories.
-const Set<String> _editableRoles = {'staff', 'admin', 'system', 'owner'};
+const Set<String> _editableRoles = {
+  'staff',
+  'admin',
+  'system',
+  'owner',
+  'manager',
+};
 
 bool _canEdit(String? role) =>
     role != null && _editableRoles.contains(role.toLowerCase());

@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/menu_category.dart';
 import 'package:pos_app/screens/add_menu_category_screen.dart';
@@ -76,6 +78,7 @@ class _MenuScreenState extends State<MenuScreen> {
       // ── FAB: only visible to editable roles ──────────────────
       floatingActionButton: Consumer<SupabaseMenuProvider>(
         builder: (_, provider, __) {
+          log('User role: ${provider.userRole}');
           if (!_canEdit(provider.userRole)) return const SizedBox.shrink();
           return FloatingActionButton.extended(
             onPressed: () => Navigator.push(

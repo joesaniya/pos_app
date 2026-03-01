@@ -1,3 +1,4 @@
+import 'package:pos_app/providers/analytics_provider.dart';
 import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/create_account_provider.dart';
 import 'package:pos_app/providers/dashboard_provider.dart';
@@ -32,6 +33,7 @@ class ProviderHelperClass {
 
     //screens
     ChangeNotifierProvider(create: (_) => PageSwitcherProvider()),
+    ChangeNotifierProvider(create: (_) => AnalyticsProvider()),
     ChangeNotifierProvider(create: (_) => DashboardProvider()),
     ChangeNotifierProvider(create: (_) => OrdersProvider()),
     ChangeNotifierProvider(create: (_) => TablesProvider()),

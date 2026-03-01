@@ -200,7 +200,7 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          Stack(
+          /*   Stack(
             children: [
               IconButton(
                 icon: const Icon(
@@ -244,6 +244,7 @@ class _Header extends StatelessWidget {
                 : const Icon(Icons.refresh_rounded, color: OC.textSec),
             onPressed: prov.isLoading ? null : prov.fetchOrders,
           ),
+      */
         ],
       ),
     );

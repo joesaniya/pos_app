@@ -1,4 +1,4 @@
-import 'dart:developer';
+﻿import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
@@ -1230,10 +1230,24 @@ class ReservationSection extends StatelessWidget {
               ),
               const Divider(height: 20, color: TC.divider),
               DetailRow(
-                icon: '🟢',
-                label: 'Check-in',
-                value: '${res.dateLabel} at ${res.timeLabel}',
+                icon: '🗓️',
+                label: 'Reserved at',
+                value: '${res.dateLabel} at ${res.reservationTimeLabel}',
               ),
+              const Divider(height: 20, color: TC.divider),
+              DetailRow(
+                icon: '🟢',
+                label: 'Scheduled check-in',
+                value: res.timeLabel,
+              ),
+              if (res.checkIn != null) ...[
+                const Divider(height: 20, color: TC.divider),
+                DetailRow(
+                  icon: '✅',
+                  label: 'Actual check-in',
+                  value: res.checkInTimeLabel,
+                ),
+              ],
               if (res.checkOut != null) ...[
                 const Divider(height: 20, color: TC.divider),
                 DetailRow(
@@ -1480,6 +1494,7 @@ class AvailableSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final upcomingRes = table.reservation;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1517,37 +1532,89 @@ class AvailableSection extends StatelessWidget {
             ],
           ),
         ),
+        // \u2705 Upcoming reservation warning banner
+        if (upcomingRes != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7E6),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Color(0xFFE8860A).withOpacity(0.4)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('\u26a0\ufe0f', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Upcoming Reservation',
+                        style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w800,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${upcomingRes.customerName} \u00b7 ${upcomingRes.guestCount} guests',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                      ),
+                      Text(
+                        'At ${upcomingRes.timeLabel}${upcomingRes.checkOut != null ? " \u2013 ${upcomingRes.checkOutTimeLabel}" : ""}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Table auto-locks 60 min before reservation.',
+                        style: TextStyle(
+                          fontSize: 10, fontStyle: FontStyle.italic,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(
-              child: ActionBtn(
-                label: 'Reserve Table',
-                emoji: '📅',
-                color: TC.reserved,
-                outlined: true,
-                onTap: () {
-                  Navigator.pop(context);
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => ChangeNotifierProvider.value(
-                      value: prov,
-                      child: ReservationSheet(
-                        tableId: table.id,
-                        provider: prov,
+            if (upcomingRes == null) ...[
+              Expanded(
+                child: ActionBtn(
+                  label: 'Reserve Table',
+                  emoji: '\ud83d\udcc5',
+                  color: TC.reserved,
+                  outlined: true,
+                  onTap: () {
+                    Navigator.pop(context);
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => ChangeNotifierProvider.value(
+                        value: prov,
+                        child: ReservationSheet(
+                          tableId: table.id,
+                          provider: prov,
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
+              const SizedBox(width: 10),
+            ],
             Expanded(
               child: ActionBtn(
                 label: 'Seat Walk-in',
-                emoji: '🚶',
+                emoji: '\ud83d\udeb6',
                 color: TC.accent,
                 onTap: () {
                   prov.seatGuests(table.id, 'Walk-in Guest');
@@ -2569,8 +2636,15 @@ class ReservationSection extends StatelessWidget {
           const Divider(height: 20, color: TC.divider),
           DetailRow(icon: '👥', label: 'Party size', value: '${res.guestCount} guests'),
           const Divider(height: 20, color: TC.divider),
-          DetailRow(icon: '🟢', label: 'Check-in',
-              value: '${res.dateLabel} at ${res.timeLabel}'),
+          DetailRow(icon: '🗓️', label: 'Reserved at',
+              value: '${res.dateLabel} at ${res.reservationTimeLabel}'),
+          const Divider(height: 20, color: TC.divider),
+          DetailRow(icon: '🟢', label: 'Scheduled check-in',
+              value: res.timeLabel),
+          if (res.checkIn != null) ...[
+            const Divider(height: 20, color: TC.divider),
+            DetailRow(icon: '✅', label: 'Actual check-in', value: res.checkInTimeLabel),
+          ],
           if (res.checkOut != null) ...[
             const Divider(height: 20, color: TC.divider),
             DetailRow(icon: '🔴', label: 'Check-out', value: res.checkOutTimeLabel),
@@ -3216,10 +3290,24 @@ class ReservationSection extends StatelessWidget {
               ),
               const Divider(height: 20, color: TC.divider),
               DetailRow(
-                icon: '🟢',
-                label: 'Check-in',
-                value: '${res.dateLabel} at ${res.timeLabel}',
+                icon: '🗓️',
+                label: 'Reserved at',
+                value: '${res.dateLabel} at ${res.reservationTimeLabel}',
               ),
+              const Divider(height: 20, color: TC.divider),
+              DetailRow(
+                icon: '🟢',
+                label: 'Scheduled check-in',
+                value: res.timeLabel,
+              ),
+              if (res.checkIn != null) ...[
+                const Divider(height: 20, color: TC.divider),
+                DetailRow(
+                  icon: '✅',
+                  label: 'Actual check-in',
+                  value: res.checkInTimeLabel,
+                ),
+              ],
               if (res.checkOut != null) ...[
                 const Divider(height: 20, color: TC.divider),
                 DetailRow(
@@ -3482,6 +3570,7 @@ class AvailableSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final upcomingRes = table.reservation;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3519,37 +3608,89 @@ class AvailableSection extends StatelessWidget {
             ],
           ),
         ),
+        // \u2705 Upcoming reservation warning banner
+        if (upcomingRes != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7E6),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Color(0xFFE8860A).withOpacity(0.4)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('\u26a0\ufe0f', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Upcoming Reservation',
+                        style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w800,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${upcomingRes.customerName} \u00b7 ${upcomingRes.guestCount} guests',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                      ),
+                      Text(
+                        'At ${upcomingRes.timeLabel}${upcomingRes.checkOut != null ? " \u2013 ${upcomingRes.checkOutTimeLabel}" : ""}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Table auto-locks 60 min before reservation.',
+                        style: TextStyle(
+                          fontSize: 10, fontStyle: FontStyle.italic,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(
-              child: ActionBtn(
-                label: 'Reserve Table',
-                emoji: '📅',
-                color: TC.reserved,
-                outlined: true,
-                onTap: () {
-                  Navigator.pop(context);
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => ChangeNotifierProvider.value(
-                      value: prov,
-                      child: ReservationSheet(
-                        tableId: table.id,
-                        provider: prov,
+            if (upcomingRes == null) ...[
+              Expanded(
+                child: ActionBtn(
+                  label: 'Reserve Table',
+                  emoji: '\ud83d\udcc5',
+                  color: TC.reserved,
+                  outlined: true,
+                  onTap: () {
+                    Navigator.pop(context);
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => ChangeNotifierProvider.value(
+                        value: prov,
+                        child: ReservationSheet(
+                          tableId: table.id,
+                          provider: prov,
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
+              const SizedBox(width: 10),
+            ],
             Expanded(
               child: ActionBtn(
                 label: 'Seat Walk-in',
-                emoji: '🚶',
+                emoji: '\ud83d\udeb6',
                 color: TC.accent,
                 onTap: () {
                   prov.seatGuests(table.id, 'Walk-in Guest');

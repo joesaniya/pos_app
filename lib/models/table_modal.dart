@@ -152,9 +152,29 @@ class Reservation {
 
   // ── Display helpers ──────────────────────────────────
 
+  /// Planned reservation/booking time (reservedFor = scheduled check-in time)
   String get timeLabel {
     final h = reservedFor.hour;
     final m = reservedFor.minute.toString().padLeft(2, '0');
+    final suffix = h >= 12 ? 'PM' : 'AM';
+    final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$hour12:$m $suffix';
+  }
+
+  /// When the booking was made (createdAt)
+  String get reservationTimeLabel {
+    final h = createdAt.hour;
+    final m = createdAt.minute.toString().padLeft(2, '0');
+    final suffix = h >= 12 ? 'PM' : 'AM';
+    final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$hour12:$m $suffix';
+  }
+
+  /// Actual check-in time label (null if guest not yet seated)
+  String get checkInTimeLabel {
+    if (checkIn == null) return '—';
+    final h = checkIn!.hour;
+    final m = checkIn!.minute.toString().padLeft(2, '0');
     final suffix = h >= 12 ? 'PM' : 'AM';
     final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '$hour12:$m $suffix';
@@ -264,17 +284,19 @@ class ReservationHistoryItem {
       customerName: row['customer_name'] ?? '',
       phone: row['phone'],
       guestCount: row['guest_count'] ?? 0,
-      reservedFor: DateTime.parse(row['reserved_for']).toLocal(),
+      // ✅ FIX: use parseToIST() — converts UTC→IST consistently,
+      // independent of device timezone. .toLocal() was wrong on non-IST devices.
+      reservedFor: parseToIST(row['reserved_for'] as String),
       checkIn: row['check_in'] != null
-          ? DateTime.parse(row['check_in']).toLocal()
+          ? parseToIST(row['check_in'] as String)
           : null,
       checkOut: row['check_out'] != null
-          ? DateTime.parse(row['check_out']).toLocal()
+          ? parseToIST(row['check_out'] as String)
           : null,
       notes: row['notes'],
       status: row['status'] ?? 'active',
       createdByName: row['created_by_name'] ?? 'Staff',
-      createdAt: DateTime.parse(row['created_at']).toLocal(),
+      createdAt: parseToIST(row['created_at'] as String),
     );
   }
 

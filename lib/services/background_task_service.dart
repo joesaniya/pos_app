@@ -856,9 +856,18 @@ Future<void> _runBackgroundChecks() async {
     final tName = 'T${tableNum.toString().padLeft(2, '0')}';
     final guestName = (row['customer_name'] as String?) ?? 'Guest';
     final guestCount = (row['guest_count'] ?? 0) as int;
-    final resTime = DateTime.parse(row['reserved_for'] as String).toLocal();
-    final minsToArr = resTime.difference(now).inMinutes;
-    final timeLabel = _fmtTime(resTime);
+    // ✅ FIX: Use UTC+5:30 (IST) instead of device timezone (.toLocal())
+    // The background isolate may run on any device timezone, but the business
+    // is in IST, so we must pin the offset for correct time display in notifications.
+    final resTime = DateTime.parse(row['reserved_for'] as String)
+        .toUtc()
+        .add(const Duration(hours: 5, minutes: 30));
+    final resTime_ = DateTime(
+      resTime.year, resTime.month, resTime.day, resTime.hour, resTime.minute,
+      resTime.second,
+    );
+    final minsToArr = resTime_.difference(now).inMinutes;
+    final timeLabel = _fmtTime(resTime_);
     final body = '$guestName · $guestCount guests · $timeLabel$biz';
 
     if (minsToArr > 25 && minsToArr <= 35) {
@@ -870,7 +879,7 @@ Future<void> _runBackgroundChecks() async {
           id: 1000 + tableNum,
           title: '🟡 Guest arriving in 30 min — $tName',
           body: body,
-          fireAt: resTime.subtract(const Duration(minutes: 30)),
+          fireAt: resTime_.subtract(const Duration(minutes: 30)),
           android: _chCheckIn,
           ios: _iosNormal,
         );
@@ -885,7 +894,7 @@ Future<void> _runBackgroundChecks() async {
           id: 2000 + tableNum,
           title: '🔔 Guest arriving in 15 min — $tName',
           body: body,
-          fireAt: resTime.subtract(const Duration(minutes: 15)),
+          fireAt: resTime_.subtract(const Duration(minutes: 15)),
           android: _chCheckIn,
           ios: _iosNormal,
         );
@@ -900,7 +909,7 @@ Future<void> _runBackgroundChecks() async {
           id: 6000 + tableNum,
           title: '🚨 Guest arriving in 5 min — $tName',
           body: body,
-          fireAt: resTime.subtract(const Duration(minutes: 5)),
+          fireAt: resTime_.subtract(const Duration(minutes: 5)),
           android: _chCheckIn,
           ios: _iosNormal,
         );
@@ -931,7 +940,13 @@ Future<void> _runBackgroundChecks() async {
     final tableNum = (tableData?['table_number'] ?? 0) as int;
     final tName = 'T${tableNum.toString().padLeft(2, '0')}';
     final guestName = (row['customer_name'] as String?) ?? 'Guest';
-    final checkOutDt = DateTime.parse(row['check_out'] as String).toLocal();
+    // ✅ FIX: Use UTC+5:30 (IST) fixed offset for correct display
+    final rawCo = DateTime.parse(row['check_out'] as String)
+        .toUtc()
+        .add(const Duration(hours: 5, minutes: 30));
+    final checkOutDt = DateTime(
+      rawCo.year, rawCo.month, rawCo.day, rawCo.hour, rawCo.minute, rawCo.second,
+    );
     final minsLeft = checkOutDt.difference(now).inMinutes;
     final coLabel = _fmtTime(checkOutDt);
     final body = '$guestName · Check-out at $coLabel$biz';

@@ -249,8 +249,75 @@ class TablesProvider extends ChangeNotifier {
 
   // ── Helper: refresh both together, one notifyListeners at end ─────
   Future<void> _refreshAll() async {
+    // ✅ FIX 2: Auto-expire overdue `active` reservations before re-fetching,
+    // so no-show guests are properly closed and their alarms won't re-trigger.
+    await markExpiredReservations();
     await Future.wait([_fetchTables(), _fetchCalendarReservations()]);
     notifyListeners();
+  }
+
+  // ── FIX 2: Auto-expire overdue reservations (no-show) ──────────────
+  // Any `active` reservation whose reserved_for is more than 30 minutes in
+  // the past is automatically marked `no_show`. This prevents ghost
+  // reservations from keeping the table locked and from continuing to fire
+  // notification alarms.
+  Future<void> markExpiredReservations() async {
+    final bId = _userCtx?.businessId;
+    if (bId == null || bId.isEmpty) return;
+    try {
+      final cutoff = DateTime.now()
+          .subtract(const Duration(minutes: 30))
+          .toUtc()
+          .toIso8601String();
+      // Find any active reservation about to be expired so we can cancel alarms
+      final expired = await _sb
+          .from(_kReservations)
+          .select('id, table_id')
+          .eq('business_id', bId)
+          .eq('status', 'active')
+          .lt('reserved_for', cutoff);
+      for (final row in (expired as List)) {
+        final resId = row['id'] as String?;
+        final tblId = row['table_id'] as String?;
+        if (resId == null || tblId == null) continue;
+        // Cancel notification alarms if table is in our local cache
+        final tableMatch =
+            _tables.where((t) => t.id == tblId).firstOrNull;
+        if (tableMatch != null) {
+          await _notif.cancelReservationScheduled(resId, tableMatch.tableNumber);
+          _notif.clearReservationKeys(resId);
+        }
+      }
+      if ((expired as List).isNotEmpty) {
+        // Bulk-update all expired active reservations to no_show
+        await _sb
+            .from(_kReservations)
+            .update({
+              'status': 'no_show',
+              'updated_by_uid': _userCtx?.uid,
+              'updated_by_name': _userCtx?.name,
+            })
+            .eq('business_id', bId)
+            .eq('status', 'active')
+            .lt('reserved_for', cutoff);
+        // Also reset those tables to available if still in `reserved` status
+        for (final row in (expired as List)) {
+          final tblId = row['table_id'] as String?;
+          if (tblId == null) continue;
+          await _sb
+              .from(_kTables)
+              .update({
+                'status': 'available',
+                'updated_by_uid': _userCtx?.uid,
+                'updated_by_name': _userCtx?.name,
+              })
+              .eq('id', tblId)
+              .eq('status', 'reserved'); // only if still reserved, not occupied
+        }
+      }
+    } catch (e) {
+      debugPrint('markExpiredReservations error: $e');
+    }
   }
 
   // ── Notification timer ─────────────────────────────────
@@ -263,11 +330,61 @@ class TablesProvider extends ChangeNotifier {
     );
   }
 
-  void _runNotifCheck() => _notif.checkAll(
-    tables: _tables,
-    businessName: _userCtx?.businessName ?? '',
-    longSeatedMinutes: 240,
-  );
+  void _runNotifCheck() {
+    _notif.checkAll(
+      tables: _tables,
+      businessName: _userCtx?.businessName ?? '',
+      longSeatedMinutes: 240,
+    );
+    // ✅ FIX: Auto-lock tables to 'reserved' status when reservation is ≤60 min away.
+    // Tables are left 'available' at booking time so walk-ins can be seated earlier.
+    _autoLockReservedTables();
+  }
+
+  // ✅ Auto-locks tables to 'reserved' status when their reservation window opens.
+  // Runs every minute via the notification timer.
+  // A table becomes LOCKED (status → reserved in DB) when:
+  //   • It has an active reservation today
+  //   • The reservation starts within 60 minutes from now
+  //   • The table is currently 'available' (not occupied / cleaning)
+  Future<void> _autoLockReservedTables() async {
+    final bId = _userCtx?.businessId;
+    if (bId == null || bId.isEmpty) return;
+    try {
+      final now = DateTime.now().toUtc();
+      final in60 = now.add(const Duration(minutes: 60)).toIso8601String();
+      final nowStr = now.toIso8601String();
+      // Find all active reservations starting within the next 60 minutes
+      // whose linked table is still 'available'
+      final rows = await _sb
+          .from(_kReservations)
+          .select('table_id')
+          .eq('business_id', bId)
+          .eq('status', 'active')
+          .gte('reserved_for', nowStr)
+          .lte('reserved_for', in60);
+      for (final row in (rows as List)) {
+        final tblId = row['table_id'] as String?;
+        if (tblId == null) continue;
+        // Only lock if the table is currently available
+        await _sb
+            .from(_kTables)
+            .update({
+              'status': 'reserved',
+              'updated_by_uid': _userCtx?.uid,
+              'updated_by_name': _userCtx?.name,
+            })
+            .eq('id', tblId)
+            .eq('status', 'available'); // only if still available
+      }
+      if ((rows as List).isNotEmpty) {
+        // Refresh tables to reflect any new reserved statuses
+        await _fetchTables();
+      }
+    } catch (e) {
+      debugPrint('_autoLockReservedTables error: $e');
+    }
+  }
 
   // ── Realtime ───────────────────────────────────────────
   void _subscribeRealtime() {
@@ -635,10 +752,51 @@ Future<void> _fetchTables() async {
 
   Future<void> clearTable(String tableId) async {
     try {
+      // ✅ FIX 1: Find the reservation BEFORE clearing, so we can:
+      //   a) mark it `completed` in table_reservations (stops it coming back in queries)
+      //   b) cancel its scheduled notification alarms
+      //   c) write the actual checkout timestamp
+      final t = _tables.where((t) => t.id == tableId).firstOrNull;
+      if (t?.reservation != null) {
+        final res = t!.reservation!;
+        // Cancel all scheduled / future alarms for this reservation
+        await _notif.cancelReservationScheduled(res.id, t.tableNumber);
+        _notif.clearReservationKeys(res.id);
+        // Mark the reservation completed with the actual checkout time
+        await _sb
+            .from(_kReservations)
+            .update({
+              'status': 'completed',
+              'check_out': DateTime.now().toUtc().toIso8601String(),
+              'updated_by_uid': _userCtx?.uid,
+              'updated_by_name': _userCtx?.name,
+            })
+            .eq('id', res.id);
+      }
+      // ✅ FIX 2: After clearing, check if this table has ANOTHER upcoming reservation.
+      // If it does, set table back to 'available' (not 'cleaning') so the next
+      // walk-in window before that reservation is not lost.
+      // If there is NO upcoming reservation, mark as 'cleaning' as normal.
+      final bId = _userCtx?.businessId;
+      String nextTableStatus = 'cleaning';
+      if (bId != null) {
+        final upcoming = await _sb
+            .from(_kReservations)
+            .select('id')
+            .eq('table_id', tableId)
+            .eq('status', 'active')
+            .gte('reserved_for', DateTime.now().toUtc().toIso8601String())
+            .limit(1);
+        if ((upcoming as List).isNotEmpty) {
+          // There's a future reservation — keep table available so walk-ins can use it
+          nextTableStatus = 'available';
+        }
+      }
+      // Clear the physical table row
       await _sb
           .from(_kTables)
           .update({
-            'status': 'cleaning',
+            'status': nextTableStatus,
             'current_customer_name': null,
             'current_order_id': null,
             'current_order_total': null,
@@ -647,7 +805,7 @@ Future<void> _fetchTables() async {
             'updated_by_name': _userCtx?.name,
           })
           .eq('id', tableId);
-      await _fetchTables();
+      await _refreshAll();
     } catch (e) {
       _error = 'Clear table error: $e';
       notifyListeners();
@@ -716,15 +874,23 @@ Future<void> _fetchTables() async {
         'created_by_email': ctx.email,
         'created_by_role': ctx.role,
       });
-      await _sb
-          .from(_kTables)
-          .update({
-            'status': 'reserved',
-            'updated_by_uid': ctx.uid,
-            'updated_by_name': ctx.name,
-          })
-          .eq('id', tableId);
-      // FIX: _refreshAll so new reservation immediately appears in calendar
+      // ✅ FIX: Do NOT immediately mark the table as 'reserved'.
+      // The table stays 'available' so walk-in customers can be seated before
+      // the reservation window opens. The table auto-locks to 'reserved' status
+      // in _autoLockReservedTables() when the reservation is ≤60 minutes away.
+      // (Only lock immediately if reservation starts within 60 min from now.)
+      final minsUntil = res.reservedFor.difference(DateTime.now()).inMinutes;
+      if (minsUntil <= 60) {
+        await _sb
+            .from(_kTables)
+            .update({
+              'status': 'reserved',
+              'updated_by_uid': ctx.uid,
+              'updated_by_name': ctx.name,
+            })
+            .eq('id', tableId);
+      }
+      // Refresh so new reservation appears in calendar
       await _refreshAll();
 
       final table = _tables.where((t) => t.id == tableId).firstOrNull;

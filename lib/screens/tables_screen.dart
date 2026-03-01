@@ -3682,10 +3682,24 @@ class _ReservationSection extends StatelessWidget {
               ),
               const Divider(height: 20, color: TC.divider),
               _DetailRow(
-                icon: '🟢',
-                label: 'Check-in',
-                value: '${res.dateLabel} at ${res.timeLabel}',
+                icon: '🗓️',
+                label: 'Reserved at',
+                value: '${res.dateLabel} at ${res.reservationTimeLabel}',
               ),
+              const Divider(height: 20, color: TC.divider),
+              _DetailRow(
+                icon: '🟢',
+                label: 'Scheduled check-in',
+                value: res.timeLabel,
+              ),
+              if (res.checkIn != null) ...[
+                const Divider(height: 20, color: TC.divider),
+                _DetailRow(
+                  icon: '✅',
+                  label: 'Actual check-in',
+                  value: res.checkInTimeLabel,
+                ),
+              ],
               if (res.checkOut != null) ...[
                 const Divider(height: 20, color: TC.divider),
                 _DetailRow(

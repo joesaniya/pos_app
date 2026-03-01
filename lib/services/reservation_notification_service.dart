@@ -413,7 +413,12 @@ class ReservationNotificationService {
       // from the foreground timer so alarms are always live while app runs.
       // The background WorkManager task does the same when app is killed.
       final res = table.reservation;
-      if (res != null && res.checkOut != null) {
+      // ✅ FIX: Skip any reservation that has already been completed,
+      // cancelled, or marked no_show — alarms must not fire for ended reservations.
+      final resStatus = res?.status ?? '';
+      if (res != null &&
+          res.checkOut != null &&
+          (resStatus == 'active' || resStatus == 'seated')) {
         final coTime = res.checkOut!;
         final minsLeft = coTime.difference(now).inMinutes;
 

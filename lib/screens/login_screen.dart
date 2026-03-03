@@ -108,7 +108,73 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // ── Handle Login (Email/Password) ─────────────────────────────
+  // ── Handle Login (Email/Password) ─────────────────────────────
   Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final result = await provider.loginWithEmail(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+
+    switch (result) {
+      case LoginResult.success:
+        _navigateToHome();
+        break;
+      case LoginResult.emailNotFound:
+        _showSnackBar('Username not found.');
+        break;
+      case LoginResult.wrongPassword:
+        _showSnackBar('Invalid password.');
+        break;
+      case LoginResult.invalidCredentials:
+        _showSnackBar('Invalid credentials.');
+        break;
+      case LoginResult.inactive:
+        _showSnackBar('Your account is inactive. Please contact your admin.');
+        break;
+      case LoginResult.error:
+        _showSnackBar('Something went wrong. Please try again.');
+        break;
+    }
+  }
+
+  // ── Social Login ──────────────────────────────────────────────
+  Future<void> _handleSocialLogin(
+    AppAuthenticationProvider provider,
+    String type,
+  ) async {
+    if (type == 'Google') {
+      final result = await provider.signInWithGoogle();
+      if (!mounted) return;
+
+      switch (result) {
+        case 'success':
+          _navigateToHome();
+          break;
+        case 'not_found':
+          _showSnackBar('No record found.');
+          break;
+        case 'inactive':
+          _showSnackBar('Your account is inactive. Please contact your admin.');
+          break;
+        case 'cancelled':
+          break; // user dismissed — no toast needed
+        default:
+          _showSnackBar('Google sign-in failed. Please try again.');
+      }
+      return;
+    }
+
+    // Apple / others (stub)
+    final success = await provider.socialLogin(provider: type);
+    if (mounted && success) {
+      _showSnackBar('$type login successful!', isSuccess: true);
+    }
+  }
+  /* Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
     final success = await provider.loginWithEmail(
@@ -123,7 +189,7 @@ class _LoginScreenState extends State<LoginScreen>
     } else {
       _showSnackBar('Login failed. Please check your credentials.');
     }
-  }
+  }*/
 
   // ── Handle Send OTP ───────────────────────────────────────────
   // Checks Firestore first, then sends real Firebase OTP
@@ -200,16 +266,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // ── Social Login ──────────────────────────────────────────────
-  Future<void> _handleSocialLogin(
-    AppAuthenticationProvider provider,
-    String type,
-  ) async {
-    final success = await provider.socialLogin(provider: type);
-
-    if (mounted && success) {
-      _showSnackBar('$type login successful!', isSuccess: true);
-    }
-  }
 
   // ── Build ─────────────────────────────────────────────────────
 

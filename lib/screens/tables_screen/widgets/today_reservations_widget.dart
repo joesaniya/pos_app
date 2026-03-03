@@ -12,7 +12,7 @@ bool _isUpcoming(ReservationHistoryItem r) {
   final now = DateTime.now();
   // If reservation has a checkOut time, show until that time passes
   // Otherwise show until reservedFor time passes
-  final endTime = r.checkOut ?? r.reservedFor;
+  final endTime = r.actualCheckOut ?? r.reservedFor;
   return endTime.isAfter(now);
 }
 

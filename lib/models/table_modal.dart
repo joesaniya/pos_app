@@ -1,8 +1,8 @@
+import 'package:pos_app/utils/ist_utils.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ENUMS
 // ─────────────────────────────────────────────────────────────────────────────
-
-import 'package:pos_app/utils/ist_utils.dart';
 
 enum TableStatus { available, occupied, reserved, cleaning }
 
@@ -94,17 +94,22 @@ class Reservation {
   final String customerName;
   final String? phone;
   final int guestCount;
-  final DateTime reservedFor; // check-in / start time
-  final DateTime? checkIn; // actual arrival (seated)
-  final DateTime? checkOut; // planned / actual departure
+
+  // ── Scheduled times (set at booking — used for slot validation) ──
+  final DateTime reservedFor; // planned check-in  (IST)
+  final DateTime?
+  scheduledCheckOut; // planned check-out (IST) → drives overlap checks
+
+  // ── Actual times (recorded by staff actions — used for billing/analytics) ──
+  final DateTime? checkIn; // actual arrival    → set by fn_checkin RPC
+  final DateTime? checkOut; // actual departure  → set by fn_checkout RPC
+
   final String? notes;
-  final String status; // active | seated | cancelled | no_show
+  final String status;
   final bool warningSent;
   final DateTime createdAt;
-
-  // ── Who created this reservation ─────────────────────
-  final String? createdByName; // staff member's name
-  final String? createdByRole; // staff member's role (admin/manager/staff)
+  final String? createdByName;
+  final String? createdByRole;
 
   const Reservation({
     required this.id,
@@ -112,6 +117,7 @@ class Reservation {
     this.phone,
     required this.guestCount,
     required this.reservedFor,
+    this.scheduledCheckOut,
     this.checkIn,
     this.checkOut,
     this.notes,
@@ -127,6 +133,7 @@ class Reservation {
     String? phone,
     int? guestCount,
     DateTime? reservedFor,
+    DateTime? scheduledCheckOut,
     DateTime? checkIn,
     DateTime? checkOut,
     String? notes,
@@ -140,6 +147,7 @@ class Reservation {
     phone: phone ?? this.phone,
     guestCount: guestCount ?? this.guestCount,
     reservedFor: reservedFor ?? this.reservedFor,
+    scheduledCheckOut: scheduledCheckOut ?? this.scheduledCheckOut,
     checkIn: checkIn ?? this.checkIn,
     checkOut: checkOut ?? this.checkOut,
     notes: notes ?? this.notes,
@@ -150,27 +158,31 @@ class Reservation {
     createdByRole: createdByRole ?? this.createdByRole,
   );
 
-  // ── Display helpers ──────────────────────────────────
+  // ── Time label helpers ───────────────────────────────────────────────────
 
-  String get timeLabel {
-    final h = reservedFor.hour;
-    final m = reservedFor.minute.toString().padLeft(2, '0');
-    final suffix = h >= 12 ? 'PM' : 'AM';
-    final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$hour12:$m $suffix';
+  String _fmt(DateTime dt) {
+    final h = dt.hour;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final suf = h >= 12 ? 'PM' : 'AM';
+    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '$h12:$m $suf';
   }
 
-  String get checkOutTimeLabel {
-    if (checkOut == null) return '—';
-    final h = checkOut!.hour;
-    final m = checkOut!.minute.toString().padLeft(2, '0');
-    final suffix = h >= 12 ? 'PM' : 'AM';
-    final hour12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$hour12:$m $suffix';
-  }
+  /// Planned check-in time label  e.g. "12:51 PM"
+  String get timeLabel => _fmt(reservedFor);
+
+  /// Planned check-out time label e.g. "1:51 PM"
+  String get scheduledCheckOutLabel =>
+      scheduledCheckOut != null ? _fmt(scheduledCheckOut!) : '—';
+
+  /// Actual arrival time label    e.g. "12:55 PM"
+  String get checkInTimeLabel => checkIn != null ? _fmt(checkIn!) : '—';
+
+  /// Actual departure time label  e.g. "2:10 PM"
+  String get checkOutTimeLabel => checkOut != null ? _fmt(checkOut!) : '—';
 
   String get dateLabel {
-    final now = DateTime.now();
+    final now = nowIST();
     final today = DateTime(now.year, now.month, now.day);
     final rDate = DateTime(
       reservedFor.year,
@@ -197,31 +209,33 @@ class Reservation {
   }
 
   String get countdownLabel {
-    final diff = reservedFor.difference(DateTime.now());
+    final diff = reservedFor.difference(nowIST());
     if (diff.isNegative) return 'Overdue';
     if (diff.inMinutes < 60) return 'in ${diff.inMinutes}m';
     if (diff.inHours < 24) return 'in ${diff.inHours}h';
     return 'in ${diff.inDays}d';
   }
 
-  /// Minutes remaining until check-out (null if no check-out time set)
-  int? get minutesUntilCheckOut {
-    if (checkOut == null) return null;
-    return checkOut!.difference(DateTime.now()).inMinutes;
+  /// Minutes until PLANNED check-out (for "ending soon" warnings)
+  int? get minutesUntilScheduledCheckOut {
+    if (scheduledCheckOut == null) return null;
+    return scheduledCheckOut!.difference(nowIST()).inMinutes;
   }
 
   bool get isEndingSoon {
-    final mins = minutesUntilCheckOut;
+    final mins = minutesUntilScheduledCheckOut;
     if (mins == null) return false;
     return mins >= 0 && mins <= 15;
   }
 
-  /// Who created the reservation — shows name if available, falls back to role
+  /// True when guest is seated but staff has not yet tapped "Mark Checked In"
+  bool get needsCheckIn => checkIn == null && status == 'seated';
+
   String get createdByLabel => createdByName ?? createdByRole ?? 'Staff';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  RESERVATION HISTORY ITEM  (used in the History screen)
+//  RESERVATION HISTORY ITEM
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ReservationHistoryItem {
@@ -231,9 +245,10 @@ class ReservationHistoryItem {
   final String customerName;
   final String? phone;
   final int guestCount;
-  final DateTime reservedFor;
-  final DateTime? checkIn;
-  final DateTime? checkOut;
+  final DateTime reservedFor; // planned check-in
+  final DateTime? plannedCheckOut; // planned check-out
+  final DateTime? actualCheckIn; // actual arrival
+  final DateTime? actualCheckOut; // actual departure
   final String? notes;
   final String status;
   final String createdByName;
@@ -247,8 +262,9 @@ class ReservationHistoryItem {
     this.phone,
     required this.guestCount,
     required this.reservedFor,
-    this.checkIn,
-    this.checkOut,
+    this.plannedCheckOut,
+    this.actualCheckIn,
+    this.actualCheckOut,
     this.notes,
     required this.status,
     required this.createdByName,
@@ -265,11 +281,14 @@ class ReservationHistoryItem {
       phone: row['phone'],
       guestCount: row['guest_count'] ?? 0,
       reservedFor: DateTime.parse(row['reserved_for']).toLocal(),
-      checkIn: row['check_in'] != null
-          ? DateTime.parse(row['check_in']).toLocal()
+      plannedCheckOut: row['check_out'] != null
+          ? DateTime.parse(row['check_out'] as String).toLocal()
           : null,
-      checkOut: row['check_out'] != null
-          ? DateTime.parse(row['check_out']).toLocal()
+      actualCheckIn: row['check_in'] != null
+          ? DateTime.parse(row['check_in'] as String).toLocal()
+          : null,
+      actualCheckOut: row['actual_check_out'] != null
+          ? DateTime.parse(row['actual_check_out'] as String).toLocal()
           : null,
       notes: row['notes'],
       status: row['status'] ?? 'active',
@@ -278,7 +297,6 @@ class ReservationHistoryItem {
     );
   }
 
-  /// Human-readable status label with emoji
   String get statusLabel {
     switch (status) {
       case 'active':
@@ -294,6 +312,21 @@ class ReservationHistoryItem {
       default:
         return status;
     }
+  }
+
+  /// Actual duration in minutes (null if guest hasn't checked out yet)
+  int? get actualDurationMinutes {
+    if (actualCheckIn == null || actualCheckOut == null) return null;
+    return actualCheckOut!.difference(actualCheckIn!).inMinutes;
+  }
+
+  String get actualDurationLabel {
+    final mins = actualDurationMinutes;
+    if (mins == null) return '—';
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${mins}m';
   }
 }
 
@@ -315,6 +348,7 @@ class RestaurantTable {
   final Reservation? reservation;
   final bool hasWindow;
   final bool isPremium;
+  final String? sessionId;
 
   const RestaurantTable({
     required this.id,
@@ -330,6 +364,7 @@ class RestaurantTable {
     this.reservation,
     this.hasWindow = false,
     this.isPremium = false,
+    this.sessionId,
   });
 
   RestaurantTable copyWith({
@@ -341,6 +376,7 @@ class RestaurantTable {
     Reservation? reservation,
     bool clearReservation = false,
     bool clearOccupied = false,
+    String? sessionId,
   }) => RestaurantTable(
     id: id,
     tableNumber: tableNumber,
@@ -361,12 +397,11 @@ class RestaurantTable {
     reservation: clearReservation ? null : reservation ?? this.reservation,
     hasWindow: hasWindow,
     isPremium: isPremium,
+    sessionId: clearOccupied ? null : sessionId ?? this.sessionId,
   );
 
-  // ── Display helpers ──────────────────────────────────
-
-  /// e.g. "T06"
   String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
+
   String get occupiedDuration {
     if (occupiedSince == null) return '—';
     final diff = nowIST().difference(occupiedSince!);
@@ -377,29 +412,8 @@ class RestaurantTable {
     return '${m}m';
   }
 
-  String get occupiedDuration1 {
-    if (occupiedSince == null) return '—';
-    // ✅ FIX: use nowIST() — occupiedSince is already in IST from provider
-    final diff = nowIST().difference(occupiedSince!);
-    if (diff.isNegative) return '0m'; // guard against clock skew
-    final h = diff.inHours;
-    final m = diff.inMinutes.remainder(60);
-    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
-    return '${diff.inMinutes}m';
-  }
-
-  // String get occupiedDuration1 {
-  //   if (occupiedSince == null) return '';
-  //   final diff = DateTime.now().difference(occupiedSince!);
-  //   if (diff.inHours > 0) {
-  //     return '${diff.inHours}h ${diff.inMinutes.remainder(60)}m';
-  //   }
-  //   return '${diff.inMinutes}m';
-  // }
-
-  /// Minutes the table has been occupied (0 if not occupied)
   int get occupiedMinutes {
     if (occupiedSince == null) return 0;
-    return DateTime.now().difference(occupiedSince!).inMinutes;
+    return nowIST().difference(occupiedSince!).inMinutes.clamp(0, 99999);
   }
 }

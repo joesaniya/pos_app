@@ -11,8 +11,20 @@ import 'tables_screen.dart';
 import 'menu_screen.dart';
 import 'inventory_screen.dart';
 
-class PageSwitcher extends StatelessWidget {
+class PageSwitcher extends StatefulWidget {
   const PageSwitcher({Key? key}) : super(key: key);
+
+  @override
+  State<PageSwitcher> createState() => _PageSwitcherState();
+}
+
+class _PageSwitcherState extends State<PageSwitcher> {
+  @override
+  void initState() {
+    super.initState();
+    // Load role as soon as the widget mounts
+    Future.microtask(() => context.read<PageSwitcherProvider>().loadRole());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,13 +33,17 @@ class PageSwitcher extends StatelessWidget {
         return Scaffold(
           body: IndexedStack(
             index: navigationProvider.selectedIndex,
-            children: const [
-              DashboardScreen(),
-              OrdersScreen(),
-              TablesScreen(),
-              MenuScreen(),
-              InventoryScreen(),
-              ProfileScreen(),
+            children: [
+              const DashboardScreen(),
+              const OrdersScreen(),
+              const TablesScreen(),
+              const MenuScreen(),
+              // Only render InventoryScreen for allowed roles
+              if (navigationProvider.canAccessInventory)
+                const InventoryScreen()
+              else
+                const SizedBox.shrink(),
+              const ProfileScreen(),
             ],
           ),
           bottomNavigationBar: const BottomNavBar(),
@@ -92,13 +108,15 @@ class BottomNavBar extends StatelessWidget {
                     isSelected: navigationProvider.selectedIndex == 3,
                     onTap: () => navigationProvider.setSelectedIndex(3),
                   ),
-                  _NavItem(
-                    index: 4,
-                    icon: Icons.inventory_2,
-                    label: 'Inventory',
-                    isSelected: navigationProvider.selectedIndex == 4,
-                    onTap: () => navigationProvider.setSelectedIndex(4),
-                  ),
+                  // Hide Inventory tab entirely for servers
+                  if (navigationProvider.canAccessInventory)
+                    _NavItem(
+                      index: 4,
+                      icon: Icons.inventory_2,
+                      label: 'Inventory',
+                      isSelected: navigationProvider.selectedIndex == 4,
+                      onTap: () => navigationProvider.setSelectedIndex(4),
+                    ),
                   _NavItem(
                     index: 5,
                     icon: Icons.person,

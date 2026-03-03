@@ -375,7 +375,7 @@ class _Header extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        GestureDetector(
+        /*  GestureDetector(
           onTap: onSupplierTap,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -444,6 +444,7 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
+      */
       ],
     ),
   );
@@ -1024,7 +1025,7 @@ class _ItemList extends StatelessWidget {
       childAspectRatio: 0.82,
     ),
     itemCount: items.length,
-    itemBuilder: (_, i) => _InventoryGridItem(
+    itemBuilder: (_, i) => InventoryItemCardWidgets(
       item: items[i],
       canManage: canManage,
       onTap: () => onTap(items[i]),
@@ -1292,7 +1293,7 @@ class _DetailSheetState extends State<_DetailSheet>
   void initState() {
     super.initState();
     _item = widget.item;
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -1339,7 +1340,7 @@ class _DetailSheetState extends State<_DetailSheet>
                 indicatorWeight: 2.5,
                 tabs: const [
                   Tab(text: 'Overview'),
-                  Tab(text: 'Actions'),
+                  // Tab(text: 'Actions'),
                   Tab(text: 'History'),
                 ],
               ),
@@ -1349,12 +1350,16 @@ class _DetailSheetState extends State<_DetailSheet>
               child: TabBarView(
                 controller: _tabs,
                 children: [
-                  _OverviewTab(item: _item),
-                  _ActionsTab(
+                  _OverviewTab(
                     item: _item,
                     provider: widget.provider,
                     onRefresh: (updated) => setState(() => _item = updated),
                   ),
+                  /* _ActionsTab(
+                    item: _item,
+                    provider: widget.provider,
+                    onRefresh: (updated) => setState(() => _item = updated),
+                  ),*/
                   _HistoryTab(item: _item),
                 ],
               ),
@@ -1369,7 +1374,13 @@ class _DetailSheetState extends State<_DetailSheet>
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 class _OverviewTab extends StatelessWidget {
   final InventoryItem item;
-  const _OverviewTab({required this.item});
+  final InventoryProvider provider;
+  final ValueChanged<InventoryItem> onRefresh;
+  const _OverviewTab({
+    required this.item,
+    required this.provider,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1525,7 +1536,152 @@ class _OverviewTab extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: 10),
+        Container(
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: ActionButtonWidget(
+                      label: 'Add Stock',
+                      emoji: '📥',
+                      color: IColors.inStock,
+                      onTap: () => _open(context, TransactionType.stockIn),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ActionButtonWidget(
+                      label: 'Edit Item',
+                      emoji: '✏️',
+                      color: IColors.accentMid,
+                      onTap: () {
+                        Navigator.pop(context);
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) =>
+                              _AddEditSheet(provider: provider, editItem: item),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconActionButtonWidgets(
+                    icon: Icons.delete_outline_rounded,
+                    color: IColors.critical,
+                    onTap: () => _confirmDelete(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 500,
+                  ), // control layout width
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    runAlignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      SizedBox(
+                        width: 160,
+                        child: ActionButtonWidget(
+                          label: 'Use Stock (Stock Out)',
+                          emoji: '📤',
+                          color: IColors.lowStock,
+                          onTap: () => _open(context, TransactionType.stockOut),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 160,
+                        child: ActionButtonWidget(
+                          label: 'Adjust Stock',
+                          emoji: '🔧',
+                          color: IColors.accentMid,
+                          onTap: () =>
+                              _open(context, TransactionType.adjustment),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 160,
+                        child: ActionButtonWidget(
+                          label: 'Mark as Waste',
+                          emoji: '🗑️',
+                          color: IColors.critical,
+                          onTap: () => _open(context, TransactionType.waste),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 22),
       ],
+    );
+  }
+
+  void _open(BuildContext ctx, TransactionType type) {
+    Navigator.pop(ctx);
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _StockUpdateSheet(item: item, provider: provider, initialType: type),
+    );
+  }
+
+  void _confirmDelete(BuildContext ctx) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Delete ${item.name}?',
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            color: IColors.textPrimary,
+          ),
+        ),
+        content: const Text(
+          'This will remove the item from inventory.',
+          style: TextStyle(color: IColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: IColors.textSecondary),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              provider.deleteItem(item.id);
+              Navigator.pop(ctx);
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: IColors.critical,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 }

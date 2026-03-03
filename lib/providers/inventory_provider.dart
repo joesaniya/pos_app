@@ -25,7 +25,7 @@ class InventoryProvider extends ChangeNotifier {
   String _userName = '';
   String _userRole = '';
 
-  static const _allowedRoles = ['owner', 'system', 'manager'];
+  static const _allowedRoles = ['owner', 'system', 'manager', 'admin'];
   bool get canManageStock => _allowedRoles.contains(_userRole.toLowerCase());
   bool get isInitialized => _isInitialized;
 

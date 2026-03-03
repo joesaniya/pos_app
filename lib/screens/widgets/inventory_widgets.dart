@@ -690,3 +690,255 @@ class SheetHeader extends StatelessWidget {
     );
   }
 }
+
+
+class InventoryItemCardWidgets extends StatelessWidget {
+  final InventoryItem item;
+  final bool canManage;
+  final VoidCallback onTap;
+  final VoidCallback onAddStock;
+
+  const InventoryItemCardWidgets({
+    Key? key,
+    required this.item,
+    required this.canManage,
+    required this.onTap,
+    required this.onAddStock,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final color = iStatusColor(item.status);
+    final bgColor = iStatusBg(item.status);
+
+    final isCritical =
+        item.status == StockStatus.critical ||
+        item.status == StockStatus.outOfStock;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        decoration: BoxDecoration(
+          color: IColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isCritical ? color.withOpacity(0.35) : IColors.divider,
+            width: isCritical ? 1.5 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isCritical
+                  ? color.withOpacity(0.08)
+                  : IColors.cardShadow,
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            /// ─────────────────────────────────────────────
+            /// TOP SECTION (Emoji + Quick Add)
+            /// ─────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 10, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Emoji Box
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      item.emoji,
+                      style: const TextStyle(fontSize: 22),
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Quick Add (Role Controlled)
+                  if (canManage)
+                    GestureDetector(
+                      onTap: onAddStock,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: IColors.accentLight,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.add,
+                          size: 16,
+                          color: IColors.accentMid,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            /// ─────────────────────────────────────────────
+            /// NAME + CATEGORY
+            /// ─────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: IColors.textPrimary,
+                      letterSpacing: -0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.category,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: IColors.textMuted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            /// ─────────────────────────────────────────────
+            /// STOCK BAR
+            /// ─────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: StockBar(
+                percent: item.stockPercent,
+                height: 5,
+                status: item.status,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            /// ─────────────────────────────────────────────
+            /// STOCK VALUE + STATUS BADGE
+            /// ─────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    item.stockDisplay,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+
+                  // Compact Status Badge
+                  StockStatusBadge(
+                    status: item.status,
+                    compact: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class IconActionButtonWidgets extends StatelessWidget {
+  final IconData? icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const IconActionButtonWidgets({
+     this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Icon(icon, color: color, size: 18),
+      ),
+    );
+  }
+}
+
+class ActionButtonWidget extends StatelessWidget {
+  final String label;
+  final String emoji;
+  final Color color;
+  final VoidCallback onTap;
+
+  const ActionButtonWidget({
+    required this.label,
+    required this.emoji,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

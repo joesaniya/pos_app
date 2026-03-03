@@ -1,4 +1,6 @@
 // lib/providers/inventory_provider.dart
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pos_app/models/inventory_modal.dart';
@@ -41,9 +43,9 @@ class InventoryProvider extends ChangeNotifier {
     try {
       final userData = await StorageService.instance.getUserData();
       _businessId = userData['businessId'] as String? ?? '';
-      _userUid    = userData['uid']        as String? ?? '';
-      _userName   = userData['name']       as String? ?? 'Unknown';
-      _userRole   = userData['role']       as String? ?? '';
+      _userUid = userData['uid'] as String? ?? '';
+      _userName = userData['name'] as String? ?? 'Unknown';
+      _userRole = userData['role'] as String? ?? '';
 
       debugPrint(
         '[InventoryProvider] Init — businessId=$_businessId role=$_userRole name=$_userName',
@@ -53,7 +55,8 @@ class InventoryProvider extends ChangeNotifier {
         await fetchItems();
         _subscribeRealtime();
       } else {
-        _seedLocal();
+        log('local item seed');
+        // _seedLocal();
       }
     } catch (e) {
       _errorMessage = 'Init failed: $e';
@@ -66,14 +69,14 @@ class InventoryProvider extends ChangeNotifier {
   }
 
   // ── Getters ───────────────────────────────────────────────────────────────
-  String get searchQuery     => _searchQuery;
+  String get searchQuery => _searchQuery;
   String get selectedCategory => _selectedCategory;
   InventorySortBy get sortBy => _sortBy;
   InventoryFilter get activeFilter => _filter;
-  bool get isLoading         => _isLoading;
-  String get errorMessage    => _errorMessage;
-  String get userRole        => _userRole;
-  String get userName        => _userName;
+  bool get isLoading => _isLoading;
+  String get errorMessage => _errorMessage;
+  String get userRole => _userRole;
+  String get userName => _userName;
 
   List<String> get categories {
     final cats = _items.map((e) => e.category).toSet().toList()..sort();
@@ -137,15 +140,37 @@ class InventoryProvider extends ChangeNotifier {
     return result;
   }
 
-  int get totalItems        => _items.length;
-  int get lowStockCount     => _items.where((i) => i.status == StockStatus.lowStock || i.status == StockStatus.critical).length;
-  int get outOfStockCount   => _items.where((i) => i.status == StockStatus.outOfStock).length;
+  int get totalItems => _items.length;
+  int get lowStockCount => _items
+      .where(
+        (i) =>
+            i.status == StockStatus.lowStock ||
+            i.status == StockStatus.critical,
+      )
+      .length;
+  int get outOfStockCount =>
+      _items.where((i) => i.status == StockStatus.outOfStock).length;
   double get totalInventoryValue => _items.fold(0, (s, i) => s + i.totalValue);
 
-  void setSearch(String q) { _searchQuery = q; notifyListeners(); }
-  void setCategory(String c) { _selectedCategory = c; notifyListeners(); }
-  void setSortBy(InventorySortBy s) { _sortBy = s; notifyListeners(); }
-  void setFilter(InventoryFilter f) { _filter = f; notifyListeners(); }
+  void setSearch(String q) {
+    _searchQuery = q;
+    notifyListeners();
+  }
+
+  void setCategory(String c) {
+    _selectedCategory = c;
+    notifyListeners();
+  }
+
+  void setSortBy(InventorySortBy s) {
+    _sortBy = s;
+    notifyListeners();
+  }
+
+  void setFilter(InventoryFilter f) {
+    _filter = f;
+    notifyListeners();
+  }
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   Future<void> fetchItems() async {
@@ -421,16 +446,16 @@ class InventoryProvider extends ChangeNotifier {
     double? costPerUnit,
   }) async {
     await Supabase.instance.client.from('stock_transactions').insert({
-      'item_id':        itemId,
-      'business_id':    _businessId,
+      'item_id': itemId,
+      'business_id': _businessId,
       'transaction_type': type.dbValue,
-      'quantity':       qty,
-      'stock_before':   before,
-      'stock_after':    after,
-      'unit':           unit.label,
-      'cost_per_unit':  costPerUnit,
-      'total_cost':     costPerUnit != null ? costPerUnit * qty : null,
-      'note':           note,
+      'quantity': qty,
+      'stock_before': before,
+      'stock_after': after,
+      'unit': unit.label,
+      'cost_per_unit': costPerUnit,
+      'total_cost': costPerUnit != null ? costPerUnit * qty : null,
+      'note': note,
       'updated_by_uid': _userUid,
       'updated_by_name': _userName,
       'updated_by_role': _userRole,

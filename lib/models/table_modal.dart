@@ -403,6 +403,3 @@ class RestaurantTable {
     return DateTime.now().difference(occupiedSince!).inMinutes;
   }
 }
-
-// Note: capitalize() extension is defined in shared_widgets.dart (StringExt).
-// Do not redefine it here to avoid ambiguous_extension_member_access errors.

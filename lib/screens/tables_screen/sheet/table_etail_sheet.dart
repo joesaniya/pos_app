@@ -307,6 +307,104 @@ class _OccupiedSectionState extends State<OccupiedSection> {
       _loading = true;
       _error = null;
     });
+    try {
+      // ✅ Step 1: Get current session_id — isolates orders to current guest
+      final tableRow = await _db
+          .from('restaurant_tables')
+          .select('session_id')
+          .eq('id', widget.table.id)
+          .single();
+
+      final sessionId = tableRow['session_id'] as String?;
+
+      // No session = table was just cleared; no active orders to show
+      if (sessionId == null) {
+        _recalc([]);
+        if (mounted)
+          setState(() {
+            _orders = [];
+            _loading = false;
+          });
+        return;
+      }
+
+      // ✅ Step 2: Fetch orders for THIS session only (not previous guests)
+      final orderRows = await _db
+          .from('orders')
+          .select(
+            'id, order_number, status, subtotal, tax_amount, '
+            'total_amount, notes, created_at, created_by_name',
+          )
+          .eq('table_id', widget.table.id)
+          .eq('session_id', sessionId) // ← KEY: current guest only
+          .inFilter('status', ['pending', 'preparing', 'ready'])
+          .order('created_at', ascending: true);
+
+      final List<_OrderSummary> summaries = [];
+      for (final o in (orderRows as List)) {
+        final oid = o['id'] as String;
+        final itemRows = await _db
+            .from('order_items')
+            .select(
+              'id, item_name, quantity, item_price, subtotal, '
+              'is_veg, category_name, notes',
+            )
+            .eq('order_id', oid)
+            .order('created_at', ascending: true);
+
+        final items = (itemRows as List)
+            .map(
+              (i) => _OrderItem(
+                id: i['id'] as String? ?? '',
+                name: i['item_name'] as String? ?? '—',
+                quantity: i['quantity'] as int? ?? 1,
+                unitPrice: (i['item_price'] as num? ?? 0).toDouble(),
+                subtotal: (i['subtotal'] as num? ?? 0).toDouble(),
+                isVeg: i['is_veg'] as bool? ?? true,
+                category: i['category_name'] as String?,
+                notes: i['notes'] as String?,
+              ),
+            )
+            .toList();
+
+        summaries.add(
+          _OrderSummary(
+            id: oid,
+            orderNumber: o['order_number'] as int? ?? 0,
+            status: o['status'] as String? ?? 'pending',
+            subtotal: (o['subtotal'] as num? ?? 0).toDouble(),
+            taxAmount: (o['tax_amount'] as num? ?? 0).toDouble(),
+            total: (o['total_amount'] as num? ?? 0).toDouble(),
+            notes: o['notes'] as String?,
+            createdByName: o['created_by_name'] as String? ?? 'Staff',
+            // ✅ Parse as IST for correct time display
+            createdAt: parseToIST(o['created_at'] as String),
+            items: items,
+          ),
+        );
+      }
+      _recalc(summaries);
+      if (mounted)
+        setState(() {
+          _orders = summaries;
+          _loading = false;
+        });
+    } catch (e, st) {
+      debugPrint('[OccupiedSection] load error: $e\n$st');
+      if (mounted)
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+    }
+  }
+
+  Future<void> _load1() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
       final orderRows = await _db

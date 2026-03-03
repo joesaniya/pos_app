@@ -1,11 +1,5 @@
-// lib/models/order_model.dart
-// Full Order model — Supabase-backed
-
+// lib/models/order_modal.dart
 import 'package:flutter/material.dart';
-
-// ══════════════════════════════════════════════════════════════
-//  ENUMS
-// ══════════════════════════════════════════════════════════════
 
 enum OrderStatus { pending, preparing, ready, completed, cancelled }
 
@@ -175,9 +169,9 @@ extension OrderTypeExt on OrderType {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-//  ORDER ITEM  (line item in an order)
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+//  ORDER ITEM
+// ─────────────────────────────────────────────────────────────────────────────
 class OrderItem {
   final String id;
   final String orderId;
@@ -229,9 +223,9 @@ class OrderItem {
   };
 }
 
-// ══════════════════════════════════════════════════════════════
-//  CART ITEM  (transient, pre-order)
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+//  CART ITEM
+// ─────────────────────────────────────────────────────────────────────────────
 class CartItem {
   final String menuItemId;
   final String itemName;
@@ -264,52 +258,37 @@ class CartItem {
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-//  ORDER  (Supabase-backed)
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+//  ORDER
+// ─────────────────────────────────────────────────────────────────────────────
 class Order {
   final String id;
   final int orderNumber;
   final OrderStatus status;
   final OrderType orderType;
-
-  // Table
   final String? tableId;
   final int? tableNumber;
-
-  // Customer
   final String? customerName;
   final String? customerPhone;
-
-  // Financials
   final double subtotal;
   final double taxAmount;
   final double discountAmount;
   final double totalAmount;
   final double taxRate;
-
-  // Items (populated via join / vw_orders_with_items)
   final List<OrderItem> items;
-
-  // Notes
   final String? notes;
-
-  // Business
   final String businessId;
   final String businessName;
-
-  // Staff
   final String createdByUid;
   final String createdByName;
   final String createdByRole;
-
-  // Timestamps
   final DateTime createdAt;
   final DateTime? startedAt;
   final DateTime? readyAt;
   final DateTime? completedAt;
   final DateTime? cancelledAt;
   final DateTime? updatedAt;
+  final String? sessionId;
 
   const Order({
     required this.id,
@@ -338,45 +317,36 @@ class Order {
     this.completedAt,
     this.cancelledAt,
     this.updatedAt,
+    this.sessionId,
   });
 
-  // ── Computed ────────────────────────────────────────────
   int get totalItems => items.fold(0, (s, i) => s + i.quantity);
-// In Order model — wherever timeLabel is defined:
-String get timeLabel {
-  // ✅ Convert UTC createdAt to IST for display
-  final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
-  final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-  final diff = now.difference(ist);
 
-  if (diff.inMinutes < 1) return 'Just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  return '${ist.day}/${ist.month}';
-}
-  String get timeLabelUST {
-    final diff = DateTime.now().difference(createdAt);
+  // ✅ IST-aware time label
+  String get timeLabel {
+    final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
+    final now = DateTime.now().toUtc().add(
+      const Duration(hours: 5, minutes: 30),
+    );
+    final diff = now.difference(ist);
+    if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    return '${diff.inHours}h ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${ist.day}/${ist.month}';
   }
 
   bool get isActive =>
       status == OrderStatus.pending || status == OrderStatus.preparing;
 
-  Duration get elapsed => DateTime.now().difference(createdAt);
-
-  // ── Deserialization ─────────────────────────────────────
   factory Order.fromJson(Map<String, dynamic> j) {
-    // Items can come as JSON array from the view
     List<OrderItem> items = [];
-    final rawItems = j['items'];
-    if (rawItems is List) {
-      items = rawItems
+    final raw = j['items'];
+    if (raw is List) {
+      items = raw
           .whereType<Map<String, dynamic>>()
           .map(OrderItem.fromJson)
           .toList();
     }
-
     return Order(
       id: j['id'] as String? ?? '',
       orderNumber: j['order_number'] as int? ?? 0,
@@ -416,6 +386,7 @@ String get timeLabel {
       updatedAt: j['updated_at'] != null
           ? DateTime.parse(j['updated_at'] as String)
           : null,
+      sessionId: j['session_id'] as String?,
     );
   }
 
@@ -453,5 +424,6 @@ String get timeLabel {
     completedAt: completedAt ?? this.completedAt,
     cancelledAt: cancelledAt ?? this.cancelledAt,
     updatedAt: updatedAt,
+    sessionId: sessionId,
   );
 }

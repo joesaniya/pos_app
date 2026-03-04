@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
+import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/profile_screen.dart';
 import 'package:pos_app/screens/tables_screen/tables_screen1.dart';
 import 'package:pos_app/screens/utils/app_sizes.dart';
@@ -19,40 +21,135 @@ class PageSwitcher extends StatefulWidget {
 }
 
 class _PageSwitcherState extends State<PageSwitcher> {
+  bool _validating = true;
+  bool _sessionValid = false;
+
   @override
   void initState() {
     super.initState();
-    // Load role as soon as the widget mounts
-    Future.microtask(() => context.read<PageSwitcherProvider>().loadRole());
+    Future.microtask(() async {
+      // ── 1. Validate session against Firestore ──────────────────
+      // This blocks deactivated accounts from auto-logging in on
+      // refresh even if Firebase still has a local session cached.
+      final authProvider = context.read<AppAuthenticationProvider>();
+      final valid = await authProvider.validateSession();
+
+      if (!mounted) return;
+
+      if (!valid) {
+        // Deactivated or deleted — redirect to login
+        final wasDeactivated = authProvider.wasDeactivated;
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+        if (wasDeactivated) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your account has been deactivated. Please contact your admin.',
+                ),
+                backgroundColor: Color(0xFFE11D48),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          });
+        }
+        return;
+      }
+
+      // ── 2. Load role for nav bar visibility ───────────────────
+      await context.read<PageSwitcherProvider>().loadRole();
+
+      if (!mounted) return;
+      setState(() {
+        _sessionValid = true;
+        _validating = false;
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<PageSwitcherProvider>(
-      builder: (context, navigationProvider, _) {
-        return Scaffold(
-          body: IndexedStack(
-            index: navigationProvider.selectedIndex,
-            children: [
-              const DashboardScreen(),
-              const OrdersScreen(),
-              const TablesScreen(),
-              const MenuScreen(),
-              // Only render InventoryScreen for allowed roles
-              if (navigationProvider.canAccessInventory)
-                const InventoryScreen()
-              else
-                const SizedBox.shrink(),
-              const ProfileScreen(),
-            ],
-          ),
-          bottomNavigationBar: const BottomNavBar(),
-        );
+    // ── Show splash while validating session ──────────────────────
+    if (_validating) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF4F7FF),
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF1847C4)),
+        ),
+      );
+    }
+
+    if (!_sessionValid) {
+      return const LoginScreen();
+    }
+
+    // ── Main app — also watch for mid-session deactivation ────────
+    return Consumer<AppAuthenticationProvider>(
+      builder: (context, auth, child) {
+        // Real-time deactivation: session watcher fired mid-session
+        if (auth.wasDeactivated) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your account has been deactivated. Please contact your admin.',
+                ),
+                backgroundColor: Color(0xFFE11D48),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 4),
+              ),
+            );
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginScreen()),
+              (route) => false,
+            );
+          });
+          return const Scaffold(
+            backgroundColor: Color(0xFFF4F7FF),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF1847C4)),
+            ),
+          );
+        }
+
+        return child!;
       },
+      // ── Your original Scaffold — completely unchanged ──────────
+      child: Consumer<PageSwitcherProvider>(
+        builder: (context, navigationProvider, _) {
+          return Scaffold(
+            body: IndexedStack(
+              index: navigationProvider.selectedIndex,
+              children: [
+                const DashboardScreen(),
+                const OrdersScreen(),
+                const TablesScreen(),
+                const MenuScreen(),
+                if (navigationProvider.canAccessInventory)
+                  const InventoryScreen()
+                else
+                  const SizedBox.shrink(),
+                const ProfileScreen(),
+              ],
+            ),
+            bottomNavigationBar: const BottomNavBar(),
+          );
+        },
+      ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  BOTTOM NAV BAR — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class BottomNavBar extends StatelessWidget {
   const BottomNavBar({Key? key}) : super(key: key);
 
@@ -108,7 +205,6 @@ class BottomNavBar extends StatelessWidget {
                     isSelected: navigationProvider.selectedIndex == 3,
                     onTap: () => navigationProvider.setSelectedIndex(3),
                   ),
-                  // Hide Inventory tab entirely for servers
                   if (navigationProvider.canAccessInventory)
                     _NavItem(
                       index: 4,
@@ -134,6 +230,9 @@ class BottomNavBar extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  NAV ITEM — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _NavItem extends StatelessWidget {
   final int index;
   final IconData icon;

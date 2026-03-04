@@ -15,74 +15,77 @@ class TeamMembersScreen extends StatefulWidget {
 
 class _TeamMembersScreenState extends State<TeamMembersScreen>
     with TickerProviderStateMixin {
-  late AnimationController _fadeController;
-  late AnimationController _headerController;
-  late Animation<double> _fadeAnim;
-  late Animation<Offset> _headerSlide;
+  TabController? _tabController;
   final _searchController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _activeScrollController = ScrollController();
+  final _pastScrollController = ScrollController();
   bool _isSearchFocused = false;
 
-  // ── Design tokens ──────────────────────────────────────────────────────────
-  static const _bg = Color(0xFF0A0D14);
-  static const _surface = Color(0xFF111520);
-  static const _card = Color(0xFF161B2E);
-  static const _cardBorder = Color(0xFF1E2640);
+  // ── Light Design Tokens ────────────────────────────────────────────────────
+  static const _bg = Color(0xFFF5F7FF);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _card = Color(0xFFFFFFFF);
+  static const _cardBorder = Color(0xFFE8ECF8);
   static const _accent = Color(0xFF4F6EF7);
-  static const _accentGlow = Color(0x334F6EF7);
-  static const _accentSoft = Color(0xFF2A3A8A);
-  static const _success = Color(0xFF00D68F);
-  static const _successSoft = Color(0x1A00D68F);
-  static const _warning = Color(0xFFFFB547);
-  static const _warningSoft = Color(0x1AFFB547);
-  static const _danger = Color(0xFFFF4D6A);
-  static const _dangerSoft = Color(0x1AFF4D6A);
-  static const _textPrimary = Color(0xFFEEF0F8);
-  static const _textSecondary = Color(0xFF7B85A3);
-  static const _textMuted = Color(0xFF3D4560);
-  static const _divider = Color(0xFF1A2038);
+  static const _accentSoft = Color(0xFFEEF1FE);
+  static const _accentMed = Color(0xFFD0D9FC);
+  static const _success = Color(0xFF00A86B);
+  static const _successSoft = Color(0xFFE6F7F2);
+  static const _warning = Color(0xFFE07B00);
+  static const _warningSoft = Color(0xFFFFF3E0);
+  static const _danger = Color(0xFFD93025);
+  static const _dangerSoft = Color(0xFFFDECEA);
+  static const _purple = Color(0xFF8B5CF6);
+  static const _purpleSoft = Color(0xFFF3EEFF);
+  static const _gold = Color(0xFFB8860B);
+  static const _goldSoft = Color(0xFFFFF8E1);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _textMuted = Color(0xFFADB5CC);
+  static const _divider = Color(0xFFF0F2FA);
 
   @override
   void initState() {
     super.initState();
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _headerController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
-    _headerSlide = Tween<Offset>(
-      begin: const Offset(0, -0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _headerController, curve: Curves.easeOutCubic));
-
-    _fadeController.forward();
-    _headerController.forward();
+    _tabController = TabController(length: 2, vsync: this);
+    _activeScrollController.addListener(_onActiveScroll);
+    _pastScrollController.addListener(_onPastScroll);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<EmployeeManagementProvider>().init();
     });
   }
 
+  void _onActiveScroll() {
+    if (_activeScrollController.position.pixels >=
+        _activeScrollController.position.maxScrollExtent - 200) {
+      context.read<EmployeeManagementProvider>().loadMoreEmployees();
+    }
+  }
+
+  void _onPastScroll() {
+    if (_pastScrollController.position.pixels >=
+        _pastScrollController.position.maxScrollExtent - 200) {
+      // reserved for future server-side past pagination
+    }
+  }
+
   @override
   void dispose() {
-    _fadeController.dispose();
-    _headerController.dispose();
+    _tabController?.dispose();
     _searchController.dispose();
-    _scrollController.dispose();
+    _activeScrollController.dispose();
+    _pastScrollController.dispose();
     super.dispose();
   }
 
-  // ── Role badge color ───────────────────────────────────────────────────────
+  // ── Role helpers ───────────────────────────────────────────────────────────
   Color _roleColor(String role) {
     switch (role.toLowerCase()) {
       case 'owner':
-        return const Color(0xFFFFD700);
+        return _gold;
       case 'system':
-        return const Color(0xFFAD49E1);
+        return _purple;
       case 'admin':
         return _accent;
       case 'manager':
@@ -95,11 +98,11 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
   Color _roleSoft(String role) {
     switch (role.toLowerCase()) {
       case 'owner':
-        return const Color(0x1AFFD700);
+        return _goldSoft;
       case 'system':
-        return const Color(0x1AAD49E1);
+        return _purpleSoft;
       case 'admin':
-        return _accentGlow;
+        return _accentSoft;
       case 'manager':
         return _warningSoft;
       default:
@@ -124,13 +127,16 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
 
   // ── Delete confirmation ────────────────────────────────────────────────────
   Future<void> _confirmDelete(
-      BuildContext ctx, EmployeeManagementProvider prov, EmployeeModel emp) async {
+    BuildContext ctx,
+    EmployeeManagementProvider prov,
+    EmployeeModel emp,
+  ) async {
     final confirmed = await showGeneralDialog<bool>(
       context: ctx,
       barrierDismissible: true,
       barrierLabel: 'Dismiss',
-      barrierColor: Colors.black87,
-      transitionDuration: const Duration(milliseconds: 300),
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 280),
       transitionBuilder: (_, anim, __, child) => ScaleTransition(
         scale: CurvedAnimation(parent: anim, curve: Curves.easeOutBack),
         child: FadeTransition(opacity: anim, child: child),
@@ -140,8 +146,11 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
     if (confirmed == true && ctx.mounted) {
       final ok = await prov.deleteEmployee(emp);
       if (ctx.mounted) {
-        _showSnack(ctx, ok ? '${emp.name} removed from team' : 'Failed to remove member',
-            ok ? _success : _danger);
+        _showSnack(
+          ctx,
+          ok ? '${emp.name} removed from team' : 'Failed to remove member',
+          ok ? _success : _danger,
+        );
       }
     }
   }
@@ -150,10 +159,11 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
     ScaffoldMessenger.of(ctx).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: _card,
+        backgroundColor: _surface,
+        elevation: 4,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: color.withOpacity(0.5)),
+          side: BorderSide(color: color.withOpacity(0.4)),
         ),
         margin: const EdgeInsets.all(16),
         content: Row(
@@ -164,9 +174,16 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
             const SizedBox(width: 12),
-            Text(msg,
+            Expanded(
+              child: Text(
+                msg,
                 style: TextStyle(
-                    color: _textPrimary, fontFamily: 'SF Pro Display', fontSize: 14)),
+                  color: _textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ],
         ),
         duration: const Duration(seconds: 3),
@@ -174,73 +191,30 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
+        statusBarIconBrightness: Brightness.dark,
       ),
       child: Scaffold(
         backgroundColor: _bg,
         body: Consumer<EmployeeManagementProvider>(
           builder: (ctx, prov, _) {
-            return FadeTransition(
-              opacity: _fadeAnim,
-              child: CustomScrollView(
-                controller: _scrollController,
-                physics: const BouncingScrollPhysics(),
-                slivers: [
-                  // ── App Bar ─────────────────────────────────────────────
-                  _buildSliverHeader(ctx, prov),
-
-                  // ── Stats Row ───────────────────────────────────────────
-                  SliverToBoxAdapter(child: _buildStatsRow(prov)),
-
-                  // ── Search + Filter ─────────────────────────────────────
-                  SliverToBoxAdapter(child: _buildSearchAndFilter(ctx, prov)),
-
-                  // ── Content ─────────────────────────────────────────────
-                  if (prov.isLoading)
-                    const SliverFillRemaining(child: _LoadingState())
-                  else if (prov.error != null)
-                    SliverFillRemaining(child: _ErrorState(error: prov.error!,
-                        onRetry: prov.refresh))
-                  else if (prov.employees.isEmpty)
-                    SliverFillRemaining(child: _EmptyState(hasFilters:
-                        prov.searchQuery.isNotEmpty || prov.roleFilter != 'All',
-                        onClear: prov.clearFilters))
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                      sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (ctx, i) {
-                            final emp = prov.employees[i];
-                            return _EmployeeCard(
-                              key: ValueKey(emp.uid),
-                              emp: emp,
-                              isSelf: prov.isSelf(emp.uid),
-                              canDelete: prov.canDelete(emp),
-                              canToggle: prov.canToggle(emp),
-                              isDeleting: prov.isDeleting,
-                              index: i,
-                              roleColor: _roleColor(emp.role),
-                              roleSoft: _roleSoft(emp.role),
-                              roleIcon: _roleIcon(emp.role),
-                              onDelete: () => _confirmDelete(ctx, prov, emp),
-                              onToggle: () async {
-                                final ok = await prov.toggleStatus(emp);
-                                if (ctx.mounted && !ok) {
-                                  _showSnack(ctx, 'Could not update status', _danger);
-                                }
-                              },
-                            );
-                          },
-                          childCount: prov.employees.length,
-                        ),
-                      ),
-                    ),
+            return NestedScrollView(
+              headerSliverBuilder: (ctx, _) => [
+                _buildSliverHeader(ctx, prov),
+                SliverToBoxAdapter(child: _buildStatsRow(prov)),
+                SliverToBoxAdapter(child: _buildSearchAndFilter(ctx, prov)),
+                SliverToBoxAdapter(child: _buildTabBar()),
+              ],
+              body: TabBarView(
+                controller: _tabController!,
+                children: [
+                  _buildActiveTab(ctx, prov),
+                  _buildPastTab(ctx, prov),
                 ],
               ),
             );
@@ -253,26 +227,30 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
   // ── Sliver Header ──────────────────────────────────────────────────────────
   Widget _buildSliverHeader(BuildContext ctx, EmployeeManagementProvider prov) {
     return SliverAppBar(
-      expandedHeight: 130,
-      collapsedHeight: 70,
+      expandedHeight: 120,
+      collapsedHeight: 64,
       pinned: true,
       stretch: true,
-      backgroundColor: _bg,
+      backgroundColor: _surface,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
+      forceElevated: true,
       leading: Padding(
         padding: const EdgeInsets.only(left: 8),
         child: IconButton(
           icon: Container(
-            width: 38,
-            height: 38,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: _surface,
-              borderRadius: BorderRadius.circular(12),
+              color: _bg,
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(color: _cardBorder),
             ),
-            child: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: _textSecondary, size: 16),
+            child: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: _textSecondary,
+              size: 15,
+            ),
           ),
           onPressed: () => Navigator.of(ctx).pop(),
         ),
@@ -282,71 +260,56 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
           padding: const EdgeInsets.only(right: 8),
           child: IconButton(
             icon: Container(
-              width: 38,
-              height: 38,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
-                color: _accentGlow,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _accentSoft),
+                color: _accentSoft,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _accentMed),
               ),
-              child: const Icon(Icons.refresh_rounded, color: _accent, size: 18),
+              child: const Icon(
+                Icons.refresh_rounded,
+                color: _accent,
+                size: 17,
+              ),
             ),
             onPressed: prov.refresh,
           ),
         ),
       ],
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 68, bottom: 18),
-        title: SlideTransition(
-          position: _headerSlide,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Team Members',
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
+        titlePadding: const EdgeInsets.only(left: 68, bottom: 16),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Team Members',
+              style: TextStyle(
+                color: _textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
               ),
-              Text(
-                prov.isLoading
-                    ? 'Loading...'
-                    : '${prov.totalCount} member${prov.totalCount != 1 ? 's' : ''}',
-                style: const TextStyle(
-                  color: _textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
-                ),
+            ),
+            Text(
+              prov.isLoading
+                  ? 'Loading…'
+                  : '${prov.totalCount} member${prov.totalCount != 1 ? 's' : ''}',
+              style: const TextStyle(
+                color: _textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w400,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF0D1228), _bg],
-            ),
-          ),
-          child: Align(
-            alignment: Alignment.topRight,
-            child: Opacity(
-              opacity: 0.15,
-              child: Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [_accent, _bg.withOpacity(0)],
-                  ),
-                ),
-              ),
+              colors: [Color(0xFFF0F4FF), _surface],
             ),
           ),
         ),
@@ -357,17 +320,17 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
   // ── Stats Row ──────────────────────────────────────────────────────────────
   Widget _buildStatsRow(EmployeeManagementProvider prov) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Row(
         children: [
           _StatChip(
             label: 'Total',
             value: prov.totalCount,
             color: _accent,
-            soft: _accentGlow,
+            soft: _accentSoft,
             icon: Icons.groups_rounded,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           _StatChip(
             label: 'Active',
             value: prov.activeCount,
@@ -375,13 +338,21 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
             soft: _successSoft,
             icon: Icons.check_circle_outline_rounded,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           _StatChip(
             label: 'Inactive',
             value: prov.inactiveCount,
             color: _textMuted,
-            soft: const Color(0x1A3D4560),
+            soft: _divider,
             icon: Icons.pause_circle_outline_rounded,
+          ),
+          const SizedBox(width: 10),
+          _StatChip(
+            label: 'Former',
+            value: prov.pastCount,
+            color: _purple,
+            soft: _purpleSoft,
+            icon: Icons.history_rounded,
           ),
         ],
       ),
@@ -389,24 +360,34 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
   }
 
   // ── Search + Filter ────────────────────────────────────────────────────────
-  Widget _buildSearchAndFilter(BuildContext ctx, EmployeeManagementProvider prov) {
+  Widget _buildSearchAndFilter(
+    BuildContext ctx,
+    EmployeeManagementProvider prov,
+  ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Column(
         children: [
-          // Search field
           AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: _surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: _isSearchFocused ? _accent.withOpacity(0.6) : _cardBorder,
+                color: _isSearchFocused
+                    ? _accent.withOpacity(0.5)
+                    : _cardBorder,
                 width: _isSearchFocused ? 1.5 : 1,
               ),
-              boxShadow: _isSearchFocused
-                  ? [BoxShadow(color: _accentGlow, blurRadius: 12)]
-                  : [],
+              boxShadow: [
+                BoxShadow(
+                  color: _isSearchFocused
+                      ? _accent.withOpacity(0.08)
+                      : Colors.black.withOpacity(0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: TextField(
               controller: _searchController,
@@ -417,12 +398,18 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
               decoration: InputDecoration(
                 hintText: 'Search by name, email or role…',
                 hintStyle: const TextStyle(color: _textMuted, fontSize: 14),
-                prefixIcon: const Icon(Icons.search_rounded,
-                    color: _textSecondary, size: 20),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: _textSecondary,
+                  size: 19,
+                ),
                 suffixIcon: prov.searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close_rounded,
-                            color: _textSecondary, size: 18),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: _textSecondary,
+                          size: 17,
+                        ),
                         onPressed: () {
                           _searchController.clear();
                           prov.setSearch('');
@@ -430,17 +417,16 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
                       )
                     : null,
                 border: InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 13,
+                ),
               ),
             ),
           ),
-
-          const SizedBox(height: 12),
-
-          // Role filter chips
+          const SizedBox(height: 10),
           SizedBox(
-            height: 36,
+            height: 34,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: prov.availableRoles.length,
@@ -448,20 +434,20 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
               itemBuilder: (_, i) {
                 final role = prov.availableRoles[i];
                 final selected = prov.roleFilter == role;
-                final color = role == 'All'
-                    ? _accent
-                    : _roleColor(role);
+                final color = role == 'All' ? _accent : _roleColor(role);
                 return GestureDetector(
                   onTap: () => prov.setRoleFilter(role),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
                     decoration: BoxDecoration(
-                      color: selected ? color.withOpacity(0.15) : _surface,
+                      color: selected ? color.withOpacity(0.12) : _surface,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: selected ? color.withOpacity(0.6) : _cardBorder,
+                        color: selected ? color.withOpacity(0.5) : _cardBorder,
                         width: selected ? 1.5 : 1,
                       ),
                     ),
@@ -469,7 +455,7 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
                       role,
                       style: TextStyle(
                         color: selected ? color : _textSecondary,
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: selected
                             ? FontWeight.w600
                             : FontWeight.w400,
@@ -484,23 +470,142 @@ class _TeamMembersScreenState extends State<TeamMembersScreen>
       ),
     );
   }
+
+  // ── Tab Bar ────────────────────────────────────────────────────────────────
+  Widget _buildTabBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      decoration: BoxDecoration(
+        color: _divider,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: TabBar(
+        controller: _tabController!,
+        indicator: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        labelColor: _textPrimary,
+        unselectedLabelColor: _textSecondary,
+        labelStyle: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w400,
+        ),
+        padding: const EdgeInsets.all(4),
+        tabs: const [
+          Tab(text: 'Current Members'),
+          Tab(text: 'Past Members'),
+        ],
+      ),
+    );
+  }
+
+  // ── Active Tab ─────────────────────────────────────────────────────────────
+  Widget _buildActiveTab(BuildContext ctx, EmployeeManagementProvider prov) {
+    if (prov.isLoading) return const _LoadingState();
+    if (prov.error != null) {
+      return _ErrorState(error: prov.error!, onRetry: prov.refresh);
+    }
+    if (prov.employees.isEmpty) {
+      return _EmptyState(
+        hasFilters: prov.searchQuery.isNotEmpty || prov.roleFilter != 'All',
+        onClear: prov.clearFilters,
+      );
+    }
+
+    return ListView.builder(
+      controller: _activeScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+      physics: const BouncingScrollPhysics(),
+      itemCount: prov.employees.length + (prov.hasMoreActive ? 1 : 0),
+      itemBuilder: (ctx, i) {
+        if (i == prov.employees.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(_accent),
+              ),
+            ),
+          );
+        }
+        final emp = prov.employees[i];
+        return _EmployeeCard(
+          key: ValueKey(emp.uid),
+          emp: emp,
+          isSelf: prov.isSelf(emp.uid),
+          canDelete: prov.canDelete(emp),
+          canToggle: prov.canToggle(emp),
+          isDeleting: prov.isDeleting,
+          index: i,
+          roleColor: _roleColor(emp.role),
+          roleSoft: _roleSoft(emp.role),
+          roleIcon: _roleIcon(emp.role),
+          onDelete: () => _confirmDelete(ctx, prov, emp),
+          onToggle: () async {
+            final ok = await prov.toggleStatus(emp);
+            if (ctx.mounted && !ok) {
+              _showSnack(ctx, 'Could not update status', _danger);
+            }
+          },
+        );
+      },
+    );
+  }
+
+  // ── Past Tab ───────────────────────────────────────────────────────────────
+  Widget _buildPastTab(BuildContext ctx, EmployeeManagementProvider prov) {
+    if (prov.isLoadingPast && prov.pastEmployees.isEmpty) {
+      return const _LoadingState(isPast: true);
+    }
+    if (prov.pastEmployees.isEmpty) {
+      return const _NoPastState();
+    }
+
+    return ListView.builder(
+      controller: _pastScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+      physics: const BouncingScrollPhysics(),
+      itemCount: prov.pastEmployees.length,
+      itemBuilder: (ctx, i) {
+        final emp = prov.pastEmployees[i];
+        return _PastEmployeeCard(
+          key: ValueKey('past_${emp.uid}'),
+          emp: emp,
+          index: i,
+          roleColor: _roleColor(emp.role),
+          roleSoft: _roleSoft(emp.role),
+          roleIcon: _roleIcon(emp.role),
+        );
+      },
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EMPLOYEE CARD
+//  CURRENT EMPLOYEE CARD
 // ─────────────────────────────────────────────────────────────────────────────
 class _EmployeeCard extends StatefulWidget {
   final EmployeeModel emp;
-  final bool isSelf;
-  final bool canDelete;
-  final bool canToggle;
-  final bool isDeleting;
+  final bool isSelf, canDelete, canToggle, isDeleting;
   final int index;
-  final Color roleColor;
-  final Color roleSoft;
+  final Color roleColor, roleSoft;
   final IconData roleIcon;
-  final VoidCallback onDelete;
-  final VoidCallback onToggle;
+  final VoidCallback onDelete, onToggle;
 
   const _EmployeeCard({
     super.key,
@@ -527,32 +632,32 @@ class _EmployeeCardState extends State<_EmployeeCard>
   late Animation<double> _scale;
   late Animation<Offset> _slide;
 
-  static const _bg = Color(0xFF0A0D14);
-  static const _card = Color(0xFF161B2E);
-  static const _cardBorder = Color(0xFF1E2640);
+  static const _card = Color(0xFFFFFFFF);
+  static const _cardBorder = Color(0xFFE8ECF8);
   static const _accent = Color(0xFF4F6EF7);
-  static const _success = Color(0xFF00D68F);
-  static const _successSoft = Color(0x1A00D68F);
-  static const _danger = Color(0xFFFF4D6A);
-  static const _dangerSoft = Color(0x1AFF4D6A);
-  static const _textPrimary = Color(0xFFEEF0F8);
-  static const _textSecondary = Color(0xFF7B85A3);
-  static const _textMuted = Color(0xFF3D4560);
+  static const _accentSoft = Color(0xFFEEF1FE);
+  static const _accentMed = Color(0xFFD0D9FC);
+  static const _success = Color(0xFF00A86B);
+  static const _successSoft = Color(0xFFE6F7F2);
+  static const _danger = Color(0xFFD93025);
+  static const _dangerSoft = Color(0xFFFDECEA);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _textMuted = Color(0xFFADB5CC);
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 400 + widget.index * 60),
+      duration: Duration(milliseconds: 380 + widget.index * 50),
     );
     _scale = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack);
     _slide = Tween<Offset>(
-      begin: const Offset(0, 0.15),
+      begin: const Offset(0, 0.1),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-
-    Future.delayed(Duration(milliseconds: widget.index * 60), () {
+    Future.delayed(Duration(milliseconds: widget.index * 50), () {
       if (mounted) _ctrl.forward();
     });
   }
@@ -573,43 +678,38 @@ class _EmployeeCardState extends State<_EmployeeCard>
       child: ScaleTransition(
         scale: _scale,
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(bottom: 10),
           child: Container(
             decoration: BoxDecoration(
               color: _card,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: widget.isSelf
-                    ? _accent.withOpacity(0.4)
-                    : _cardBorder,
+                color: widget.isSelf ? _accent.withOpacity(0.35) : _cardBorder,
                 width: widget.isSelf ? 1.5 : 1,
               ),
-              boxShadow: widget.isSelf
-                  ? [
-                      BoxShadow(
-                        color: _accent.withOpacity(0.08),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      )
-                    ]
-                  : [],
+              boxShadow: [
+                BoxShadow(
+                  color: widget.isSelf
+                      ? _accent.withOpacity(0.06)
+                      : Colors.black.withOpacity(0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
             child: Column(
               children: [
-                // ── Main row ───────────────────────────────────────────
+                // ── Main row ──────────────────────────────────────
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(14),
                   child: Row(
                     children: [
-                      // Avatar
                       _Avatar(
                         emp: emp,
                         roleColor: widget.roleColor,
                         isActive: isActive,
                       ),
-                      const SizedBox(width: 14),
-
-                      // Info
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -629,15 +729,16 @@ class _EmployeeCardState extends State<_EmployeeCard>
                                   ),
                                 ),
                                 if (widget.isSelf) ...[
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 7),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: _accent.withOpacity(0.15),
+                                      color: _accentSoft,
                                       borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(
-                                          color: _accent.withOpacity(0.4)),
+                                      border: Border.all(color: _accentMed),
                                     ),
                                     child: const Text(
                                       'You',
@@ -645,14 +746,13 @@ class _EmployeeCardState extends State<_EmployeeCard>
                                         color: _accent,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
                                       ),
                                     ),
                                   ),
                                 ],
                               ],
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 3),
                             Text(
                               emp.email,
                               style: const TextStyle(
@@ -664,76 +764,14 @@ class _EmployeeCardState extends State<_EmployeeCard>
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                // Role badge
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: widget.roleSoft,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                        color: widget.roleColor.withOpacity(0.3)),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(widget.roleIcon,
-                                          color: widget.roleColor, size: 11),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        _capitalize(emp.role),
-                                        style: TextStyle(
-                                          color: widget.roleColor,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                _RoleBadge(
+                                  label: _cap(emp.role),
+                                  color: widget.roleColor,
+                                  soft: widget.roleSoft,
+                                  icon: widget.roleIcon,
                                 ),
-                                const SizedBox(width: 8),
-                                // Status badge
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isActive
-                                        ? _successSoft
-                                        : const Color(0x1A3D4560),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: isActive
-                                          ? _success.withOpacity(0.3)
-                                          : _textMuted.withOpacity(0.2),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 5,
-                                        height: 5,
-                                        decoration: BoxDecoration(
-                                          color: isActive
-                                              ? _success
-                                              : _textMuted,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        isActive ? 'Active' : 'Inactive',
-                                        style: TextStyle(
-                                          color: isActive
-                                              ? _success
-                                              : _textMuted,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                const SizedBox(width: 7),
+                                _StatusBadge(isActive: isActive),
                               ],
                             ),
                           ],
@@ -743,82 +781,60 @@ class _EmployeeCardState extends State<_EmployeeCard>
                   ),
                 ),
 
-                // ── Footer ─────────────────────────────────────────────
-                if (widget.canToggle || widget.canDelete) ...[
-                  Container(
-                    height: 1,
-                    color: _cardBorder.withOpacity(0.6),
+                // ── Footer ────────────────────────────────────────
+                Container(height: 1, color: const Color(0xFFF0F2FA)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      children: [
-                        // Joined date
-                        Icon(Icons.calendar_today_outlined,
-                            color: _textMuted, size: 12),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Joined ${emp.joinedLabel}',
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_outlined,
+                        color: _textMuted,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          'Joined ${emp.joinedLabel}  ·  ${emp.tenureLabel}',
                           style: const TextStyle(
-                              color: _textMuted, fontSize: 12),
+                            color: _textMuted,
+                            fontSize: 11.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const Spacer(),
-
-                        // Toggle button
-                        if (widget.canToggle)
-                          _ActionButton(
-                            label: isActive ? 'Deactivate' : 'Activate',
-                            icon: isActive
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: isActive ? _dangerSoft : _successSoft,
-                            textColor: isActive ? _danger : _success,
-                            borderColor: isActive
-                                ? _danger.withOpacity(0.3)
-                                : _success.withOpacity(0.3),
-                            onTap: widget.onToggle,
-                          ),
-
-                        if (widget.canToggle && widget.canDelete)
-                          const SizedBox(width: 8),
-
-                        // Delete button
-                        if (widget.canDelete)
-                          _ActionButton(
-                            label: 'Remove',
-                            icon: Icons.person_remove_rounded,
-                            color: _dangerSoft,
-                            textColor: _danger,
-                            borderColor: _danger.withOpacity(0.3),
-                            onTap: widget.isDeleting ? () {} : widget.onDelete,
-                          ),
-                      ],
-                    ),
-                  ),
-                ] else ...[
-                  // Just show joined date
-                  Container(
-                    height: 1,
-                    color: _cardBorder.withOpacity(0.6),
-                  ),
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today_outlined,
-                            color: _textMuted, size: 12),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Joined ${emp.joinedLabel}',
-                          style:
-                              const TextStyle(color: _textMuted, fontSize: 12),
+                      ),
+                      if (widget.canToggle) ...[
+                        const SizedBox(width: 8),
+                        _ActionButton(
+                          label: isActive ? 'Deactivate' : 'Activate',
+                          icon: isActive
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: isActive ? _dangerSoft : _successSoft,
+                          textColor: isActive ? _danger : _success,
+                          borderColor: isActive
+                              ? _danger.withOpacity(0.25)
+                              : _success.withOpacity(0.25),
+                          onTap: widget.onToggle,
                         ),
                       ],
-                    ),
+                      if (widget.canToggle && widget.canDelete)
+                        const SizedBox(width: 7),
+                      if (widget.canDelete)
+                        _ActionButton(
+                          label: 'Remove',
+                          icon: Icons.person_remove_rounded,
+                          color: _dangerSoft,
+                          textColor: _danger,
+                          borderColor: _danger.withOpacity(0.25),
+                          onTap: widget.isDeleting ? () {} : widget.onDelete,
+                        ),
+                    ],
                   ),
-                ],
+                ),
               ],
             ),
           ),
@@ -826,19 +842,276 @@ class _EmployeeCardState extends State<_EmployeeCard>
       ),
     );
   }
-
-  String _capitalize(String s) =>
-      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  AVATAR
+//  PAST EMPLOYEE CARD
 // ─────────────────────────────────────────────────────────────────────────────
+class _PastEmployeeCard extends StatefulWidget {
+  final EmployeeModel emp;
+  final int index;
+  final Color roleColor, roleSoft;
+  final IconData roleIcon;
+
+  const _PastEmployeeCard({
+    super.key,
+    required this.emp,
+    required this.index,
+    required this.roleColor,
+    required this.roleSoft,
+    required this.roleIcon,
+  });
+
+  @override
+  State<_PastEmployeeCard> createState() => _PastEmployeeCardState();
+}
+
+class _PastEmployeeCardState extends State<_PastEmployeeCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<Offset> _slide;
+
+  static const _card = Color(0xFFFFFFFF);
+  static const _cardBorder = Color(0xFFE8ECF8);
+  static const _purple = Color(0xFF8B5CF6);
+  static const _purpleSoft = Color(0xFFF3EEFF);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _textMuted = Color(0xFFADB5CC);
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 350 + widget.index * 40),
+    );
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    Future.delayed(Duration(milliseconds: widget.index * 40), () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final emp = widget.emp;
+    return SlideTransition(
+      position: _slide,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: _cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    // Greyscale avatar
+                    Stack(
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: _cardBorder, width: 2),
+                            color: const Color(0xFFF0F2FA),
+                          ),
+                          child: ClipOval(
+                            child: ColorFiltered(
+                              colorFilter: const ColorFilter.matrix([
+                                0.2126,
+                                0.7152,
+                                0.0722,
+                                0,
+                                0,
+                                0.2126,
+                                0.7152,
+                                0.0722,
+                                0,
+                                0,
+                                0.2126,
+                                0.7152,
+                                0.0722,
+                                0,
+                                0,
+                                0,
+                                0,
+                                0,
+                                1,
+                                0,
+                              ]),
+                              child: emp.profilePhoto.isNotEmpty
+                                  ? Image.network(
+                                      emp.profilePhoto,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) =>
+                                          _InitialsAvatar(
+                                            emp: emp,
+                                            roleColor: _textMuted,
+                                          ),
+                                    )
+                                  : _InitialsAvatar(
+                                      emp: emp,
+                                      roleColor: _textMuted,
+                                    ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: _purpleSoft,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: _card, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.history_rounded,
+                              color: _purple,
+                              size: 9,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            emp.name,
+                            style: const TextStyle(
+                              color: _textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            emp.email,
+                            style: const TextStyle(
+                              color: _textSecondary,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 8),
+                          _RoleBadge(
+                            label: _cap(emp.role),
+                            color: _textMuted,
+                            soft: const Color(0xFFF0F2FA),
+                            icon: widget.roleIcon,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Tenure badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _purpleSoft,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _purple.withOpacity(0.2)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            emp.tenureLabel,
+                            style: const TextStyle(
+                              color: _purple,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Text(
+                            'tenure',
+                            style: TextStyle(
+                              color: _purple,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Container(height: 1, color: const Color(0xFFF0F2FA)),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 9,
+                ),
+                child: Row(
+                  children: [
+                    _InfoPill(
+                      icon: Icons.login_rounded,
+                      label: 'Joined ${emp.joinedLabel}',
+                      color: _textMuted,
+                    ),
+                    if (emp.deletedAt != null) ...[
+                      const SizedBox(width: 12),
+                      _InfoPill(
+                        icon: Icons.logout_rounded,
+                        label: 'Left ${emp.leftLabel}',
+                        color: _purple.withOpacity(0.7),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHARED SMALL WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
+String _cap(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
+
 class _Avatar extends StatelessWidget {
   final EmployeeModel emp;
   final Color roleColor;
   final bool isActive;
-
   const _Avatar({
     required this.emp,
     required this.roleColor,
@@ -850,33 +1123,35 @@ class _Avatar extends StatelessWidget {
     return Stack(
       children: [
         Container(
-          width: 54,
-          height: 54,
+          width: 50,
+          height: 50,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: roleColor.withOpacity(0.4), width: 2),
+            border: Border.all(color: roleColor.withOpacity(0.35), width: 2),
           ),
           child: ClipOval(
             child: emp.profilePhoto.isNotEmpty
                 ? Image.network(
                     emp.profilePhoto,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _InitialsAvatar(emp: emp, roleColor: roleColor),
+                    errorBuilder: (_, __, ___) =>
+                        _InitialsAvatar(emp: emp, roleColor: roleColor),
                   )
                 : _InitialsAvatar(emp: emp, roleColor: roleColor),
           ),
         ),
-        // Active indicator dot
         Positioned(
-          right: 1,
-          bottom: 1,
+          right: 0,
+          bottom: 0,
           child: Container(
             width: 13,
             height: 13,
             decoration: BoxDecoration(
-              color: isActive ? const Color(0xFF00D68F) : const Color(0xFF3D4560),
+              color: isActive
+                  ? const Color(0xFF00A86B)
+                  : const Color(0xFFADB5CC),
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF161B2E), width: 2),
+              border: Border.all(color: Colors.white, width: 2),
             ),
           ),
         ),
@@ -888,19 +1163,18 @@ class _Avatar extends StatelessWidget {
 class _InitialsAvatar extends StatelessWidget {
   final EmployeeModel emp;
   final Color roleColor;
-
   const _InitialsAvatar({required this.emp, required this.roleColor});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: roleColor.withOpacity(0.12),
+      color: roleColor.withOpacity(0.1),
       child: Center(
         child: Text(
           emp.initials,
           style: TextStyle(
             color: roleColor,
-            fontSize: 18,
+            fontSize: 17,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -909,17 +1183,120 @@ class _InitialsAvatar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ACTION BUTTON
-// ─────────────────────────────────────────────────────────────────────────────
+class _RoleBadge extends StatelessWidget {
+  final String label;
+  final Color color, soft;
+  final IconData icon;
+  const _RoleBadge({
+    required this.label,
+    required this.color,
+    required this.soft,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: soft,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 11),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final bool isActive;
+  const _StatusBadge({required this.isActive});
+
+  static const _success = Color(0xFF00A86B);
+  static const _successSoft = Color(0xFFE6F7F2);
+  static const _textMuted = Color(0xFFADB5CC);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: isActive ? _successSoft : const Color(0xFFF5F6FA),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isActive
+              ? _success.withOpacity(0.3)
+              : _textMuted.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: isActive ? _success : _textMuted,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            isActive ? 'Active' : 'Inactive',
+            style: TextStyle(
+              color: isActive ? _success : _textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _InfoPill({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: color, fontSize: 11.5)),
+      ],
+    );
+  }
+}
+
 class _ActionButton extends StatelessWidget {
   final String label;
   final IconData icon;
-  final Color color;
-  final Color textColor;
-  final Color borderColor;
+  final Color color, textColor, borderColor;
   final VoidCallback onTap;
-
   const _ActionButton({
     required this.label,
     required this.icon,
@@ -934,16 +1311,16 @@ class _ActionButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(9),
           border: Border.all(color: borderColor),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: textColor, size: 13),
+            Icon(icon, color: textColor, size: 12),
             const SizedBox(width: 5),
             Text(
               label,
@@ -960,16 +1337,11 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  STAT CHIP
-// ─────────────────────────────────────────────────────────────────────────────
 class _StatChip extends StatelessWidget {
   final String label;
   final int value;
-  final Color color;
-  final Color soft;
+  final Color color, soft;
   final IconData icon;
-
   const _StatChip({
     required this.label,
     required this.value,
@@ -978,32 +1350,39 @@ class _StatChip extends StatelessWidget {
     required this.icon,
   });
 
-  static const _card = Color(0xFF161B2E);
-  static const _cardBorder = Color(0xFF1E2640);
-  static const _textSecondary = Color(0xFF7B85A3);
+  static const _card = Color(0xFFFFFFFF);
+  static const _cardBorder = Color(0xFFE8ECF8);
+  static const _textSecondary = Color(0xFF6B7280);
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: _card,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: _cardBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               decoration: BoxDecoration(
                 color: soft,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(icon, color: color, size: 16),
+              child: Icon(icon, color: color, size: 14),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 7),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1011,16 +1390,13 @@ class _StatChip extends StatelessWidget {
                   '$value',
                   style: TextStyle(
                     color: color,
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
                   label,
-                  style: const TextStyle(
-                    color: _textSecondary,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: _textSecondary, fontSize: 10),
                 ),
               ],
             ),
@@ -1038,13 +1414,13 @@ class _DeleteDialog extends StatelessWidget {
   final EmployeeModel emp;
   const _DeleteDialog({required this.emp});
 
-  static const _card = Color(0xFF161B2E);
-  static const _cardBorder = Color(0xFF1E2640);
-  static const _danger = Color(0xFFFF4D6A);
-  static const _dangerSoft = Color(0x1AFF4D6A);
-  static const _textPrimary = Color(0xFFEEF0F8);
-  static const _textSecondary = Color(0xFF7B85A3);
-  static const _surface = Color(0xFF111520);
+  static const _card = Color(0xFFFFFFFF);
+  static const _cardBorder = Color(0xFFE8ECF8);
+  static const _danger = Color(0xFFD93025);
+  static const _dangerSoft = Color(0xFFFDECEA);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _bg = Color(0xFFF5F7FF);
 
   @override
   Widget build(BuildContext context) {
@@ -1058,11 +1434,11 @@ class _DeleteDialog extends StatelessWidget {
             decoration: BoxDecoration(
               color: _card,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: _danger.withOpacity(0.3), width: 1.5),
+              border: Border.all(color: _danger.withOpacity(0.2), width: 1.5),
               boxShadow: [
                 BoxShadow(
-                  color: _danger.withOpacity(0.1),
-                  blurRadius: 40,
+                  color: Colors.black.withOpacity(0.12),
+                  blurRadius: 30,
                   offset: const Offset(0, 8),
                 ),
               ],
@@ -1070,28 +1446,26 @@ class _DeleteDialog extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Icon
                 Container(
-                  width: 64,
-                  height: 64,
+                  width: 60,
+                  height: 60,
                   decoration: BoxDecoration(
                     color: _dangerSoft,
                     shape: BoxShape.circle,
-                    border: Border.all(color: _danger.withOpacity(0.3)),
+                    border: Border.all(color: _danger.withOpacity(0.2)),
                   ),
                   child: const Icon(
                     Icons.person_remove_rounded,
                     color: _danger,
-                    size: 28,
+                    size: 26,
                   ),
                 ),
-                const SizedBox(height: 20),
-
+                const SizedBox(height: 18),
                 const Text(
                   'Remove Member',
                   style: TextStyle(
                     color: _textPrimary,
-                    fontSize: 20,
+                    fontSize: 19,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.3,
                   ),
@@ -1106,19 +1480,17 @@ class _DeleteDialog extends StatelessWidget {
                     height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 24),
-
-                // Buttons
+                const SizedBox(height: 22),
                 Row(
                   children: [
                     Expanded(
                       child: GestureDetector(
                         onTap: () => Navigator.pop(context, false),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
                           decoration: BoxDecoration(
-                            color: _surface,
-                            borderRadius: BorderRadius.circular(14),
+                            color: _bg,
+                            borderRadius: BorderRadius.circular(13),
                             border: Border.all(color: _cardBorder),
                           ),
                           child: const Center(
@@ -1127,7 +1499,7 @@ class _DeleteDialog extends StatelessWidget {
                               style: TextStyle(
                                 color: _textSecondary,
                                 fontWeight: FontWeight.w600,
-                                fontSize: 15,
+                                fontSize: 14,
                               ),
                             ),
                           ),
@@ -1139,10 +1511,10 @@ class _DeleteDialog extends StatelessWidget {
                       child: GestureDetector(
                         onTap: () => Navigator.pop(context, true),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
                           decoration: BoxDecoration(
                             color: _danger,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(13),
                           ),
                           child: const Center(
                             child: Text(
@@ -1150,7 +1522,7 @@ class _DeleteDialog extends StatelessWidget {
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 15,
+                                fontSize: 14,
                               ),
                             ),
                           ),
@@ -1169,33 +1541,36 @@ class _DeleteDialog extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LOADING STATE
+//  STATE SCREENS
 // ─────────────────────────────────────────────────────────────────────────────
 class _LoadingState extends StatelessWidget {
-  const _LoadingState();
+  final bool isPast;
+  const _LoadingState({this.isPast = false});
 
   static const _accent = Color(0xFF4F6EF7);
-  static const _textSecondary = Color(0xFF7B85A3);
+  static const _purple = Color(0xFF8B5CF6);
+  static const _textSecondary = Color(0xFF6B7280);
 
   @override
   Widget build(BuildContext context) {
+    final color = isPast ? _purple : _accent;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
-              valueColor: const AlwaysStoppedAnimation<Color>(_accent),
-              backgroundColor: _accent.withOpacity(0.15),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              backgroundColor: color.withOpacity(0.1),
             ),
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'Loading team members…',
-            style: TextStyle(color: _textSecondary, fontSize: 14),
+          const SizedBox(height: 14),
+          Text(
+            isPast ? 'Loading past members…' : 'Loading team members…',
+            style: const TextStyle(color: _textSecondary, fontSize: 14),
           ),
         ],
       ),
@@ -1203,20 +1578,17 @@ class _LoadingState extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ERROR STATE
-// ─────────────────────────────────────────────────────────────────────────────
 class _ErrorState extends StatelessWidget {
   final String error;
   final VoidCallback onRetry;
   const _ErrorState({required this.error, required this.onRetry});
 
-  static const _danger = Color(0xFFFF4D6A);
-  static const _dangerSoft = Color(0x1AFF4D6A);
-  static const _cardBorder = Color(0xFF1E2640);
-  static const _textPrimary = Color(0xFFEEF0F8);
-  static const _textSecondary = Color(0xFF7B85A3);
-  static const _surface = Color(0xFF111520);
+  static const _danger = Color(0xFFD93025);
+  static const _dangerSoft = Color(0xFFFDECEA);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _bg = Color(0xFFF5F7FF);
+  static const _cardBorder = Color(0xFFE8ECF8);
 
   @override
   Widget build(BuildContext context) {
@@ -1227,22 +1599,27 @@ class _ErrorState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 72,
-              height: 72,
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
                 color: _dangerSoft,
                 shape: BoxShape.circle,
-                border: Border.all(color: _danger.withOpacity(0.3)),
+                border: Border.all(color: _danger.withOpacity(0.2)),
               ),
-              child: const Icon(Icons.cloud_off_rounded, color: _danger, size: 30),
+              child: const Icon(
+                Icons.cloud_off_rounded,
+                color: _danger,
+                size: 28,
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             const Text(
               'Something went wrong',
               style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600),
+                color: _textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -1250,27 +1627,36 @@ class _ErrorState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(color: _textSecondary, fontSize: 13),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
             GestureDetector(
               onTap: onRetry,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 26,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
-                  color: _surface,
-                  borderRadius: BorderRadius.circular(14),
+                  color: _bg,
+                  borderRadius: BorderRadius.circular(13),
                   border: Border.all(color: _cardBorder),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.refresh_rounded, color: _textSecondary, size: 16),
-                    SizedBox(width: 8),
-                    Text('Try Again',
-                        style: TextStyle(
-                            color: _textSecondary,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14)),
+                    Icon(
+                      Icons.refresh_rounded,
+                      color: _textSecondary,
+                      size: 15,
+                    ),
+                    SizedBox(width: 7),
+                    Text(
+                      'Try Again',
+                      style: TextStyle(
+                        color: _textSecondary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1282,21 +1668,16 @@ class _ErrorState extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  EMPTY STATE
-// ─────────────────────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final bool hasFilters;
   final VoidCallback onClear;
   const _EmptyState({required this.hasFilters, required this.onClear});
 
   static const _accent = Color(0xFF4F6EF7);
-  static const _accentGlow = Color(0x334F6EF7);
-  static const _accentSoft = Color(0x1A4F6EF7);
-  static const _textPrimary = Color(0xFFEEF0F8);
-  static const _textSecondary = Color(0xFF7B85A3);
-  static const _surface = Color(0xFF111520);
-  static const _cardBorder = Color(0xFF1E2640);
+  static const _accentSoft = Color(0xFFEEF1FE);
+  static const _accentMed = Color(0xFFD0D9FC);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
 
   @override
   Widget build(BuildContext context) {
@@ -1307,22 +1688,27 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 72,
-              height: 72,
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
                 color: _accentSoft,
                 shape: BoxShape.circle,
-                border: Border.all(color: _accent.withOpacity(0.3)),
+                border: Border.all(color: _accentMed),
               ),
-              child: const Icon(Icons.group_off_rounded, color: _accent, size: 30),
+              child: const Icon(
+                Icons.group_off_rounded,
+                color: _accent,
+                size: 28,
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             Text(
               hasFilters ? 'No results found' : 'No team members',
               style: const TextStyle(
-                  color: _textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600),
+                color: _textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -1333,27 +1719,86 @@ class _EmptyState extends StatelessWidget {
               style: const TextStyle(color: _textSecondary, fontSize: 13),
             ),
             if (hasFilters) ...[
-              const SizedBox(height: 24),
+              const SizedBox(height: 22),
               GestureDetector(
                 onTap: onClear,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 26,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
-                    color: _accentGlow,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: _accent.withOpacity(0.4)),
+                    color: _accentSoft,
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: _accentMed),
                   ),
                   child: const Text(
                     'Clear Filters',
                     style: TextStyle(
-                        color: _accent,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14),
+                      color: _accent,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoPastState extends StatelessWidget {
+  const _NoPastState();
+
+  static const _purple = Color(0xFF8B5CF6);
+  static const _purpleSoft = Color(0xFFF3EEFF);
+  static const _textPrimary = Color(0xFF1A1F36);
+  static const _textSecondary = Color(0xFF6B7280);
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: _purpleSoft,
+                shape: BoxShape.circle,
+                border: Border.all(color: _purple.withOpacity(0.2)),
+              ),
+              child: const Icon(
+                Icons.history_rounded,
+                color: _purple,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'No past members',
+              style: TextStyle(
+                color: _textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Former team members who have been removed\nwill appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _textSecondary,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
           ],
         ),
       ),

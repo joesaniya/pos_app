@@ -14,7 +14,6 @@ enum LoginMethod { emailPassword, phoneOtp }
 
 enum ForgotPasswordStep { enterEmail, verifyOtp, resetPassword, success }
 
-// ── New: typed result for email login ─────────────────────────
 enum LoginResult {
   success,
   emailNotFound,
@@ -30,6 +29,9 @@ class AppAuthenticationProvider with ChangeNotifier {
   final StorageService _storage = StorageService.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
+  // ── Active session watcher ────────────────────────────────────
+  StreamSubscription<DocumentSnapshot>? _sessionWatcher;
+
   // ── State ─────────────────────────────────────────────────────
   AuthMode _authMode = AuthMode.login;
   LoginMethod _loginMethod = LoginMethod.emailPassword;
@@ -42,6 +44,10 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool _otpSent = false;
   bool _agreedToTerms = false;
   String _resetEmail = '';
+
+  // ── NEW: expose when account was remotely deactivated ─────────
+  bool _wasDeactivated = false;
+  bool get wasDeactivated => _wasDeactivated;
 
   String? _verificationId;
   int? _resendToken;
@@ -65,6 +71,121 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool get isSignupMode => _authMode == AuthMode.signup;
   bool get isEmailPasswordMethod => _loginMethod == LoginMethod.emailPassword;
   bool get isPhoneOtpMethod => _loginMethod == LoginMethod.phoneOtp;
+
+  // ─────────────────────────────────────────────────────────────
+  // SESSION VALIDATION — call this from PageSwitcher / main.dart
+  // on every app start to block deactivated auto-login
+  // ─────────────────────────────────────────────────────────────
+
+  /// Returns true if a valid active session exists, false if the
+  /// session is missing or the account has been deactivated.
+  Future<bool> validateSession() async {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) {
+      await _storage.clearUserData();
+      return false;
+    }
+
+    try {
+      // Always re-fetch from Firestore — never trust local cache alone
+      final doc = await _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .get();
+
+      if (!doc.exists) {
+        await _forceLogout();
+        return false;
+      }
+
+      final data = doc.data()!;
+
+      // ── Block deactivated accounts ─────────────────────────────
+      if (data['isActive'] != true) {
+        _wasDeactivated = true;
+        await _forceLogout();
+        return false;
+      }
+
+      // ── Block deleted accounts ─────────────────────────────────
+      if (data['isDeleted'] == true) {
+        await _forceLogout();
+        return false;
+      }
+
+      // Session is valid — refresh local storage with latest data
+      final token = await firebaseUser.getIdToken(true) ?? '';
+      await _persistUser(
+        data: data,
+        uid: firebaseUser.uid,
+        token: token,
+        fallbackEmail: firebaseUser.email ?? '',
+        fallbackPhone: firebaseUser.phoneNumber ?? '',
+      );
+
+      // Start real-time watcher so deactivation takes effect immediately
+      _startSessionWatcher(firebaseUser.uid);
+
+      return true;
+    } catch (e) {
+      debugPrint('validateSession error: $e');
+      // On network error, allow session to continue (offline tolerance)
+      return _auth.currentUser != null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // REAL-TIME SESSION WATCHER
+  // Listens to the logged-in user's Firestore doc.
+  // If isActive becomes false, force logout immediately.
+  // ─────────────────────────────────────────────────────────────
+  void _startSessionWatcher(String uid) {
+    _sessionWatcher?.cancel();
+    _sessionWatcher = _firestore
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen(
+          (snap) async {
+            if (!snap.exists) {
+              await _forceLogout();
+              return;
+            }
+            final data = snap.data()!;
+            final isActive = data['isActive'] == true;
+            final isDeleted = data['isDeleted'] == true;
+
+            if (!isActive || isDeleted) {
+              log(
+                'Session watcher: account deactivated/deleted — forcing logout',
+              );
+              _wasDeactivated = true;
+              notifyListeners(); // UI listens and navigates to login
+              await _forceLogout();
+            }
+          },
+          onError: (e) {
+            debugPrint('Session watcher error: $e');
+          },
+        );
+  }
+
+  void stopSessionWatcher() {
+    _sessionWatcher?.cancel();
+    _sessionWatcher = null;
+  }
+
+  /// Force sign out without user interaction
+  Future<void> _forceLogout() async {
+    stopSessionWatcher();
+    try {
+      await _auth.signOut();
+      await _googleSignIn.signOut();
+    } catch (_) {}
+    await _storage.clearUserData();
+    _userData = {};
+    resetAll();
+  }
 
   // ── Auth Mode / Method Control ────────────────────────────────
   void switchToLogin() {
@@ -208,7 +329,7 @@ class AppAuthenticationProvider with ChangeNotifier {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // EMAIL / PASSWORD LOGIN — returns LoginResult for granular UI
+  // EMAIL / PASSWORD LOGIN
   // ─────────────────────────────────────────────────────────────
   Future<LoginResult> loginWithEmail({
     required String email,
@@ -218,16 +339,15 @@ class AppAuthenticationProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // ── Step 1: Check if email exists in Firestore ─────────────
       final emailTrimmed = email.trim().toLowerCase();
 
+      // ── Step 1: Check email exists in Firestore ────────────────
       QuerySnapshot snap = await _firestore
           .collection('users')
           .where('email', isEqualTo: emailTrimmed)
           .limit(1)
           .get();
 
-      // Fallback: original casing
       if (snap.docs.isEmpty) {
         snap = await _firestore
             .collection('users')
@@ -238,17 +358,18 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       if (snap.docs.isEmpty) {
         setLoading(false);
-        return LoginResult.emailNotFound; // → "Username not found."
+        return LoginResult.emailNotFound;
       }
 
       final firestoreData = snap.docs.first.data() as Map<String, dynamic>;
 
+      // ── Step 2: Check isActive BEFORE signing in ───────────────
       if (firestoreData['isActive'] != true) {
         setLoading(false);
         return LoginResult.inactive;
       }
 
-      // ── Step 2: Attempt Firebase sign-in ──────────────────────
+      // ── Step 3: Firebase sign-in ───────────────────────────────
       try {
         final UserCredential credential = await _auth
             .signInWithEmailAndPassword(
@@ -262,15 +383,24 @@ class AppAuthenticationProvider with ChangeNotifier {
           return LoginResult.error;
         }
 
-        final token = await firebaseUser.getIdToken() ?? '';
-
-        // Re-fetch by UID for freshest data
+        // ── Step 4: Re-fetch by UID for freshest data ──────────────
         final docSnap = await _firestore
             .collection('users')
             .doc(firebaseUser.uid)
             .get();
 
         final data = docSnap.exists ? docSnap.data()! : firestoreData;
+
+        // ── Step 5: Double-check isActive after auth ───────────────
+        // Covers race condition where account was deactivated between
+        // the email query (Step 1) and now
+        if (data['isActive'] != true || data['isDeleted'] == true) {
+          await _auth.signOut();
+          setLoading(false);
+          return LoginResult.inactive;
+        }
+
+        final token = await firebaseUser.getIdToken() ?? '';
 
         await _persistUser(
           data: data,
@@ -279,14 +409,16 @@ class AppAuthenticationProvider with ChangeNotifier {
           fallbackEmail: email.trim(),
         );
 
+        // ── Step 6: Start real-time watcher ───────────────────────
+        _startSessionWatcher(firebaseUser.uid);
+
         log('Email login success: ${email.trim()} (${firebaseUser.uid})');
         setLoading(false);
         return LoginResult.success;
       } on FirebaseAuthException catch (e) {
         setLoading(false);
-        // Email exists in Firestore but password is wrong
         if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-          return LoginResult.wrongPassword; // → "Invalid password."
+          return LoginResult.wrongPassword;
         }
         return LoginResult.error;
       }
@@ -300,17 +432,14 @@ class AppAuthenticationProvider with ChangeNotifier {
   // ─────────────────────────────────────────────────────────────
   // GOOGLE SIGN-IN
   // ─────────────────────────────────────────────────────────────
-  /// Returns: 'success' | 'not_found' | 'inactive' | 'cancelled' | 'error'
   Future<String> signInWithGoogle() async {
     setLoading(true);
     HapticFeedback.mediumImpact();
 
     try {
-      // ── Trigger Google picker ──────────────────────────────────
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
 
       if (googleUser == null) {
-        // User dismissed the picker
         setLoading(false);
         return 'cancelled';
       }
@@ -323,7 +452,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         idToken: googleAuth.idToken,
       );
 
-      // ── Sign into Firebase ─────────────────────────────────────
       final UserCredential userCredential = await _auth.signInWithCredential(
         credential,
       );
@@ -334,8 +462,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         return 'error';
       }
 
-      // ── Check account exists in Firestore ──────────────────────
-      // Try by UID first, then by email
       DocumentSnapshot docSnap = await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
@@ -350,7 +476,6 @@ class AppAuthenticationProvider with ChangeNotifier {
             .get();
 
         if (emailSnap.docs.isEmpty) {
-          // Also try original casing
           emailSnap = await _firestore
               .collection('users')
               .where('email', isEqualTo: firebaseUser.email!)
@@ -363,18 +488,18 @@ class AppAuthenticationProvider with ChangeNotifier {
       final bool foundByEmail = emailSnap != null && emailSnap.docs.isNotEmpty;
 
       if (!foundByUid && !foundByEmail) {
-        // No Firestore record → sign out and reject
         await _auth.signOut();
         await _googleSignIn.signOut();
         setLoading(false);
-        return 'not_found'; // → "No record found."
+        return 'not_found';
       }
 
       final Map<String, dynamic> data = foundByUid
           ? docSnap.data() as Map<String, dynamic>
           : emailSnap!.docs.first.data() as Map<String, dynamic>;
 
-      if (data['isActive'] != true) {
+      // Check isActive + isDeleted
+      if (data['isActive'] != true || data['isDeleted'] == true) {
         await _auth.signOut();
         await _googleSignIn.signOut();
         setLoading(false);
@@ -390,6 +515,8 @@ class AppAuthenticationProvider with ChangeNotifier {
         fallbackEmail: firebaseUser.email ?? '',
       );
 
+      _startSessionWatcher(firebaseUser.uid);
+
       log('Google login success: ${firebaseUser.email} (${firebaseUser.uid})');
       setLoading(false);
       return 'success';
@@ -404,13 +531,11 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  // ── Keep old bool wrapper so existing callers don't break ─────
   Future<bool> socialLogin({required String provider}) async {
     if (provider == 'Google') {
       final result = await signInWithGoogle();
       return result == 'success';
     }
-    // Apple / others — stub
     setLoading(true);
     await Future.delayed(const Duration(seconds: 2));
     setLoading(false);
@@ -418,7 +543,7 @@ class AppAuthenticationProvider with ChangeNotifier {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // PHONE / OTP  (unchanged logic, kept intact)
+  // PHONE / OTP
   // ─────────────────────────────────────────────────────────────
   Future<String> sendOTP({required String phone}) async {
     setLoading(true);
@@ -441,7 +566,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         return 'not_found';
       }
       final data = snap.docs.first.data() as Map<String, dynamic>;
-      if (data['isActive'] != true) {
+      if (data['isActive'] != true || data['isDeleted'] == true) {
         setLoading(false);
         return 'inactive';
       }
@@ -513,6 +638,14 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
       final data = snap.docs.first.data() as Map<String, dynamic>;
+
+      // Re-check isActive on OTP verify too
+      if (data['isActive'] != true || data['isDeleted'] == true) {
+        await _auth.signOut();
+        setLoading(false);
+        return false;
+      }
+
       final String token = await firebaseUser.getIdToken() ?? '';
       await _persistUser(
         data: data,
@@ -520,6 +653,9 @@ class AppAuthenticationProvider with ChangeNotifier {
         token: token,
         fallbackPhone: phone,
       );
+
+      _startSessionWatcher(firebaseUser.uid);
+
       log('Phone login success: ${data['phone']}');
       setLoading(false);
       return true;
@@ -628,6 +764,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     required String email,
     required String otp,
   }) async => true;
+
   Future<bool> resetPassword({
     required String email,
     required String otp,
@@ -638,10 +775,12 @@ class AppAuthenticationProvider with ChangeNotifier {
   // LOGOUT / RESET
   // ─────────────────────────────────────────────────────────────
   Future<void> logout() async {
+    stopSessionWatcher();
     await _auth.signOut();
     await _googleSignIn.signOut();
     await _storage.clearUserData();
     _userData = {};
+    _wasDeactivated = false;
     resetAll();
   }
 

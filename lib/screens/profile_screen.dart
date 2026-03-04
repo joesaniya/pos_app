@@ -804,7 +804,7 @@ class _PersonalCard extends StatelessWidget {
             val: p.email,
             icon: Icons.alternate_email_rounded,
             iconC: _C.violet,
-            trail: _Bdg('Verified', _C.green),
+            // trail: _Bdg('Verified', _C.green),
           ),
           _FRow(
             lbl: 'PHONE NUMBER',

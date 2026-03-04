@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/screens/utils/role_config.dart';
 
-
 class AppColors {
   static const background = Color(0xFFF7F5F0);
   static const card = Colors.white;
@@ -58,10 +57,7 @@ class SectionHeader extends StatelessWidget {
             ),
             Text(
               subtitle,
-              style: TextStyle(
-                color: AppColors.labelGray,
-                fontSize: 11.sp,
-              ),
+              style: TextStyle(color: AppColors.labelGray, fontSize: 11.sp),
             ),
           ],
         ),
@@ -112,10 +108,7 @@ class StaffPageTopBar extends StatelessWidget {
                 ),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    color: AppColors.labelGray,
-                    fontSize: 11.sp,
-                  ),
+                  style: TextStyle(color: AppColors.labelGray, fontSize: 11.sp),
                 ),
               ],
             ),
@@ -194,10 +187,7 @@ class StatusBadge extends StatelessWidget {
           Container(
             width: 6.w,
             height: 6.w,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           SizedBox(width: 5.w),
           Text(
@@ -267,9 +257,15 @@ class StaffHeadBanner extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(14.r),
-                        border: Border.all(color: Colors.white.withOpacity(0.18)),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.18),
+                        ),
                       ),
-                      child: Icon(Icons.person_add_rounded, color: Colors.white, size: 24.sp),
+                      child: Icon(
+                        Icons.person_add_rounded,
+                        color: Colors.white,
+                        size: 24.sp,
+                      ),
                     ),
                     SizedBox(width: 16.w),
                     Expanded(
@@ -302,10 +298,12 @@ class StaffHeadBanner extends StatelessWidget {
                 SizedBox(height: 16.h),
                 Row(
                   children: roles
-                      .map((r) => Padding(
-                            padding: EdgeInsets.only(right: 8.w),
-                            child: _RoleChip(role: r),
-                          ))
+                      .map(
+                        (r) => Padding(
+                          padding: EdgeInsets.only(right: 8.w),
+                          child: _RoleChip(role: r),
+                        ),
+                      )
                       .toList(),
                 ),
               ],
@@ -447,7 +445,10 @@ class RoleCard extends StatelessWidget {
                         ),
                         SizedBox(height: 8.h),
                         Container(
-                          padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 3.h),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 7.w,
+                            vertical: 3.h,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(6.r),
@@ -475,7 +476,9 @@ class RoleCard extends StatelessWidget {
                 width: isSelected ? 18.w : 8.w,
                 height: 4.h,
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.white.withOpacity(0.7) : AppColors.border,
+                  color: isSelected
+                      ? Colors.white.withOpacity(0.7)
+                      : AppColors.border,
                   borderRadius: BorderRadius.circular(2.r),
                 ),
               ),
@@ -593,7 +596,10 @@ class StaffFormField extends StatelessWidget {
             bottomLeft: isLast ? Radius.circular(20.r) : Radius.zero,
             bottomRight: isLast ? Radius.circular(20.r) : Radius.zero,
           ),
-          borderSide: BorderSide(color: accentColor.withOpacity(0.45), width: 2),
+          borderSide: BorderSide(
+            color: accentColor.withOpacity(0.45),
+            width: 2,
+          ),
         ),
         errorBorder: InputBorder.none,
         focusedErrorBorder: InputBorder.none,
@@ -608,7 +614,11 @@ class EyeIconButton extends StatelessWidget {
   final bool isVisible;
   final VoidCallback onTap;
 
-  const EyeIconButton({super.key, required this.isVisible, required this.onTap});
+  const EyeIconButton({
+    super.key,
+    required this.isVisible,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -761,7 +771,9 @@ class StaffCTAButton extends StatelessWidget {
                           ? 'Create ${role!.label} Account'
                           : 'Select a Role to Continue',
                       style: TextStyle(
-                        color: isReady ? Colors.white : AppColors.placeholderGray,
+                        color: isReady
+                            ? Colors.white
+                            : AppColors.placeholderGray,
                         fontSize: 15.sp,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.2,
@@ -776,7 +788,11 @@ class StaffCTAButton extends StatelessWidget {
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(8.r),
                         ),
-                        child: Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14.sp),
+                        child: Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 14.sp,
+                        ),
                       ),
                     ],
                   ],
@@ -801,7 +817,11 @@ class InfoNoteRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.info_outline_rounded, size: 12.sp, color: AppColors.placeholderGray),
+        Icon(
+          Icons.info_outline_rounded,
+          size: 12.sp,
+          color: AppColors.placeholderGray,
+        ),
         SizedBox(width: 5.w),
         Text(
           message,
@@ -862,7 +882,11 @@ class CreateAccountSuccessView extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: Icon(Icons.check_rounded, color: role.color, size: 46.sp),
+                    child: Icon(
+                      Icons.check_rounded,
+                      color: role.color,
+                      size: 46.sp,
+                    ),
                   ),
                   SizedBox(height: 24.h),
 
@@ -887,13 +911,19 @@ class CreateAccountSuccessView extends StatelessWidget {
                   SizedBox(height: 4.h),
                   Text(
                     'has been added as ${role.label}',
-                    style: TextStyle(color: AppColors.labelGray, fontSize: 13.sp),
+                    style: TextStyle(
+                      color: AppColors.labelGray,
+                      fontSize: 13.sp,
+                    ),
                   ),
                   SizedBox(height: 20.h),
 
                   // Role badge
                   Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 16.w,
+                      vertical: 8.h,
+                    ),
                     decoration: BoxDecoration(
                       color: role.light,
                       borderRadius: BorderRadius.circular(20.r),
@@ -919,7 +949,7 @@ class CreateAccountSuccessView extends StatelessWidget {
                   SizedBox(height: 28.h),
 
                   // Email verification note
-                  Container(
+                  /*  Container(
                     padding: EdgeInsets.all(14.w),
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -942,7 +972,7 @@ class CreateAccountSuccessView extends StatelessWidget {
                         ),
                       ],
                     ),
-                  ),
+                  ),*/
                 ],
               ),
             ),
@@ -957,7 +987,11 @@ class CreateAccountSuccessView extends StatelessWidget {
 //  TOAST HELPER (call from context)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void showStaffToast(BuildContext context, String message, {bool success = true}) {
+void showStaffToast(
+  BuildContext context,
+  String message, {
+  bool success = true,
+}) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       behavior: SnackBarBehavior.floating,

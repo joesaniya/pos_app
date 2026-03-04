@@ -23,6 +23,34 @@ enum LoginResult {
   error,
 }
 
+// ── Remember Me credentials returned to the UI ───────────────
+class RememberedCredentials {
+  final String method; // 'email' | 'phone'
+  final String email;
+  final String password;
+  final String phone;
+
+  const RememberedCredentials._({
+    required this.method,
+    this.email = '',
+    this.password = '',
+    this.phone = '',
+  });
+
+  factory RememberedCredentials.email(String email, String password) =>
+      RememberedCredentials._(
+        method: 'email',
+        email: email,
+        password: password,
+      );
+
+  factory RememberedCredentials.phone(String phone) =>
+      RememberedCredentials._(method: 'phone', phone: phone);
+
+  bool get isEmailMethod => method == 'email';
+  bool get isPhoneMethod => method == 'phone';
+}
+
 class AppAuthenticationProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -45,7 +73,13 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool _agreedToTerms = false;
   String _resetEmail = '';
 
-  // ── NEW: expose when account was remotely deactivated ─────────
+  // ── Remember Me state ─────────────────────────────────────────
+  /// Set to true once we've attempted to load remembered credentials
+  /// on first build — prevents repeated async calls.
+  bool _rememberedCredentialsLoaded = false;
+  RememberedCredentials? _rememberedCredentials;
+
+  // ── Deactivation flag ─────────────────────────────────────────
   bool _wasDeactivated = false;
   bool get wasDeactivated => _wasDeactivated;
 
@@ -72,13 +106,51 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool get isEmailPasswordMethod => _loginMethod == LoginMethod.emailPassword;
   bool get isPhoneOtpMethod => _loginMethod == LoginMethod.phoneOtp;
 
-  // ─────────────────────────────────────────────────────────────
-  // SESSION VALIDATION — call this from PageSwitcher / main.dart
-  // on every app start to block deactivated auto-login
-  // ─────────────────────────────────────────────────────────────
+  /// Non-null when valid remembered credentials exist.
+  RememberedCredentials? get rememberedCredentials => _rememberedCredentials;
+  bool get hasRememberedCredentials => _rememberedCredentials != null;
 
-  /// Returns true if a valid active session exists, false if the
-  /// session is missing or the account has been deactivated.
+  // ═══════════════════════════════════════════════════════════
+  // REMEMBER ME — PUBLIC API
+  // ═══════════════════════════════════════════════════════════
+
+  /// Call once from [LoginScreen.initState] to load any saved creds.
+  /// Populates [rememberedCredentials] and switches to the correct
+  /// login method tab automatically.
+  Future<void> loadRememberedCredentials() async {
+    if (_rememberedCredentialsLoaded) return;
+    _rememberedCredentialsLoaded = true;
+
+    final raw = await _storage.getRememberedCredentials();
+    if (raw == null) return;
+
+    if (raw['method'] == 'email') {
+      _rememberedCredentials = RememberedCredentials.email(
+        raw['email'] ?? '',
+        raw['password'] ?? '',
+      );
+      _loginMethod = LoginMethod.emailPassword;
+      _rememberMe = true;
+    } else if (raw['method'] == 'phone') {
+      _rememberedCredentials = RememberedCredentials.phone(raw['phone'] ?? '');
+      _loginMethod = LoginMethod.phoneOtp;
+      _rememberMe = true;
+    }
+
+    notifyListeners();
+  }
+
+  /// Clears remembered credentials without logging out the current session.
+  /// Called when the user unchecks "Remember Me" while already logged in.
+  Future<void> clearRememberedCredentials() async {
+    _rememberedCredentials = null;
+    await _storage.clearRememberedCredentials();
+    notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // SESSION VALIDATION
+  // ═══════════════════════════════════════════════════════════
   Future<bool> validateSession() async {
     final firebaseUser = _auth.currentUser;
     if (firebaseUser == null) {
@@ -87,7 +159,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
 
     try {
-      // Always re-fetch from Firestore — never trust local cache alone
       final doc = await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
@@ -100,20 +171,17 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       final data = doc.data()!;
 
-      // ── Block deactivated accounts ─────────────────────────────
       if (data['isActive'] != true) {
         _wasDeactivated = true;
         await _forceLogout();
         return false;
       }
 
-      // ── Block deleted accounts ─────────────────────────────────
       if (data['isDeleted'] == true) {
         await _forceLogout();
         return false;
       }
 
-      // Session is valid — refresh local storage with latest data
       final token = await firebaseUser.getIdToken(true) ?? '';
       await _persistUser(
         data: data,
@@ -123,51 +191,39 @@ class AppAuthenticationProvider with ChangeNotifier {
         fallbackPhone: firebaseUser.phoneNumber ?? '',
       );
 
-      // Start real-time watcher so deactivation takes effect immediately
       _startSessionWatcher(firebaseUser.uid);
-
       return true;
     } catch (e) {
       debugPrint('validateSession error: $e');
-      // On network error, allow session to continue (offline tolerance)
       return _auth.currentUser != null;
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // REAL-TIME SESSION WATCHER
-  // Listens to the logged-in user's Firestore doc.
-  // If isActive becomes false, force logout immediately.
-  // ─────────────────────────────────────────────────────────────
+  // ─── Real-time session watcher ────────────────────────────────
   void _startSessionWatcher(String uid) {
     _sessionWatcher?.cancel();
     _sessionWatcher = _firestore
         .collection('users')
         .doc(uid)
         .snapshots()
-        .listen(
-          (snap) async {
-            if (!snap.exists) {
-              await _forceLogout();
-              return;
-            }
-            final data = snap.data()!;
-            final isActive = data['isActive'] == true;
-            final isDeleted = data['isDeleted'] == true;
+        .listen((snap) async {
+          if (!snap.exists) {
+            await _forceLogout();
+            return;
+          }
+          final data = snap.data()!;
+          final isActive = data['isActive'] == true;
+          final isDeleted = data['isDeleted'] == true;
 
-            if (!isActive || isDeleted) {
-              log(
-                'Session watcher: account deactivated/deleted — forcing logout',
-              );
-              _wasDeactivated = true;
-              notifyListeners(); // UI listens and navigates to login
-              await _forceLogout();
-            }
-          },
-          onError: (e) {
-            debugPrint('Session watcher error: $e');
-          },
-        );
+          if (!isActive || isDeleted) {
+            log(
+              'Session watcher: account deactivated/deleted — forcing logout',
+            );
+            _wasDeactivated = true;
+            notifyListeners();
+            await _forceLogout();
+          }
+        }, onError: (e) => debugPrint('Session watcher error: $e'));
   }
 
   void stopSessionWatcher() {
@@ -175,7 +231,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     _sessionWatcher = null;
   }
 
-  /// Force sign out without user interaction
   Future<void> _forceLogout() async {
     stopSessionWatcher();
     try {
@@ -187,7 +242,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     resetAll();
   }
 
-  // ── Auth Mode / Method Control ────────────────────────────────
+  // ─── Auth Mode / Method Control ───────────────────────────────
   void switchToLogin() {
     if (_authMode == AuthMode.login) return;
     _authMode = AuthMode.login;
@@ -241,6 +296,11 @@ class AppAuthenticationProvider with ChangeNotifier {
 
   void toggleRememberMe() {
     _rememberMe = !_rememberMe;
+    // If the user is actively unchecking, wipe saved credentials immediately
+    if (!_rememberMe) {
+      _rememberedCredentials = null;
+      _storage.clearRememberedCredentials();
+    }
     HapticFeedback.lightImpact();
     notifyListeners();
   }
@@ -266,9 +326,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void setResetEmail(String email) {
-    _resetEmail = email;
-  }
+  void setResetEmail(String email) => _resetEmail = email;
 
   void goToNextForgotPasswordStep() {
     switch (_forgotPasswordStep) {
@@ -295,7 +353,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Helper: save user data & set _userData ────────────────────
+  // ─── Helper: persist user ─────────────────────────────────────
   Future<void> _persistUser({
     required Map<String, dynamic> data,
     required String uid,
@@ -328,9 +386,9 @@ class AppAuthenticationProvider with ChangeNotifier {
     };
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   // EMAIL / PASSWORD LOGIN
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   Future<LoginResult> loginWithEmail({
     required String email,
     required String password,
@@ -341,7 +399,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     try {
       final emailTrimmed = email.trim().toLowerCase();
 
-      // ── Step 1: Check email exists in Firestore ────────────────
+      // Step 1: Check email exists in Firestore
       QuerySnapshot snap = await _firestore
           .collection('users')
           .where('email', isEqualTo: emailTrimmed)
@@ -363,13 +421,13 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       final firestoreData = snap.docs.first.data() as Map<String, dynamic>;
 
-      // ── Step 2: Check isActive BEFORE signing in ───────────────
+      // Step 2: Check isActive BEFORE signing in
       if (firestoreData['isActive'] != true) {
         setLoading(false);
         return LoginResult.inactive;
       }
 
-      // ── Step 3: Firebase sign-in ───────────────────────────────
+      // Step 3: Firebase sign-in
       try {
         final UserCredential credential = await _auth
             .signInWithEmailAndPassword(
@@ -383,7 +441,7 @@ class AppAuthenticationProvider with ChangeNotifier {
           return LoginResult.error;
         }
 
-        // ── Step 4: Re-fetch by UID for freshest data ──────────────
+        // Step 4: Re-fetch by UID
         final docSnap = await _firestore
             .collection('users')
             .doc(firebaseUser.uid)
@@ -391,9 +449,7 @@ class AppAuthenticationProvider with ChangeNotifier {
 
         final data = docSnap.exists ? docSnap.data()! : firestoreData;
 
-        // ── Step 5: Double-check isActive after auth ───────────────
-        // Covers race condition where account was deactivated between
-        // the email query (Step 1) and now
+        // Step 5: Double-check isActive
         if (data['isActive'] != true || data['isDeleted'] == true) {
           await _auth.signOut();
           setLoading(false);
@@ -401,7 +457,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         }
 
         final token = await firebaseUser.getIdToken() ?? '';
-
         await _persistUser(
           data: data,
           uid: firebaseUser.uid,
@@ -409,7 +464,26 @@ class AppAuthenticationProvider with ChangeNotifier {
           fallbackEmail: email.trim(),
         );
 
-        // ── Step 6: Start real-time watcher ───────────────────────
+        // ── Step 6: Handle Remember Me ─────────────────────────
+        if (_rememberMe) {
+          await _storage.saveRememberedCredentials(
+            email: email.trim(),
+            password: password,
+          );
+          // Refresh the in-memory object so it's ready on next launch
+          _rememberedCredentials = RememberedCredentials.email(
+            email.trim(),
+            password,
+          );
+          // Extend expiry on every successful remembered login
+          await _storage.refreshRememberExpiry();
+        } else {
+          // User explicitly didn't check "Remember Me" — clear any old creds
+          await _storage.clearRememberedCredentials();
+          _rememberedCredentials = null;
+        }
+
+        // Step 7: Start real-time watcher
         _startSessionWatcher(firebaseUser.uid);
 
         log('Email login success: ${email.trim()} (${firebaseUser.uid})');
@@ -429,16 +503,15 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   // GOOGLE SIGN-IN
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   Future<String> signInWithGoogle() async {
     setLoading(true);
     HapticFeedback.mediumImpact();
 
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-
       if (googleUser == null) {
         setLoading(false);
         return 'cancelled';
@@ -446,7 +519,6 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
-
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -498,7 +570,6 @@ class AppAuthenticationProvider with ChangeNotifier {
           ? docSnap.data() as Map<String, dynamic>
           : emailSnap!.docs.first.data() as Map<String, dynamic>;
 
-      // Check isActive + isDeleted
       if (data['isActive'] != true || data['isDeleted'] == true) {
         await _auth.signOut();
         await _googleSignIn.signOut();
@@ -507,13 +578,15 @@ class AppAuthenticationProvider with ChangeNotifier {
       }
 
       final String token = await firebaseUser.getIdToken() ?? '';
-
       await _persistUser(
         data: data,
         uid: firebaseUser.uid,
         token: token,
         fallbackEmail: firebaseUser.email ?? '',
       );
+
+      // Google login — no password to remember; clear any stale creds
+      if (!_rememberMe) await _storage.clearRememberedCredentials();
 
       _startSessionWatcher(firebaseUser.uid);
 
@@ -542,9 +615,9 @@ class AppAuthenticationProvider with ChangeNotifier {
     return false;
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   // PHONE / OTP
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   Future<String> sendOTP({required String phone}) async {
     setLoading(true);
     HapticFeedback.mediumImpact();
@@ -565,11 +638,13 @@ class AppAuthenticationProvider with ChangeNotifier {
         setLoading(false);
         return 'not_found';
       }
+
       final data = snap.docs.first.data() as Map<String, dynamic>;
       if (data['isActive'] != true || data['isDeleted'] == true) {
         setLoading(false);
         return 'inactive';
       }
+
       final completer = Completer<String>();
       await _auth.verifyPhoneNumber(
         phoneNumber: normalised,
@@ -592,6 +667,7 @@ class AppAuthenticationProvider with ChangeNotifier {
           if (!completer.isCompleted) completer.complete('timeout');
         },
       );
+
       final result = await completer.future;
       setLoading(false);
       if (result == 'success') setOtpSent(true);
@@ -620,6 +696,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         setLoading(false);
         return false;
       }
+
       final String normalised = phone.startsWith('+') ? phone : '+91$phone';
       QuerySnapshot snap = await _firestore
           .collection('users')
@@ -637,9 +714,8 @@ class AppAuthenticationProvider with ChangeNotifier {
         setLoading(false);
         return false;
       }
-      final data = snap.docs.first.data() as Map<String, dynamic>;
 
-      // Re-check isActive on OTP verify too
+      final data = snap.docs.first.data() as Map<String, dynamic>;
       if (data['isActive'] != true || data['isDeleted'] == true) {
         await _auth.signOut();
         setLoading(false);
@@ -653,6 +729,16 @@ class AppAuthenticationProvider with ChangeNotifier {
         token: token,
         fallbackPhone: phone,
       );
+
+      // ── Remember Me for phone ──────────────────────────────
+      if (_rememberMe) {
+        await _storage.saveRememberedPhone(phone: phone);
+        _rememberedCredentials = RememberedCredentials.phone(phone);
+        await _storage.refreshRememberExpiry();
+      } else {
+        await _storage.clearRememberedCredentials();
+        _rememberedCredentials = null;
+      }
 
       _startSessionWatcher(firebaseUser.uid);
 
@@ -680,16 +766,12 @@ class AppAuthenticationProvider with ChangeNotifier {
         forceResendingToken: _resendToken,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (_) {},
-        verificationFailed: (e) {
-          debugPrint('Resend failed: ${e.code}');
-        },
+        verificationFailed: (e) => debugPrint('Resend failed: ${e.code}'),
         codeSent: (String vId, int? resendToken) {
           _verificationId = vId;
           _resendToken = resendToken;
         },
-        codeAutoRetrievalTimeout: (String vId) {
-          _verificationId = vId;
-        },
+        codeAutoRetrievalTimeout: (String vId) => _verificationId = vId,
       );
       setLoading(false);
       return 'success';
@@ -700,9 +782,9 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   // FORGOT PASSWORD
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   Future<bool> sendPasswordResetOTP({required String email}) async {
     setLoading(true);
     setResetEmail(email);
@@ -724,6 +806,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         setLoading(false);
         return false;
       }
+
       await _auth.sendPasswordResetEmail(email: trimmedEmail);
       await _firestore.collection('users').doc(snap.docs.first.id).update({
         'passwordLastChanged': FieldValue.serverTimestamp(),
@@ -771,14 +854,23 @@ class AppAuthenticationProvider with ChangeNotifier {
     required String newPassword,
   }) async => true;
 
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   // LOGOUT / RESET
-  // ─────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
   Future<void> logout() async {
     stopSessionWatcher();
     await _auth.signOut();
     await _googleSignIn.signOut();
     await _storage.clearUserData();
+
+    // ── Only wipe remembered credentials if NOT remembering ──
+    // If rememberMe is still true, keep credentials so the
+    // login screen auto-fills on next open.
+    if (!_rememberMe) {
+      await _storage.clearRememberedCredentials();
+      _rememberedCredentials = null;
+    }
+
     _userData = {};
     _wasDeactivated = false;
     resetAll();
@@ -802,7 +894,8 @@ class AppAuthenticationProvider with ChangeNotifier {
     _isConfirmPasswordVisible = false;
     _isNewPasswordVisible = false;
     _isLoading = false;
-    _rememberMe = false;
+    // NOTE: _rememberMe intentionally NOT reset here —
+    // it should persist to reflect the stored state.
     _otpSent = false;
     _agreedToTerms = false;
     _resetEmail = '';

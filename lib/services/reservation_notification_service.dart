@@ -406,7 +406,7 @@ class ReservationNotificationService {
       title = '👻 No-show — $tName';
       body = '$customerName did not arrive. Table is now free.$biz';
     } else {
-      title = '✖️ Reservation cancelled — $tName';
+      title = '❌ Reservation cancelled — $tName';
       body = 'Booking for $customerName has been cancelled. Table is now free.$biz';
     }
 

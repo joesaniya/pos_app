@@ -39,10 +39,15 @@ class _LoginScreenState extends State<LoginScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
+  // ── Track if auto-fill banner was dismissed ───────────────────
+  bool _autoFillBannerDismissed = false;
+
   @override
   void initState() {
     super.initState();
     _setupAnimations();
+    // Load remembered credentials after first frame so provider is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initRememberMe());
   }
 
   void _setupAnimations() {
@@ -50,14 +55,12 @@ class _LoginScreenState extends State<LoginScreen>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _animController,
         curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
       ),
     );
-
     _slideAnimation =
         Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
           CurvedAnimation(
@@ -65,8 +68,31 @@ class _LoginScreenState extends State<LoginScreen>
             curve: const Interval(0.2, 0.8, curve: Curves.easeOutCubic),
           ),
         );
-
     _animController.forward();
+  }
+
+  /// Loads remembered credentials and auto-fills fields.
+  Future<void> _initRememberMe() async {
+    final provider = Provider.of<AppAuthenticationProvider>(
+      context,
+      listen: false,
+    );
+    await provider.loadRememberedCredentials();
+
+    if (!mounted) return;
+
+    final creds = provider.rememberedCredentials;
+    if (creds == null) return;
+
+    if (creds.isEmailMethod) {
+      _emailController.text = creds.email;
+      _passwordController.text = creds.password;
+    } else if (creds.isPhoneMethod) {
+      _phoneController.text = creds.phone;
+    }
+
+    // Show the auto-fill banner
+    setState(() => _autoFillBannerDismissed = false);
   }
 
   @override
@@ -97,17 +123,14 @@ class _LoginScreenState extends State<LoginScreen>
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const PageSwitcher(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
+        pageBuilder: (_, animation, __) => const PageSwitcher(),
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
         transitionDuration: const Duration(milliseconds: 400),
       ),
     );
   }
 
-  // ── Handle Login (Email/Password) ─────────────────────────────
   // ── Handle Login (Email/Password) ─────────────────────────────
   Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
@@ -127,6 +150,8 @@ class _LoginScreenState extends State<LoginScreen>
         _showSnackBar('Username not found.');
         break;
       case LoginResult.wrongPassword:
+        // If remembered password is wrong, clear it so user isn't stuck
+        _handleWrongPassword(provider);
         _showSnackBar('Invalid password.');
         break;
       case LoginResult.invalidCredentials:
@@ -141,6 +166,17 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  /// Called on wrong password — clears saved password so the user
+  /// must re-enter it; prevents them being permanently locked out
+  /// of the auto-fill loop.
+  void _handleWrongPassword(AppAuthenticationProvider provider) {
+    _passwordController.clear();
+    if (provider.hasRememberedCredentials) {
+      provider.clearRememberedCredentials();
+      setState(() => _autoFillBannerDismissed = true);
+    }
+  }
+
   // ── Social Login ──────────────────────────────────────────────
   Future<void> _handleSocialLogin(
     AppAuthenticationProvider provider,
@@ -149,7 +185,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (type == 'Google') {
       final result = await provider.signInWithGoogle();
       if (!mounted) return;
-
       switch (result) {
         case 'success':
           _navigateToHome();
@@ -161,38 +196,20 @@ class _LoginScreenState extends State<LoginScreen>
           _showSnackBar('Your account is inactive. Please contact your admin.');
           break;
         case 'cancelled':
-          break; // user dismissed — no toast needed
+          break;
         default:
           _showSnackBar('Google sign-in failed. Please try again.');
       }
       return;
     }
 
-    // Apple / others (stub)
     final success = await provider.socialLogin(provider: type);
     if (mounted && success) {
       _showSnackBar('$type login successful!', isSuccess: true);
     }
   }
-  /* Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final success = await provider.loginWithEmail(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
-    );
-
-    if (!mounted) return;
-
-    if (success) {
-      _navigateToHome();
-    } else {
-      _showSnackBar('Login failed. Please check your credentials.');
-    }
-  }*/
 
   // ── Handle Send OTP ───────────────────────────────────────────
-  // Checks Firestore first, then sends real Firebase OTP
   Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -218,7 +235,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // ── Handle Verify OTP ─────────────────────────────────────────
-  // Verifies Firebase OTP — on success redirects to home
   Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -241,7 +257,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (provider.isEmailPasswordMethod) {
       await _handleEmailLogin(provider);
     } else {
-      // Phone OTP method
       if (!provider.otpSent) {
         await _handleSendOTP(provider);
       } else {
@@ -265,10 +280,9 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ── Social Login ──────────────────────────────────────────────
-
-  // ── Build ─────────────────────────────────────────────────────
-
+  // ═══════════════════════════════════════════════════════════
+  // BUILD
+  // ═══════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -294,7 +308,14 @@ class _LoginScreenState extends State<LoginScreen>
                         children: [
                           SizedBox(height: 40.h),
                           _buildHeader(),
-                          SizedBox(height: 48.h),
+                          SizedBox(height: 32.h),
+
+                          // ── Auto-fill banner ──────────────────
+                          if (provider.hasRememberedCredentials &&
+                              !_autoFillBannerDismissed)
+                            _buildAutoFillBanner(provider),
+
+                          SizedBox(height: 16.h),
                           _buildLoginMethodTabs(provider),
                           SizedBox(height: 32.h),
                           _buildForm(provider),
@@ -321,13 +342,81 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ── Widgets ───────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  // WIDGETS
+  // ═══════════════════════════════════════════════════════════
 
   Widget _buildHeader() {
     return const AuthHeader(
       title: 'Welcome Back!',
       subtitle: 'Sign in to continue to your account',
       showLogo: true,
+    );
+  }
+
+  /// Small banner that tells the user their credentials were auto-filled,
+  /// with a "Not you?" button to clear and start fresh.
+  Widget _buildAutoFillBanner(AppAuthenticationProvider provider) {
+    final creds = provider.rememberedCredentials!;
+    final label = creds.isEmailMethod ? creds.email : creds.phone;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: EdgeInsets.only(bottom: 4.h),
+      padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
+      decoration: BoxDecoration(
+        color: AppColors.primaryPurple.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10.r),
+        border: Border.all(color: AppColors.primaryPurple.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.verified_user_outlined,
+            size: 16.sp,
+            color: AppColors.primaryPurple,
+          ),
+          SizedBox(width: 8.w),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: AppTheme.labelSmall.copyWith(
+                  color: AppColors.textSecondary,
+                  fontSize: 12.sp,
+                ),
+                children: [
+                  const TextSpan(text: 'Auto-filled for '),
+                  TextSpan(
+                    text: label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () async {
+              HapticFeedback.lightImpact();
+              await provider.clearRememberedCredentials();
+              _emailController.clear();
+              _passwordController.clear();
+              _phoneController.clear();
+              setState(() => _autoFillBannerDismissed = true);
+            },
+            child: Text(
+              'Not you?',
+              style: AppTheme.labelSmall.copyWith(
+                color: AppColors.primaryPurple,
+                fontWeight: FontWeight.w600,
+                fontSize: 12.sp,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -414,27 +503,22 @@ class _LoginScreenState extends State<LoginScreen>
     return Column(
       key: const ValueKey('phone-otp'),
       children: [
-        // ── Phone Field (disabled after OTP sent) ──────────────
         AuthTextField(
           controller: _phoneController,
           label: 'Phone Number',
           hint: 'Enter your phone number',
           prefixIcon: Icons.phone_outlined,
           keyboardType: TextInputType.phone,
-          enabled: !provider.otpSent, // lock after OTP sent
+          enabled: !provider.otpSent,
           maxLength: 10,
           validator: (value) {
-            if (value == null || value.isEmpty) {
+            if (value == null || value.isEmpty)
               return 'Please enter your phone number';
-            }
-            if (value.length < 10) {
+            if (value.length < 10)
               return 'Please enter a valid 10-digit phone number';
-            }
             return null;
           },
         ),
-
-        // ── OTP Field (shown only after OTP sent) ──────────────
         if (provider.otpSent) ...[
           SizedBox(height: 16.h),
           AuthTextField(
@@ -488,7 +572,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildActionButton(AppAuthenticationProvider provider) {
-    // Dynamic button label based on current state
     String label;
     if (provider.isEmailPasswordMethod) {
       label = 'Sign In';
@@ -516,13 +599,13 @@ class _LoginScreenState extends State<LoginScreen>
           color: const Color(0xFFDB4437),
           onTap: () => _handleSocialLogin(provider, 'Google'),
         ),
-        SizedBox(height: 12.h),
+        /*  SizedBox(height: 12.h),
         SocialLoginButton(
           icon: Icons.apple_rounded,
           label: 'Continue with Apple',
           color: AppColors.textPrimary,
           onTap: () => _handleSocialLogin(provider, 'Apple'),
-        ),
+        ),*/
       ],
     );
   }

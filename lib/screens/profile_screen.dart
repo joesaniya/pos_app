@@ -11,6 +11,9 @@ import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  COLOR PALETTE
+// ─────────────────────────────────────────────────────────────────────────────
 class _K {
   static const page = Color(0xFFF4F7FF);
   static const white = Color(0xFFFFFFFF);
@@ -29,6 +32,17 @@ class _K {
   static const violet = Color(0xFF7C3AED);
   static const rose = Color(0xFFE11D48);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FORMAT HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+String _fmtRev(double v) {
+  if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(1)}L';
+  if (v >= 1000) return '₹${(v / 1000).toStringAsFixed(1)}k';
+  return '₹${v.toStringAsFixed(0)}';
+}
+
+String _fmtNum(int n) => n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ROOT
@@ -93,6 +107,7 @@ class _Screen extends StatelessWidget {
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
                 slivers: [
+                  // ── Top bar ────────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _TopBar(
                       onEdit: () => Navigator.push(
@@ -120,32 +135,58 @@ class _Screen extends StatelessWidget {
                       ).then((_) => prov.loadProfile()),
                     ),
                   ),
+
+                  // ── Identity card ──────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _IdentityCard(p: p, onToggleShift: prov.toggleShift),
                   ),
-                  SliverToBoxAdapter(child: _StatsStrip(p: p)),
+
+                  // ── Today's summary strip ──────────────────────────────────
+                  SliverToBoxAdapter(child: _TodayStatsStrip(prov: prov)),
+
+                  // ── Personal info ──────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _SectionHead(title: 'PERSONAL INFO'),
                   ),
                   SliverToBoxAdapter(child: _PersonalCard(p: p)),
+
+                  // ── Organisation ───────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _SectionHead(title: 'ORGANISATION'),
                   ),
                   SliverToBoxAdapter(
                     child: _OrgCard(p: p, prov: prov),
                   ),
+
+                  // ── Account timeline ───────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _SectionHead(title: 'ACCOUNT TIMELINE'),
                   ),
                   SliverToBoxAdapter(child: _TimelineCard(p: p)),
-                  SliverToBoxAdapter(child: _SectionHead(title: 'PERFORMANCE')),
-                  SliverToBoxAdapter(child: _PerfCard(p: p)),
+
+                  // ── Weekly / Monthly performance ───────────────────────────
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'PERFORMANCE SUMMARY'),
+                  ),
+                  SliverToBoxAdapter(child: _WeekMonthPerfCard(prov: prov)),
+
+                  // ── All-time performance ───────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: _SectionHead(title: 'ALL-TIME PERFORMANCE'),
+                  ),
+                  SliverToBoxAdapter(
+                    child: _AllTimePerfCard(p: p, prov: prov),
+                  ),
+
+                  // ── Quick actions ──────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: _SectionHead(title: 'QUICK ACTIONS'),
                   ),
                   SliverToBoxAdapter(
                     child: _ActionsGrid(p: p, prov: prov),
                   ),
+
+                  // ── Recent activity ────────────────────────────────────────
                   if (p.recentActivity.isNotEmpty) ...[
                     SliverToBoxAdapter(
                       child: _SectionHead(title: 'RECENT ACTIVITY'),
@@ -154,6 +195,8 @@ class _Screen extends StatelessWidget {
                       child: _ActivityCard(p: p, prov: prov),
                     ),
                   ],
+
+                  // ── Sign out ───────────────────────────────────────────────
                   SliverToBoxAdapter(child: _SignOutRow()),
                   const SliverToBoxAdapter(child: SizedBox(height: 48)),
                 ],
@@ -247,7 +290,6 @@ class _IdentityCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // ── Avatar — shows photo or initials ──────────────
             _Avatar(
               initials: p.avatarInitials ?? 'U',
               roleColor: p.role.color,
@@ -330,7 +372,7 @@ class _IdentityCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  AVATAR  — shows network photo if available, else initials
+//  AVATAR
 // ─────────────────────────────────────────────────────────────────────────────
 class _Avatar extends StatelessWidget {
   final String initials;
@@ -349,7 +391,6 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // ── Photo or gradient+initials ────────────────────────
         Container(
           width: 76,
           height: 76,
@@ -390,7 +431,7 @@ class _Avatar extends StatelessWidget {
                             end: Alignment.bottomRight,
                           ),
                         ),
-                        child: Center(
+                        child: const Center(
                           child: SizedBox(
                             width: 20,
                             height: 20,
@@ -407,8 +448,6 @@ class _Avatar extends StatelessWidget {
                 )
               : _initialsWidget(),
         ),
-
-        // ── Active/inactive dot ───────────────────────────────
         Positioned(
           right: 1,
           bottom: 1,
@@ -486,41 +525,75 @@ class _Pill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  STATS STRIP
+//  TODAY'S STATS STRIP
 // ─────────────────────────────────────────────────────────────────────────────
-class _StatsStrip extends StatelessWidget {
-  final UserProfile p;
-  const _StatsStrip({required this.p});
+class _TodayStatsStrip extends StatelessWidget {
+  final ProfileProvider prov;
+  const _TodayStatsStrip({required this.prov});
 
   @override
   Widget build(BuildContext context) {
-    final s = p.stats;
+    final s = prov.perfStats;
+    final loading = prov.statsLoading;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _StatBox(
-            value: '${s.ordersToday}',
-            label: 'Orders\nToday',
-            color: _K.royal,
+          // Section label + spinner
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                const Text(
+                  "TODAY'S SUMMARY",
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: _K.muted,
+                    letterSpacing: 2.0,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (loading)
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: _K.royal,
+                    ),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(width: 8),
-          _StatBox(
-            value: '${s.tablesManaged}',
-            label: 'Tables\nManaged',
-            color: _K.teal,
-          ),
-          const SizedBox(width: 8),
-          _StatBox(
-            value: '₹${(s.revenueToday / 1000).toStringAsFixed(1)}k',
-            label: 'Revenue\nToday',
-            color: _K.green,
-          ),
-          const SizedBox(width: 8),
-          _StatBox(
-            value: '${s.shiftsThisWeek}/6',
-            label: 'Shifts\nWeek',
-            color: _K.violet,
+          Row(
+            children: [
+              _StatBox(
+                value: loading ? '–' : '${s.ordersTodayCount}',
+                label: 'Orders\nToday',
+                color: _K.royal,
+              ),
+              const SizedBox(width: 8),
+              _StatBox(
+                value: loading ? '–' : '${s.tablesTodayCount}',
+                label: 'Tables\nToday',
+                color: _K.teal,
+              ),
+              const SizedBox(width: 8),
+              _StatBox(
+                value: loading ? '–' : _fmtRev(s.revenueTodayAmount),
+                label: 'Revenue\nToday',
+                color: _K.green,
+              ),
+              const SizedBox(width: 8),
+              _StatBox(
+                value: loading ? '–' : '${s.shiftsThisWeek}/6',
+                label: 'Shifts\nWeek',
+                color: _K.violet,
+              ),
+            ],
           ),
         ],
       ),
@@ -528,6 +601,9 @@ class _StatsStrip extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  STAT BOX
+// ─────────────────────────────────────────────────────────────────────────────
 class _StatBox extends StatelessWidget {
   final String value, label;
   final Color color;
@@ -1150,132 +1226,21 @@ class _TRow extends StatelessWidget {
 
 class _TDivider extends StatelessWidget {
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 1.5,
-          height: 22,
-          margin: const EdgeInsets.only(left: 5.25),
-          color: _K.line,
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PERFORMANCE CARD
-// ─────────────────────────────────────────────────────────────────────────────
-class _PerfCard extends StatelessWidget {
-  final UserProfile p;
-  const _PerfCard({required this.p});
-
-  String _fmt(int n) => n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
-
-  @override
-  Widget build(BuildContext context) {
-    final s = p.stats;
-    return _LuxCard(
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_K.royal, _K.royalMid],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.insights_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-                const SizedBox(width: 9),
-                const Text(
-                  'All-time Performance',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    p.businessName.isEmpty ? 'All Time' : p.businessName,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    _PBlock(
-                      emoji: '🧾',
-                      label: 'Total Orders\nHandled',
-                      value: _fmt(s.totalOrdersAllTime),
-                      color: _K.royal,
-                    ),
-                    const SizedBox(width: 10),
-                    _PBlock(
-                      emoji: '💵',
-                      label: 'Avg Order\nValue',
-                      value: '₹${s.avgOrderValue.toStringAsFixed(0)}',
-                      color: _K.green,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    _PBlock(
-                      emoji: '🪑',
-                      label: 'Tables\nManaged',
-                      value: '${s.tablesManaged}',
-                      color: _K.teal,
-                    ),
-                    const SizedBox(width: 10),
-                    _PBlock(
-                      emoji: '⏱️',
-                      label: 'Shifts This\nWeek',
-                      value: '${s.shiftsThisWeek} / 6',
-                      color: _K.violet,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(
+        width: 1.5,
+        height: 22,
+        margin: const EdgeInsets.only(left: 5.25),
+        color: _K.line,
       ),
-    );
-  }
+    ],
+  );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PERFORMANCE BLOCK  (shared small card used in perf grids)
+// ─────────────────────────────────────────────────────────────────────────────
 class _PBlock extends StatelessWidget {
   final String emoji, label, value;
   final Color color;
@@ -1328,6 +1293,393 @@ class _PBlock extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TAB BUTTON  (used in WeekMonth card)
+// ─────────────────────────────────────────────────────────────────────────────
+class _TabBtn extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _TabBtn({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? _K.royal : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: active ? Colors.white : _K.royal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WEEKLY & MONTHLY PERFORMANCE CARD
+// ─────────────────────────────────────────────────────────────────────────────
+class _WeekMonthPerfCard extends StatefulWidget {
+  final ProfileProvider prov;
+  const _WeekMonthPerfCard({required this.prov});
+
+  @override
+  State<_WeekMonthPerfCard> createState() => _WeekMonthPerfCardState();
+}
+
+class _WeekMonthPerfCardState extends State<_WeekMonthPerfCard> {
+  int _tab = 0; // 0 = Week, 1 = Month
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.prov.perfStats;
+    final loading = widget.prov.statsLoading;
+    final isWeek = _tab == 0;
+
+    final orders = isWeek ? s.ordersWeekCount : s.ordersMonthCount;
+    final revenue = isWeek ? s.revenueWeekAmount : s.revenueMonthAmount;
+    final tables = isWeek ? s.tablesWeekCount : s.tablesMonthCount;
+    final aov = isWeek ? s.avgOrderValueWeek : s.avgOrderValueMonth;
+
+    return _LuxCard(
+      child: Column(
+        children: [
+          // ── Header with tab toggle ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 16, 0),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: _K.royal.withOpacity(0.09),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: const Icon(
+                    Icons.bar_chart_rounded,
+                    color: _K.royal,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Performance Summary',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: _K.ink,
+                    ),
+                  ),
+                ),
+                if (loading)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: _K.royal,
+                      ),
+                    ),
+                  ),
+                // Tab toggle
+                Container(
+                  decoration: BoxDecoration(
+                    color: _K.royalSoft,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _TabBtn(
+                        label: 'Week',
+                        active: _tab == 0,
+                        onTap: () => setState(() => _tab = 0),
+                      ),
+                      _TabBtn(
+                        label: 'Month',
+                        active: _tab == 1,
+                        onTap: () => setState(() => _tab = 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Stats grid ─────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    _PBlock(
+                      emoji: '🧾',
+                      label: 'Total Orders\nHandled',
+                      value: loading ? '–' : '$orders',
+                      color: _K.royal,
+                    ),
+                    const SizedBox(width: 10),
+                    _PBlock(
+                      emoji: '💵',
+                      label: 'Total Revenue\nGenerated',
+                      value: loading ? '–' : _fmtRev(revenue),
+                      color: _K.green,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _PBlock(
+                      emoji: '🪑',
+                      label: 'Tables\nManaged',
+                      value: loading ? '–' : '$tables',
+                      color: _K.teal,
+                    ),
+                    const SizedBox(width: 10),
+                    _PBlock(
+                      emoji: '📊',
+                      label: 'Avg Order\nValue',
+                      value: loading ? '–' : _fmtRev(aov),
+                      color: _K.amber,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ALL-TIME PERFORMANCE CARD
+// ─────────────────────────────────────────────────────────────────────────────
+class _AllTimePerfCard extends StatelessWidget {
+  final UserProfile p;
+  final ProfileProvider prov;
+  const _AllTimePerfCard({required this.p, required this.prov});
+
+  String get _tenureDetailed {
+    final diff = DateTime.now().difference(p.joinedDate);
+    final years = diff.inDays ~/ 365;
+    final months = (diff.inDays % 365) ~/ 30;
+    final days = diff.inDays % 30;
+    if (years > 0) return '$years yr ${months}mo';
+    if (months > 0) return '${months}mo ${days}d';
+    return '${diff.inDays}d';
+  }
+
+  String get _weeksWorked {
+    final diff = DateTime.now().difference(p.joinedDate);
+    return '${(diff.inDays / 7).floor()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = prov.perfStats;
+    final loading = prov.statsLoading;
+
+    return _LuxCard(
+      child: Column(
+        children: [
+          // ── Gradient header ────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [_K.royal, _K.royalMid],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.insights_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: 9),
+                const Expanded(
+                  child: Text(
+                    'All-Time Performance',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+                if (loading)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Since ${p.joinedDate.year}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Stats grid ─────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    _PBlock(
+                      emoji: '🧾',
+                      label: 'Total Orders\nHandled',
+                      value: loading ? '–' : _fmtNum(s.ordersAllTimeCount),
+                      color: _K.royal,
+                    ),
+                    const SizedBox(width: 10),
+                    _PBlock(
+                      emoji: '💰',
+                      label: 'Total Revenue\nGenerated',
+                      value: loading ? '–' : _fmtRev(s.revenueAllTimeAmount),
+                      color: _K.green,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _PBlock(
+                      emoji: '🪑',
+                      label: 'Tables\nManaged',
+                      value: loading ? '–' : _fmtNum(s.tablesAllTimeCount),
+                      color: _K.teal,
+                    ),
+                    const SizedBox(width: 10),
+                    _PBlock(
+                      emoji: '📅',
+                      label: 'Weeks\nWorked',
+                      value: _weeksWorked,
+                      color: _K.violet,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // ── Tenure banner ──────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _K.royal.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _K.royal.withOpacity(0.14)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('⏱️', style: TextStyle(fontSize: 22)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Total Work Experience',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: _K.muted,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              _tenureDetailed,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: _K.royal,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _K.green.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _K.green.withOpacity(0.25)),
+                        ),
+                        child: Text(
+                          p.tenureLabel,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: _K.green,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1737,7 +2089,7 @@ class _SignOutRow extends StatelessWidget {
                       onPressed: () async {
                         Navigator.pop(ctx);
                         await ctx.read<AppAuthenticationProvider>().logout();
-                        if (ctx.mounted)
+                        if (ctx.mounted) {
                           Navigator.pushAndRemoveUntil(
                             ctx,
                             MaterialPageRoute(
@@ -1745,6 +2097,7 @@ class _SignOutRow extends StatelessWidget {
                             ),
                             (r) => false,
                           );
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _K.rose,
@@ -1879,7 +2232,11 @@ class _ShimmerState extends State<_Shimmer>
             const SizedBox(height: 22),
             _b(w: 100, h: 10, r: 4),
             const SizedBox(height: 10),
-            _b(h: 200, r: 20),
+            _b(h: 180, r: 20),
+            const SizedBox(height: 22),
+            _b(w: 120, h: 10, r: 4),
+            const SizedBox(height: 10),
+            _b(h: 240, r: 20),
             const SizedBox(height: 22),
             Row(
               children: [

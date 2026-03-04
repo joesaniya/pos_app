@@ -659,6 +659,708 @@
 //   static Future<void> restart() => _register();
 // }
 
+import 'dart:developer';
+
+import 'package:flutter/widgets.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest_all.dart' as tzData;
+import 'package:workmanager/workmanager.dart';
+import 'package:pos_app/config/app_config.dart';
+
+const kLongSeatedTask = 'long_seated_check';
+const kLongSeatedTag = 'reservation_checks';
+const _kSentKeys = '_notif_sent_keys';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NOTIFICATION CHANNELS (must match reservation_notification_service.dart)
+// ─────────────────────────────────────────────────────────────────────────────
+const _chCheckOut = AndroidNotificationDetails(
+  'ch_checkout',
+  'Check-out Warnings',
+  channelDescription: 'Alerts when a reservation is ending soon',
+  importance: Importance.max,
+  priority: Priority.max,
+  playSound: true,
+  enableVibration: true,
+  icon: '@mipmap/ic_launcher',
+  channelShowBadge: true,
+);
+
+const _chCheckIn = AndroidNotificationDetails(
+  'ch_checkin',
+  'Check-in Reminders',
+  channelDescription: 'Alerts when a guest is about to arrive',
+  importance: Importance.high,
+  priority: Priority.high,
+  playSound: true,
+  icon: '@mipmap/ic_launcher',
+);
+
+const _chLongSeated = AndroidNotificationDetails(
+  'ch_long_seated',
+  'Long-seated Alerts',
+  channelDescription: 'Alerts when guests have been seated too long',
+  importance: Importance.defaultImportance,
+  priority: Priority.defaultPriority,
+  playSound: false,
+  icon: '@mipmap/ic_launcher',
+);
+
+// Expiry channel — must match reservation_notification_service.dart
+const _chExpiry = AndroidNotificationDetails(
+  'ch_expiry',
+  'Expired Reservations',
+  channelDescription:
+      'Alerts when a reservation expires because the guest never arrived',
+  importance: Importance.high,
+  priority: Priority.high,
+  playSound: true,
+  enableVibration: true,
+  icon: '@mipmap/ic_launcher',
+  channelShowBadge: true,
+);
+
+const _iosHigh = DarwinNotificationDetails(
+  presentAlert: true,
+  presentBadge: true,
+  presentSound: true,
+  interruptionLevel: InterruptionLevel.timeSensitive,
+);
+const _iosNormal = DarwinNotificationDetails(
+  presentAlert: true,
+  presentSound: false,
+);
+const _iosActive = DarwinNotificationDetails(
+  presentAlert: true,
+  presentBadge: true,
+  presentSound: true,
+  interruptionLevel: InterruptionLevel.active,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TOP-LEVEL WORKMANAGER CALLBACK
+// ─────────────────────────────────────────────────────────────────────────────
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((taskName, inputData) async {
+    log('[BG] ▶ Task: $taskName');
+    try {
+      WidgetsFlutterBinding.ensureInitialized();
+      if (taskName == kLongSeatedTask) {
+        await _runBackgroundChecks();
+      }
+      log('[BG] ✅ Done: $taskName');
+      return true;
+    } catch (e, st) {
+      log('[BG] ❌ Error: $e\n$st');
+      return false;
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MAIN BACKGROUND CHECK FUNCTION
+// ─────────────────────────────────────────────────────────────────────────────
+Future<void> _runBackgroundChecks() async {
+  // ── 1. Bootstrap notifications + timezone ────────────────────────────────
+  final plugin = FlutterLocalNotificationsPlugin();
+  tzData.initializeTimeZones();
+  try {
+    tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
+  } catch (_) {
+    tz.setLocalLocation(tz.UTC);
+  }
+  await plugin.initialize(
+    settings: const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(),
+    ),
+  );
+
+  // ── 2. Load context from SharedPreferences ────────────────────────────────
+  final prefs = await SharedPreferences.getInstance();
+  final businessId = prefs.getString('businessId') ?? '';
+  final businessName = prefs.getString('businessName') ?? '';
+  log('[BG] businessId=$businessId');
+
+  if (businessId.isEmpty) {
+    log('[BG] No businessId — user not logged in, skipping');
+    return;
+  }
+
+  // ── 3. Load sent-key dedup store ──────────────────────────────────────────
+  final today = _todayKey();
+  final rawKeys = prefs.getStringList(_kSentKeys) ?? [];
+  final sentKeys = rawKeys.where((k) => k.startsWith(today)).toSet();
+
+  // ── 4. Bootstrap Supabase ─────────────────────────────────────────────────
+  await _ensureSupabase();
+  final sb = Supabase.instance.client;
+  final now = DateTime.now();
+  final biz = businessName.isNotEmpty ? '\n$businessName' : '';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── 5. AUTO-EXPIRY CHECK ──────────────────────────────────────────────────
+  //
+  //  This is the background safety net.  Flutter's 1-min foreground timer
+  //  handles expiry when the app is open, but WorkManager handles it when:
+  //    - App is in background / killed
+  //    - Device was offline and just reconnected
+  //    - Multiple hours have passed without any app activity
+  //
+  //  Strategy: Try the DB RPC first (fn_expire_stale_reservations).
+  //  If that fails (old DB), fall back to querying + updating directly.
+  // ══════════════════════════════════════════════════════════════════════════
+  log('[BG] 🔍 Running auto-expiry check...');
+  try {
+    // Try the DB RPC (v10 migration)
+    final expiryResult = await sb.rpc(
+      'fn_expire_stale_reservations',
+      params: {'p_business_id': businessId},
+    );
+    final expiredCount = expiryResult?['expired_count'] as int? ?? 0;
+    log('[BG] ✅ DB expiry: $expiredCount reservation(s) expired');
+
+    // Send a notification for each expired reservation
+    if (expiredCount > 0) {
+      final expiredIds = (expiryResult?['expired_ids'] as List?) ?? [];
+      for (final id in expiredIds) {
+        await _sendExpiryNotificationForId(
+          sb,
+          plugin,
+          id as String,
+          biz,
+          sentKeys,
+          today,
+        );
+      }
+    }
+  } catch (rpcError) {
+    log('[BG] ⚠️ RPC not available, using direct query fallback: $rpcError');
+    // Fallback: query and expire directly
+    await _directExpireStaleReservations(
+      sb,
+      plugin,
+      businessId,
+      biz,
+      sentKeys,
+      today,
+      now,
+    );
+  }
+
+  // ── 6. Long-seated check ─────────────────────────────────────────────────
+  final cutoff4h = now
+      .subtract(const Duration(hours: 4))
+      .toUtc()
+      .toIso8601String();
+
+  final occupiedRows = await sb
+      .from('restaurant_tables')
+      .select('id, table_number, occupied_since, current_customer_name')
+      .eq('business_id', businessId)
+      .eq('status', 'occupied')
+      .eq('is_active', true)
+      .lt('occupied_since', cutoff4h);
+
+  for (final row in (occupiedRows as List)) {
+    final tableNum = row['table_number'] as int;
+    final tableId = row['id'] as String;
+    final guestName = (row['current_customer_name'] as String?) ?? 'Guest';
+    final occupiedSince = DateTime.parse(
+      row['occupied_since'] as String,
+    ).toLocal();
+    final seatedMins = now.difference(occupiedSince).inMinutes;
+
+    const longMin = 240;
+    if (seatedMins >= longMin) {
+      final bucket = ((seatedMins - longMin) ~/ 30) * 30;
+      final totalMins = longMin + bucket;
+      final h = totalMins ~/ 60, m = totalMins % 60;
+      final label = m > 0 ? '${h}h ${m}m' : '${h}h';
+      final key = '${today}_ls_${tableId}_$totalMins';
+
+      if (!sentKeys.contains(key)) {
+        sentKeys.add(key);
+        await plugin.show(
+          id: 4000 + tableNum,
+          title: '⏱️ Long stay — Table $tableNum ($label)',
+          body: '$guestName seated for $label$biz',
+          notificationDetails: const NotificationDetails(
+            android: _chLongSeated,
+            iOS: _iosNormal,
+          ),
+        );
+        log('[BG] 🔔 Long-seated → T$tableNum ($label)');
+      }
+    }
+  }
+
+  // ── 7. Check-in reminders ─────────────────────────────────────────────────
+  final in35 = now.add(const Duration(minutes: 35)).toUtc().toIso8601String();
+  final nowUtc = now.toUtc().toIso8601String();
+
+  final checkInRows = await sb
+      .from('table_reservations')
+      .select(
+        'id, customer_name, guest_count, reserved_for, '
+        'restaurant_tables(table_number)',
+      )
+      .eq('business_id', businessId)
+      .inFilter('status', ['active'])
+      .gte('reserved_for', nowUtc)
+      .lte('reserved_for', in35);
+
+  for (final row in (checkInRows as List)) {
+    final tableData = row['restaurant_tables'];
+    final tableNum = (tableData?['table_number'] ?? 0) as int;
+    final tName = 'T${tableNum.toString().padLeft(2, '0')}';
+    final guestName = (row['customer_name'] as String?) ?? 'Guest';
+    final guestCount = (row['guest_count'] ?? 0) as int;
+    final resTime = DateTime.parse(row['reserved_for'] as String).toLocal();
+    final minsToArr = resTime.difference(now).inMinutes;
+    final timeLabel = _fmtTime(resTime);
+    final body = '$guestName · $guestCount guests · $timeLabel$biz';
+
+    if (minsToArr > 25 && minsToArr <= 35) {
+      final k = '${today}_ci30_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 1000 + tableNum,
+          title: '🟡 Guest arriving in 30 min — $tName',
+          body: body,
+          fireAt: resTime.subtract(const Duration(minutes: 30)),
+          android: _chCheckIn,
+          ios: _iosNormal,
+        );
+      }
+    }
+    if (minsToArr > 10 && minsToArr <= 22) {
+      final k = '${today}_ci15_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 2000 + tableNum,
+          title: '🔔 Guest arriving in 15 min — $tName',
+          body: body,
+          fireAt: resTime.subtract(const Duration(minutes: 15)),
+          android: _chCheckIn,
+          ios: _iosNormal,
+        );
+      }
+    }
+    if (minsToArr <= 10 && minsToArr > 0) {
+      final k = '${today}_ci5_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 6000 + tableNum,
+          title: '🚨 Guest arriving in 5 min — $tName',
+          body: body,
+          fireAt: resTime.subtract(const Duration(minutes: 5)),
+          android: _chCheckIn,
+          ios: _iosNormal,
+        );
+      }
+    }
+  }
+
+  // ── 8. Check-out reminders ────────────────────────────────────────────────
+  final in35co = now.add(const Duration(minutes: 35)).toUtc().toIso8601String();
+
+  final checkOutRows = await sb
+      .from('table_reservations')
+      .select(
+        'id, customer_name, check_out, '
+        'restaurant_tables(table_number)',
+      )
+      .eq('business_id', businessId)
+      .inFilter('status', ['active', 'seated'])
+      .not('check_out', 'is', null)
+      .gte('check_out', nowUtc)
+      .lte('check_out', in35co);
+
+  for (final row in (checkOutRows as List)) {
+    final tableData = row['restaurant_tables'];
+    final tableNum = (tableData?['table_number'] ?? 0) as int;
+    final tName = 'T${tableNum.toString().padLeft(2, '0')}';
+    final guestName = (row['customer_name'] as String?) ?? 'Guest';
+    final checkOutDt = DateTime.parse(row['check_out'] as String).toLocal();
+    final minsLeft = checkOutDt.difference(now).inMinutes;
+    final coLabel = _fmtTime(checkOutDt);
+    final body = '$guestName · Check-out at $coLabel$biz';
+
+    log('[BG] 🕐 Checkout in ${minsLeft}min — $tName');
+
+    if (minsLeft > 28) {
+      final k = '${today}_co30_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 7000 + tableNum,
+          title: '🟡 Reservation ending in 30 min — $tName',
+          body: body,
+          fireAt: checkOutDt.subtract(const Duration(minutes: 30)),
+          android: _chCheckOut,
+          ios: _iosHigh,
+        );
+      }
+    }
+    if (minsLeft > 13 && minsLeft <= 18) {
+      final k = '${today}_co15_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 3000 + tableNum,
+          title: '🔴 Reservation ending in 15 min — $tName',
+          body: body,
+          fireAt: checkOutDt.subtract(const Duration(minutes: 15)),
+          android: _chCheckOut,
+          ios: _iosHigh,
+        );
+      }
+    }
+    if (minsLeft > 5 && minsLeft <= 10) {
+      final k = '${today}_co5_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await _bgSchedule(
+          plugin,
+          id: 7500 + tableNum,
+          title: '🚨 Reservation ending in 5 min — $tName',
+          body: body,
+          fireAt: checkOutDt.subtract(const Duration(minutes: 5)),
+          android: _chCheckOut,
+          ios: _iosHigh,
+        );
+      }
+    } else if (minsLeft >= 0 && minsLeft <= 5) {
+      final k = '${today}_co5_${row['id']}';
+      if (!sentKeys.contains(k)) {
+        sentKeys.add(k);
+        await plugin.show(
+          id: 7500 + tableNum,
+          title: '🚨 Reservation ending in 5 min — $tName',
+          body: body,
+          notificationDetails: const NotificationDetails(
+            android: _chCheckOut,
+            iOS: _iosHigh,
+          ),
+        );
+        log('[BG] 🚨 5-min checkout immediate → $tName');
+      }
+    }
+  }
+
+  // ── 9. Checkout NOW check ─────────────────────────────────────────────────
+  final justPassed = now
+      .subtract(const Duration(minutes: 1))
+      .toUtc()
+      .toIso8601String();
+
+  final nowRows = await sb
+      .from('table_reservations')
+      .select(
+        'id, customer_name, check_out, '
+        'restaurant_tables(table_number)',
+      )
+      .eq('business_id', businessId)
+      .inFilter('status', ['active', 'seated'])
+      .not('check_out', 'is', null)
+      .gte('check_out', justPassed)
+      .lte('check_out', nowUtc);
+
+  for (final row in (nowRows as List)) {
+    final tableData = row['restaurant_tables'];
+    final tableNum = (tableData?['table_number'] ?? 0) as int;
+    final tName = 'T${tableNum.toString().padLeft(2, '0')}';
+    final guestName = (row['customer_name'] as String?) ?? 'Guest';
+    final key = '${today}_coNow_${row['id']}';
+
+    if (!sentKeys.contains(key)) {
+      sentKeys.add(key);
+      await plugin.show(
+        id: 3000 + tableNum,
+        title: '🔴 Checkout time reached — $tName',
+        body: '$guestName · It\'s time to check out$biz',
+        notificationDetails: const NotificationDetails(
+          android: _chCheckOut,
+          iOS: _iosHigh,
+        ),
+      );
+      log('[BG] 🔴 Checkout NOW → $tName');
+    }
+  }
+
+  // ── 10. Persist sent-keys ─────────────────────────────────────────────────
+  final cleaned = sentKeys.where((k) => k.startsWith(today)).toList();
+  await prefs.setStringList(_kSentKeys, cleaned);
+  log('[BG] 💾 Saved ${cleaned.length} sent-keys');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EXPIRY HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Fetch details for one reservation and send expiry notification
+Future<void> _sendExpiryNotificationForId(
+  SupabaseClient sb,
+  FlutterLocalNotificationsPlugin plugin,
+  String reservationId,
+  String biz,
+  Set<String> sentKeys,
+  String today,
+) async {
+  try {
+    final rows = await sb
+        .from('table_reservations')
+        .select('customer_name, reserved_for, restaurant_tables(table_number)')
+        .eq('id', reservationId)
+        .limit(1);
+
+    if ((rows as List).isEmpty) return;
+    final row = rows.first as Map<String, dynamic>;
+    final tableData = row['restaurant_tables'];
+    final tableNum = (tableData?['table_number'] as int?) ?? 0;
+    final tName = 'T${tableNum.toString().padLeft(2, '0')}';
+    final customerName = row['customer_name'] as String? ?? 'Guest';
+    final reservedFor = DateTime.parse(row['reserved_for'] as String).toLocal();
+    final timeStr = _fmtTime(reservedFor);
+
+    final key =
+        '${today}_expiry_${tableNum}_${DateTime.now().millisecondsSinceEpoch}';
+    if (!sentKeys.contains(key)) {
+      sentKeys.add(key);
+      await plugin.show(
+        id: 10000 + tableNum,
+        title: '⏰ Reservation expired — $tName is now free',
+        body:
+            '$customerName (booked $timeStr) did not arrive. '
+            'Table is available.$biz',
+        notificationDetails: const NotificationDetails(
+          android: _chExpiry,
+          iOS: _iosActive,
+        ),
+      );
+      log('[BG] ⏰ Expiry notification → $tName ($customerName at $timeStr)');
+    }
+  } catch (e) {
+    log('[BG] ⚠️ Expiry notification error: $e');
+  }
+}
+
+/// Direct expiry fallback when fn_expire_stale_reservations RPC is unavailable
+Future<void> _directExpireStaleReservations(
+  SupabaseClient sb,
+  FlutterLocalNotificationsPlugin plugin,
+  String businessId,
+  String biz,
+  Set<String> sentKeys,
+  String today,
+  DateTime now,
+) async {
+  try {
+    // Find all stale active reservations:
+    //   check_in IS NULL + slot completely ended
+    final nowUtc = now.toUtc().toIso8601String();
+
+    // We can't filter by computed check_out fallback in a simple query,
+    // so we fetch all active reservations ended more than 2h ago
+    // and filter client-side.
+    final twoHoursAgo = now
+        .subtract(const Duration(hours: 2))
+        .toUtc()
+        .toIso8601String();
+
+    final staleRows = await sb
+        .from('table_reservations')
+        .select(
+          'id, table_id, customer_name, reserved_for, check_out, check_in, '
+          'restaurant_tables(table_number)',
+        )
+        .eq('business_id', businessId)
+        .eq('status', 'active')
+        .isFilter('check_in', null)
+        .lt('reserved_for', twoHoursAgo); // reserved_for > 2h ago
+
+    for (final row in (staleRows as List)) {
+      final reservedFor = DateTime.parse(
+        row['reserved_for'] as String,
+      ).toLocal();
+      final checkOutRaw = row['check_out'];
+      final slotEnd = checkOutRaw != null
+          ? DateTime.parse(checkOutRaw as String).toLocal()
+          : reservedFor.add(const Duration(hours: 2));
+
+      // Only expire if the entire slot has passed
+      if (slotEnd.isAfter(now)) continue;
+
+      final tableId = row['table_id'] as String;
+      final tableData = row['restaurant_tables'];
+      final tableNum = (tableData?['table_number'] as int?) ?? 0;
+      final tName = 'T${tableNum.toString().padLeft(2, '0')}';
+      final customerName = row['customer_name'] as String? ?? 'Guest';
+      final resId = row['id'] as String;
+
+      // Mark reservation as no_show
+      await sb
+          .from('table_reservations')
+          .update({
+            'status': 'no_show',
+            'updated_by_name': 'System (Auto-Expired)',
+          })
+          .eq('id', resId)
+          .eq('status', 'active');
+
+      // Free table if still reserved
+      await sb
+          .from('restaurant_tables')
+          .update({
+            'status': 'available',
+            'updated_by_name': 'System (Auto-Expired)',
+          })
+          .eq('id', tableId)
+          .eq('status', 'reserved');
+
+      log('[BG] ⏰ Direct-expired: $tName — $customerName');
+
+      // Send notification
+      final timeStr = _fmtTime(reservedFor);
+      final key =
+          '${today}_expiry_${tableNum}_${DateTime.now().millisecondsSinceEpoch}';
+      if (!sentKeys.contains(key)) {
+        sentKeys.add(key);
+        await plugin.show(
+          id: 10000 + tableNum,
+          title: '⏰ Reservation expired — $tName is now free',
+          body:
+              '$customerName (booked $timeStr) did not arrive. '
+              'Table is available.$biz',
+          notificationDetails: const NotificationDetails(
+            android: _chExpiry,
+            iOS: _iosActive,
+          ),
+        );
+      }
+    }
+  } catch (e) {
+    log('[BG] ⚠️ Direct expiry error: $e');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SCHEDULE HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+Future<void> _bgSchedule(
+  FlutterLocalNotificationsPlugin plugin, {
+  required int id,
+  required String title,
+  required String body,
+  required DateTime fireAt,
+  required AndroidNotificationDetails android,
+  required DarwinNotificationDetails ios,
+}) async {
+  if (fireAt.isBefore(DateTime.now())) {
+    log('[BG] ⏭ Past — skipped: "$title"');
+    return;
+  }
+  try {
+    await plugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: tz.TZDateTime.from(fireAt, tz.local),
+      notificationDetails: NotificationDetails(android: android, iOS: ios),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
+    log('[BG] ⏰ Scheduled id=$id "$title" → $fireAt');
+  } catch (e) {
+    log('[BG] ⚠️ Schedule error id=$id: $e');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SUPABASE LAZY INIT
+// ─────────────────────────────────────────────────────────────────────────────
+Future<void> _ensureSupabase() async {
+  try {
+    Supabase.instance.client;
+  } catch (_) {
+    await Supabase.initialize(
+      url: AppConfig.supabaseUrl,
+      anonKey: AppConfig.supabaseAnonKey,
+    );
+    log('[BG] Supabase initialized');
+  }
+}
+
+String _todayKey() {
+  final n = DateTime.now();
+  return '${n.year}-${n.month.toString().padLeft(2, '0')}-'
+      '${n.day.toString().padLeft(2, '0')}';
+}
+
+String _fmtTime(DateTime dt) {
+  final h = dt.hour;
+  final m = dt.minute.toString().padLeft(2, '0');
+  final suf = h >= 12 ? 'PM' : 'AM';
+  final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+  return '$h12:$m $suf';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  BackgroundTaskService
+// ─────────────────────────────────────────────────────────────────────────────
+class BackgroundTaskService {
+  BackgroundTaskService._();
+
+  static Future<void> initialize() async {
+    await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+    await _register();
+  }
+
+  static Future<void> _register() async {
+    await Workmanager().cancelByTag(kLongSeatedTag);
+
+    await Workmanager().registerPeriodicTask(
+      kLongSeatedTask,
+      kLongSeatedTask,
+      tag: kLongSeatedTag,
+      frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+      constraints: Constraints(
+        networkType: NetworkType.connected,
+        requiresBatteryNotLow: false,
+      ),
+      backoffPolicy: BackoffPolicy.linear,
+      backoffPolicyDelay: const Duration(seconds: 30),
+    );
+
+    log(
+      '[BG] ✅ Registered (15 min) — handles expiry + long-seated + check-in + check-out',
+    );
+  }
+
+  static Future<void> cancelAll() async {
+    await Workmanager().cancelByTag(kLongSeatedTag);
+    log('[BG] Background tasks cancelled');
+  }
+
+  static Future<void> restart() => _register();
+}
+/*
+
+
+
 //correct notification fworking for table
 import 'dart:developer';
 
@@ -1156,3 +1858,4 @@ class BackgroundTaskService {
   /// Call after login to restart checks
   static Future<void> restart() => _register();
 }
+*/

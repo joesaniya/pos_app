@@ -223,7 +223,7 @@ class Reservation {
 // ─────────────────────────────────────────────────────────────────────────────
 //  RESERVATION HISTORY ITEM  (used in the History screen)
 // ─────────────────────────────────────────────────────────────────────────────
-
+/*
 class ReservationHistoryItem {
   final String id;
   final int tableNumber;
@@ -296,7 +296,90 @@ class ReservationHistoryItem {
     }
   }
 }
+*/
+// ─────────────────────────────────────────────────────────────────────────────
+//  RESERVATION HISTORY ITEM  (used in the History screen + auto-expiry)
+//
+//  CHANGE vs original: added `tableId` field so the local expiry fallback
+//  in TablesProvider._localExpireStaleReservations() can update the correct
+//  table row without an extra DB query.
+// ─────────────────────────────────────────────────────────────────────────────
 
+class ReservationHistoryItem {
+  final String id;
+  final String tableId; // ← NEW: UUID of the parent restaurant_tables row
+  final int tableNumber;
+  final String section;
+  final String customerName;
+  final String? phone;
+  final int guestCount;
+  final DateTime reservedFor;
+  final DateTime? checkIn;
+  final DateTime? checkOut;
+  final String? notes;
+  final String status;
+  final String createdByName;
+  final DateTime createdAt;
+
+  const ReservationHistoryItem({
+    required this.id,
+    required this.tableId, // ← NEW
+    required this.tableNumber,
+    required this.section,
+    required this.customerName,
+    this.phone,
+    required this.guestCount,
+    required this.reservedFor,
+    this.checkIn,
+    this.checkOut,
+    this.notes,
+    required this.status,
+    required this.createdByName,
+    required this.createdAt,
+  });
+
+  factory ReservationHistoryItem.fromMap(Map<String, dynamic> row) {
+    final tableData = row['restaurant_tables'];
+    return ReservationHistoryItem(
+      id: row['id'] ?? '',
+      tableId: row['table_id'] ?? '', // ← NEW
+      tableNumber: tableData?['table_number'] ?? 0,
+      section: tableData?['section'] ?? '',
+      customerName: row['customer_name'] ?? '',
+      phone: row['phone'],
+      guestCount: row['guest_count'] ?? 0,
+      reservedFor: DateTime.parse(row['reserved_for']).toLocal(),
+      checkIn: row['check_in'] != null
+          ? DateTime.parse(row['check_in']).toLocal()
+          : null,
+      checkOut: row['check_out'] != null
+          ? DateTime.parse(row['check_out']).toLocal()
+          : null,
+      notes: row['notes'],
+      status: row['status'] ?? 'active',
+      createdByName: row['created_by_name'] ?? 'Staff',
+      createdAt: DateTime.parse(row['created_at']).toLocal(),
+    );
+  }
+
+  /// Human-readable status label with emoji
+  String get statusLabel {
+    switch (status) {
+      case 'active':
+        return '📅 Active';
+      case 'seated':
+        return '🍽️ Seated';
+      case 'completed':
+        return '✅ Completed';
+      case 'cancelled':
+        return '✖️ Cancelled';
+      case 'no_show':
+        return '👻 No Show';
+      default:
+        return status;
+    }
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 //  RESTAURANT TABLE MODEL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,9 +448,29 @@ class RestaurantTable {
 
   // ── Display helpers ──────────────────────────────────
 
-  /// e.g. "T06"
-  String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
   String get occupiedDuration {
+    if (occupiedSince == null) return '—';
+    final diff = elapsedIST(
+      occupiedSince!,
+    ); // ← uses nowIST() internally, never negative
+    final h = diff.inHours;
+    final m = diff.inMinutes.remainder(60);
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${diff.inMinutes}m';
+  }
+
+  // occupiedDuration1 can be deleted — it's now a duplicate
+  // String get occupiedDuration1 { ... }   ← remove this
+
+  int get occupiedMinutes {
+    if (occupiedSince == null) return 0;
+    return elapsedIST(
+      occupiedSince!,
+    ).inMinutes; // ← was DateTime.now(), now IST-safe
+  }
+
+  String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
+  String get occupiedDuration1 {
     if (occupiedSince == null) return '—';
     final diff = nowIST().difference(occupiedSince!);
     final mins = diff.isNegative ? 0 : diff.inMinutes;
@@ -377,28 +480,8 @@ class RestaurantTable {
     return '${m}m';
   }
 
-  String get occupiedDuration1 {
-    if (occupiedSince == null) return '—';
-    // ✅ FIX: use nowIST() — occupiedSince is already in IST from provider
-    final diff = nowIST().difference(occupiedSince!);
-    if (diff.isNegative) return '0m'; // guard against clock skew
-    final h = diff.inHours;
-    final m = diff.inMinutes.remainder(60);
-    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
-    return '${diff.inMinutes}m';
-  }
-
-  // String get occupiedDuration1 {
-  //   if (occupiedSince == null) return '';
-  //   final diff = DateTime.now().difference(occupiedSince!);
-  //   if (diff.inHours > 0) {
-  //     return '${diff.inHours}h ${diff.inMinutes.remainder(60)}m';
-  //   }
-  //   return '${diff.inMinutes}m';
-  // }
-
   /// Minutes the table has been occupied (0 if not occupied)
-  int get occupiedMinutes {
+  int get occupiedMinutes1 {
     if (occupiedSince == null) return 0;
     return DateTime.now().difference(occupiedSince!).inMinutes;
   }

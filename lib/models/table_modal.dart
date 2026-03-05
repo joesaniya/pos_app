@@ -221,7 +221,121 @@ class Reservation {
   String get createdByLabel => createdByName ?? createdByRole ?? 'Staff';
 }
 
+class ReservationHistoryItem {
+  final String id;
+  final String tableId;
+  final int tableNumber;
+  final String section;
+  final String customerName;
+  final String? phone;
+  final int guestCount;
+  final DateTime reservedFor;
+  final DateTime? checkIn;
+  final DateTime? checkOut;
+  final String? notes;
+  final String status;
+  final String createdByName;
+  final DateTime createdAt;
 
+  // ── Audit / cancellation fields ───────────────────────
+  /// Who last updated this reservation (name from updated_by_name column)
+  final String? updatedByName;
+
+  /// Name of the staff member who cancelled / marked no-show.
+  /// Falls back to updatedByName when not explicitly recorded.
+  final String? cancelledByName;
+
+  /// Timestamp when the reservation was cancelled / no-showed.
+  /// Populated from a `cancelled_at` column or derived from `updated_at`.
+  final DateTime? cancelledAt;
+
+  /// Optional free-text reason for cancellation (e.g. "guest request").
+  final String? cancellationReason;
+
+  const ReservationHistoryItem({
+    required this.id,
+    required this.tableId,
+    required this.tableNumber,
+    required this.section,
+    required this.customerName,
+    this.phone,
+    required this.guestCount,
+    required this.reservedFor,
+    this.checkIn,
+    this.checkOut,
+    this.notes,
+    required this.status,
+    required this.createdByName,
+    required this.createdAt,
+    // audit
+    this.updatedByName,
+    this.cancelledByName,
+    this.cancelledAt,
+    this.cancellationReason,
+  });
+
+  factory ReservationHistoryItem.fromMap(Map<String, dynamic> row) {
+    final tableData = row['restaurant_tables'];
+
+    // Determine cancelled_at: use explicit column if present,
+    // otherwise fall back to updated_at (which Supabase updates on every write).
+    DateTime? cancelledAt;
+    if (row['cancelled_at'] != null) {
+      cancelledAt = DateTime.parse(row['cancelled_at'] as String).toLocal();
+    } else if (row['updated_at'] != null) {
+      final status = row['status'] as String? ?? '';
+      if (status == 'cancelled' || status == 'no_show') {
+        cancelledAt = DateTime.parse(row['updated_at'] as String).toLocal();
+      }
+    }
+
+    return ReservationHistoryItem(
+      id: row['id'] ?? '',
+      tableId: row['table_id'] ?? '',
+      tableNumber: tableData?['table_number'] ?? 0,
+      section: tableData?['section'] ?? '',
+      customerName: row['customer_name'] ?? '',
+      phone: row['phone'],
+      guestCount: row['guest_count'] ?? 0,
+      reservedFor: DateTime.parse(row['reserved_for']).toLocal(),
+      checkIn: row['check_in'] != null
+          ? DateTime.parse(row['check_in']).toLocal()
+          : null,
+      checkOut: row['check_out'] != null
+          ? DateTime.parse(row['check_out']).toLocal()
+          : null,
+      notes: row['notes'],
+      status: row['status'] ?? 'active',
+      createdByName: row['created_by_name'] ?? 'Staff',
+      createdAt: DateTime.parse(row['created_at']).toLocal(),
+      // audit
+      updatedByName: row['updated_by_name'] as String?,
+      cancelledByName: row['updated_by_name'] as String?, // same column for now
+      cancelledAt: cancelledAt,
+      cancellationReason: row['cancellation_reason'] as String?,
+    );
+  }
+
+  /// Human-readable status label with emoji
+  String get statusLabel {
+    switch (status) {
+      case 'active':
+        return '📅 Active';
+      case 'seated':
+        return '🍽️ Seated';
+      case 'completed':
+        return '✅ Completed';
+      case 'cancelled':
+        return '✖️ Cancelled';
+      case 'no_show':
+        return '👻 No Show';
+      default:
+        return status;
+    }
+  }
+}
+
+/*
 class ReservationHistoryItem {
   final String id;
   final String tableId; 
@@ -297,10 +411,7 @@ class ReservationHistoryItem {
     }
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-//  RESTAURANT TABLE MODEL
-// ─────────────────────────────────────────────────────────────────────────────
-
+*/
 class RestaurantTable {
   final String id;
   final int tableNumber;

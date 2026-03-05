@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/utils/ist_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -848,9 +849,6 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-  // ══════════════════════════════════════════════════════
-  //  RESERVATION CRUD
-  // ══════════════════════════════════════════════════════
   Future<bool> checkAvailability({
     required String tableId,
     required DateTime checkIn,
@@ -951,6 +949,8 @@ class TablesProvider extends ChangeNotifier {
   }
 
   Future<void> updateReservation(String tableId, Reservation updated) async {
+    log('Updating reservation ${updated.id} for table $tableId');
+
     try {
       await _sb
           .from(_kReservations)

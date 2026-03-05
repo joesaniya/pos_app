@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -206,6 +208,8 @@ class _ReservationSheetState extends State<ReservationSheet> {
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
       createdAt: widget.existing?.createdAt ?? DateTime.now(),
     );
+
+    log('upserting reservation: $res');
     isEdit
         ? await widget.provider.updateReservation(widget.tableId, res)
         : await widget.provider.addReservation(widget.tableId, res);

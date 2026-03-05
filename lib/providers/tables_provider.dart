@@ -67,6 +67,12 @@ class TablesProvider extends ChangeNotifier {
   bool get historyLoading => _historyLoading;
   bool get historyHasMore => _historyHasMore;
 
+  /// Total active reservations across all upcoming dates (from calendar cache).
+  /// Use this for the summary bar — it reflects real bookings, not just
+  /// tables currently showing 'reserved' status (which is slot-windowed).
+  int get totalUpcomingReservations =>
+      _calendarReservations.where((r) => r.status == 'active').length;
+
   List<ReservationHistoryItem> get calendarReservations =>
       List.unmodifiable(_calendarReservations);
   bool get calendarLoading => _calendarLoading;
@@ -77,26 +83,28 @@ class TablesProvider extends ChangeNotifier {
         return false;
       if (_selectedStatus != null && t.status != _selectedStatus) return false;
       return true;
-    }).toList()
-      ..sort((a, b) {
-        const p = {
-          TableStatus.occupied: 0,
-          TableStatus.reserved: 1,
-          TableStatus.available: 2,
-          TableStatus.cleaning: 3,
-        };
-        final pa = p[a.status] ?? 4, pb = p[b.status] ?? 4;
-        if (pa != pb) return pa.compareTo(pb);
-        return a.tableNumber.compareTo(b.tableNumber);
-      });
+    }).toList()..sort((a, b) {
+      const p = {
+        TableStatus.occupied: 0,
+        TableStatus.reserved: 1,
+        TableStatus.available: 2,
+        TableStatus.cleaning: 3,
+      };
+      final pa = p[a.status] ?? 4, pb = p[b.status] ?? 4;
+      if (pa != pb) return pa.compareTo(pb);
+      return a.tableNumber.compareTo(b.tableNumber);
+    });
   }
 
   int get totalAvailable =>
       _tables.where((t) => t.status == TableStatus.available).length;
   int get totalOccupied =>
       _tables.where((t) => t.status == TableStatus.occupied).length;
-  int get totalReserved =>
-      _tables.where((t) => t.status == TableStatus.reserved).length;
+  /*int get totalReserved =>
+      _tables.where((t) => t.status == TableStatus.reserved).length;*/
+  int get totalReserved => _calendarReservations
+      .where((r) => r.status == 'active' || r.status == 'seated')
+      .length;
   int get totalTables => _tables.length;
 
   List<ReservationHistoryItem> reservationsForDate(DateTime date) {
@@ -108,8 +116,7 @@ class TablesProvider extends ChangeNotifier {
         r.reservedFor.day,
       );
       return rd == d;
-    }).toList()
-      ..sort((a, b) => a.reservedFor.compareTo(b.reservedFor));
+    }).toList()..sort((a, b) => a.reservedFor.compareTo(b.reservedFor));
   }
 
   int get todayReservationCount => reservationsForDate(DateTime.now()).length;
@@ -281,7 +288,9 @@ class TablesProvider extends ChangeNotifier {
 
       final expiredCount = result?['expired_count'] as int? ?? 0;
       if (expiredCount > 0) {
-        debugPrint('[Expiry] ✅ Auto-expired $expiredCount stale reservation(s)');
+        debugPrint(
+          '[Expiry] ✅ Auto-expired $expiredCount stale reservation(s)',
+        );
 
         // Send a notification for each expired reservation
         final expiredIds = (result?['expired_ids'] as List?) ?? [];
@@ -315,7 +324,8 @@ class TablesProvider extends ChangeNotifier {
       if (res.checkIn != null) continue;
 
       // Calculate slot end time
-      final slotEnd = res.checkOut ?? res.reservedFor.add(const Duration(hours: 2));
+      final slotEnd =
+          res.checkOut ?? res.reservedFor.add(const Duration(hours: 2));
 
       // Expire if the entire slot has passed
       if (slotEnd.isBefore(now)) {
@@ -336,10 +346,15 @@ class TablesProvider extends ChangeNotifier {
                 'status': 'available',
                 'updated_by_name': 'System (Auto-Expired)',
               })
-              .eq('id', res.tableId)  // NOTE: tableId is on ReservationHistoryItem
+              .eq(
+                'id',
+                res.tableId,
+              ) // NOTE: tableId is on ReservationHistoryItem
               .eq('status', 'reserved');
 
-          debugPrint('[Expiry] ✅ Local-expired reservation ${res.id} for ${res.customerName}');
+          debugPrint(
+            '[Expiry] ✅ Local-expired reservation ${res.id} for ${res.customerName}',
+          );
           anyExpired = true;
 
           // Send expiry notification
@@ -379,7 +394,9 @@ class TablesProvider extends ChangeNotifier {
       // Fallback: query DB for details
       final rows = await _sb
           .from(_kReservations)
-          .select('customer_name, reserved_for, restaurant_tables(table_number)')
+          .select(
+            'customer_name, reserved_for, restaurant_tables(table_number)',
+          )
           .eq('id', reservationId)
           .limit(1);
 
@@ -534,8 +551,9 @@ class TablesProvider extends ChangeNotifier {
 
     if (effectiveStatus == TableStatus.reserved && reservation != null) {
       final now = nowIST();
-      final minsUntilReservation =
-          reservation.reservedFor.difference(now).inMinutes;
+      final minsUntilReservation = reservation.reservedFor
+          .difference(now)
+          .inMinutes;
 
       // Table only shows as RESERVED when within 15 min of reservation start
       // or if the guest has already been seated (resStatus == 'seated')
@@ -699,12 +717,15 @@ class TablesProvider extends ChangeNotifier {
       }
 
       // Use fn_seat_guest RPC — slot-aware, generates session_id
-      final result = await _sb.rpc('fn_seat_guest', params: {
-        'p_table_id': tableId,
-        'p_customer_name': customerName,
-        'p_staff_uid': _userCtx?.uid,
-        'p_staff_name': _userCtx?.name,
-      });
+      final result = await _sb.rpc(
+        'fn_seat_guest',
+        params: {
+          'p_table_id': tableId,
+          'p_customer_name': customerName,
+          'p_staff_uid': _userCtx?.uid,
+          'p_staff_name': _userCtx?.name,
+        },
+      );
 
       await _refreshAll();
 
@@ -784,8 +805,7 @@ class TablesProvider extends ChangeNotifier {
   Future<void> _restoreReservedIfNeeded(String tableId) async {
     try {
       final now = DateTime.now().toUtc();
-      final in15 =
-          now.add(const Duration(minutes: 15)).toIso8601String();
+      final in15 = now.add(const Duration(minutes: 15)).toIso8601String();
       final nowStr = now.toIso8601String();
 
       final rows = await _sb
@@ -1015,10 +1035,7 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _cancelAsync(
-    String tableId, {
-    RestaurantTable? table,
-  }) async {
+  Future<void> _cancelAsync(String tableId, {RestaurantTable? table}) async {
     try {
       await _sb
           .from(_kReservations)
@@ -1140,9 +1157,7 @@ class TablesProvider extends ChangeNotifier {
           .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
 
       final items = (rows as List)
-          .map(
-            (r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>),
-          )
+          .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
           .toList();
       _history.addAll(items);
       _historyPage++;
@@ -1193,11 +1208,10 @@ class TablesProvider extends ChangeNotifier {
       final r = t.reservation;
       if (r == null) return false;
       return r.reservedFor.isAfter(now) && r.reservedFor.isBefore(cutoff);
-    }).toList()
-      ..sort(
-        (a, b) =>
-            a.reservation!.reservedFor.compareTo(b.reservation!.reservedFor),
-      );
+    }).toList()..sort(
+      (a, b) =>
+          a.reservation!.reservedFor.compareTo(b.reservation!.reservedFor),
+    );
   }
 
   List<RestaurantTable> get endingSoonTables =>
@@ -1241,6 +1255,7 @@ class SeatResult {
   final bool success;
   final String? sessionId;
   final String? reservationId;
+
   /// If not null, a reservation starts around this time today.
   /// Staff should ensure the walk-in finishes before this time.
   final DateTime? nextReservationTime;

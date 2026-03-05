@@ -197,7 +197,8 @@ class Reservation {
   }
 
   String get countdownLabel {
-    final diff = reservedFor.difference(DateTime.now());
+    // final diff = reservedFor.difference(DateTime.now());
+    final diff = reservedFor.difference(nowIST());
     if (diff.isNegative) return 'Overdue';
     if (diff.inMinutes < 60) return 'in ${diff.inMinutes}m';
     if (diff.inHours < 24) return 'in ${diff.inHours}h';

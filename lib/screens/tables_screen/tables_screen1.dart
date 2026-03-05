@@ -307,7 +307,8 @@ class _FloorViewState extends State<_FloorView> {
               crossAxisCount: 2,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
-              childAspectRatio: 0.72,
+              childAspectRatio: 1.02,
+              // childAspectRatio: 0.72,
             ),
             delegate: SliverChildBuilderDelegate(
               (ctx, i) => TableCard(
@@ -387,7 +388,6 @@ class _StickyTabsDelegate extends SliverPersistentHeaderDelegate {
     );
   }
 
- 
   @override
   bool shouldRebuild(_StickyTabsDelegate old) => true;
 }

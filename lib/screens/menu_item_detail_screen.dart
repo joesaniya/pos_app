@@ -86,7 +86,7 @@ class MenuItemDetailScreen extends StatelessWidget {
           ),
         ),
       ),
-      actions: [
+      /*actions: [
         Padding(
           padding: const EdgeInsets.all(8),
           child: CircleAvatar(
@@ -101,7 +101,7 @@ class MenuItemDetailScreen extends StatelessWidget {
             ),
           ),
         ),
-      ],
+      ],*/
       flexibleSpace: FlexibleSpaceBar(
         background: Stack(
           fit: StackFit.expand,

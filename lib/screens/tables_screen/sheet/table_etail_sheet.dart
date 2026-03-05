@@ -13,10 +13,6 @@ import '../widgets/seated_duration_timer.dart';
 import 'reservation_sheet.dart';
 import 'add_edit_table_sheet.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  INTERNAL DATA MODELS
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _OrderItem {
   final String id;
   final String name;
@@ -64,10 +60,6 @@ class _OrderSummary {
     required this.items,
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  ROOT SHEET
-// ─────────────────────────────────────────────────────────────────────────────
 
 class TableDetailSheet extends StatelessWidget {
   final RestaurantTable table;
@@ -230,10 +222,6 @@ class TableDetailSheet extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  BADGE
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _Badge extends StatelessWidget {
   final String text;
@@ -445,6 +433,46 @@ class _OccupiedSectionState extends State<OccupiedSection> {
     _ => '🕐',
   };
 
+  /// Shows time only if seated today, adds date if seated on a previous day.
+  String _fmtSeatedSince(DateTime since) {
+    final now = nowIST();
+    final todayDate = DateTime(now.year, now.month, now.day);
+    final sinceDate = DateTime(since.year, since.month, since.day);
+
+    final timeStr = fmtTimeIST(since);
+
+    if (sinceDate == todayDate) {
+      return timeStr; // same day → "3:52 PM"
+    }
+
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[since.month - 1]} ${since.day}, $timeStr';
+  }
+
+  String get _liveDuration {
+    final since = widget.table.occupiedSince;
+    if (since == null) return '—';
+    final diff = elapsedIST(since);
+    final h = diff.inHours;
+    final m = diff.inMinutes.remainder(60);
+    final base = h > 0 ? '${h}h ${m.toString().padLeft(2, '0')}m' : '${m}m';
+    if (h >= 4) return '$base ⚠️';
+    return base;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -478,18 +506,24 @@ class _OccupiedSectionState extends State<OccupiedSection> {
               ),
               const Divider(height: 20, color: TC.divider),
               if (widget.table.occupiedSince != null) ...[
-                DetailRow(
+                /*DetailRow(
                   icon: '🕐',
                   label: 'Seated since',
                   value: fmtTimeIST(widget.table.occupiedSince!),
+                ),*/
+                DetailRow(
+                  icon: '🕐',
+                  label: 'Seated since',
+                  value: _fmtSeatedSince(widget.table.occupiedSince!),
                 ),
                 const Divider(height: 20, color: TC.divider),
               ],
-              DetailRow(
+              /*  DetailRow(
                 icon: '⏱️',
                 label: 'Duration',
                 value: widget.table.occupiedDuration,
-              ),
+              ),*/
+              DetailRow(icon: '⏱️', label: 'Duration', value: _liveDuration),
               const Divider(height: 20, color: TC.divider),
               DetailRow(
                 icon: '💰',

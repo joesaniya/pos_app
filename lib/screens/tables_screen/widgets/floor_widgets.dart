@@ -1,9 +1,10 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 import 'package:pos_app/screens/tables_screen/widgets/seated_duration_timer.dart'; // ← NEW
-
 
 // ═════════════════════════════════════════════════════════════
 //  HEADER
@@ -81,6 +82,7 @@ class TableHeader extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         '${prov.totalReserved} reserved',
+
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -276,15 +278,13 @@ class LongSeatedBanner extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════
-//  SUMMARY BAR
-// ═════════════════════════════════════════════════════════════
 class SummaryBar extends StatelessWidget {
   final TablesProvider prov;
   const SummaryBar({super.key, required this.prov});
 
   @override
   Widget build(BuildContext context) {
+    log('Rebuilding SummaryBar:${prov.totalUpcomingReservations}');
     return SizedBox(
       height: 82,
       child: ListView(
@@ -307,19 +307,20 @@ class SummaryBar extends StatelessWidget {
             emoji: '📅',
             label: 'Reserved',
             value: '${prov.totalReserved}',
+            // value: '${prov.totalUpcomingReservations}',
             color: TC.reserved,
           ),
           MetricPill(
             emoji: '🧹',
             label: 'Cleaning',
-            value: '${prov.allTables.where((t) => t.status == TableStatus.cleaning).length}',
+            value:
+                '${prov.allTables.where((t) => t.status == TableStatus.cleaning).length}',
             color: TC.cleaning,
           ),
           MetricPill(
             emoji: '📊',
             label: 'Occupancy',
-            value:
-                '${(prov.occupancyRate * 100).toStringAsFixed(0)}%',
+            value: '${(prov.occupancyRate * 100).toStringAsFixed(0)}%',
             color: TC.accent,
           ),
           // ── NEW: Today's bookings metric ──────────────
@@ -531,8 +532,7 @@ class StatusFilterRow extends StatelessWidget {
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color:
-                        isSel ? (s == null ? TC.textPri : color) : TC.border,
+                    color: isSel ? (s == null ? TC.textPri : color) : TC.border,
                   ),
                 ),
                 child: Text(

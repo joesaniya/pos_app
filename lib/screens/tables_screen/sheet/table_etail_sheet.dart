@@ -1331,7 +1331,8 @@ class ReservationSection extends StatelessWidget {
                 onTap: () => _confirmCancel(context),
               ),
             ),
-            const SizedBox(width: 10),
+            //edit issue
+            /*      const SizedBox(width: 10),
             Expanded(
               child: ActionBtn(
                 label: 'Edit',
@@ -1356,6 +1357,7 @@ class ReservationSection extends StatelessWidget {
                 },
               ),
             ),
+        */
           ],
         ),
         const SizedBox(height: 12),
@@ -1846,7 +1848,7 @@ class AvailableSection extends StatelessWidget {
                   onTap: () => _confirmCancel(context),
                 ),
               ),
-              const SizedBox(width: 10),
+              /*   const SizedBox(width: 10),
               Expanded(
                 child: ActionBtn(
                   label: 'Edit',
@@ -1871,6 +1873,7 @@ class AvailableSection extends StatelessWidget {
                   },
                 ),
               ),
+           */
             ],
           ),
         ],

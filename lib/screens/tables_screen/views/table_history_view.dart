@@ -4,11 +4,7 @@ import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 
-// ═════════════════════════════════════════════════════════════
-//  HISTORY VIEW
-//  FIX 1: Only upcoming reservations shown by default
-//  FIX 2: Custom premium date range picker (no showDateRangePicker)
-// ═════════════════════════════════════════════════════════════
+
 class HistoryView extends StatefulWidget {
   final TablesProvider prov;
   const HistoryView({super.key, required this.prov});

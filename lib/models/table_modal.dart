@@ -221,12 +221,10 @@ class Reservation {
   String get createdByLabel => createdByName ?? createdByRole ?? 'Staff';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  RESERVATION HISTORY ITEM  (used in the History screen)
-// ─────────────────────────────────────────────────────────────────────────────
-/*
+
 class ReservationHistoryItem {
   final String id;
+  final String tableId; 
   final int tableNumber;
   final String section;
   final String customerName;
@@ -242,89 +240,7 @@ class ReservationHistoryItem {
 
   const ReservationHistoryItem({
     required this.id,
-    required this.tableNumber,
-    required this.section,
-    required this.customerName,
-    this.phone,
-    required this.guestCount,
-    required this.reservedFor,
-    this.checkIn,
-    this.checkOut,
-    this.notes,
-    required this.status,
-    required this.createdByName,
-    required this.createdAt,
-  });
-
-  factory ReservationHistoryItem.fromMap(Map<String, dynamic> row) {
-    final tableData = row['restaurant_tables'];
-    return ReservationHistoryItem(
-      id: row['id'] ?? '',
-      tableNumber: tableData?['table_number'] ?? 0,
-      section: tableData?['section'] ?? '',
-      customerName: row['customer_name'] ?? '',
-      phone: row['phone'],
-      guestCount: row['guest_count'] ?? 0,
-      reservedFor: DateTime.parse(row['reserved_for']).toLocal(),
-      checkIn: row['check_in'] != null
-          ? DateTime.parse(row['check_in']).toLocal()
-          : null,
-      checkOut: row['check_out'] != null
-          ? DateTime.parse(row['check_out']).toLocal()
-          : null,
-      notes: row['notes'],
-      status: row['status'] ?? 'active',
-      createdByName: row['created_by_name'] ?? 'Staff',
-      createdAt: DateTime.parse(row['created_at']).toLocal(),
-    );
-  }
-
-  /// Human-readable status label with emoji
-  String get statusLabel {
-    switch (status) {
-      case 'active':
-        return '📅 Active';
-      case 'seated':
-        return '🍽️ Seated';
-      case 'completed':
-        return '✅ Completed';
-      case 'cancelled':
-        return '✖️ Cancelled';
-      case 'no_show':
-        return '👻 No Show';
-      default:
-        return status;
-    }
-  }
-}
-*/
-// ─────────────────────────────────────────────────────────────────────────────
-//  RESERVATION HISTORY ITEM  (used in the History screen + auto-expiry)
-//
-//  CHANGE vs original: added `tableId` field so the local expiry fallback
-//  in TablesProvider._localExpireStaleReservations() can update the correct
-//  table row without an extra DB query.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class ReservationHistoryItem {
-  final String id;
-  final String tableId; // ← NEW: UUID of the parent restaurant_tables row
-  final int tableNumber;
-  final String section;
-  final String customerName;
-  final String? phone;
-  final int guestCount;
-  final DateTime reservedFor;
-  final DateTime? checkIn;
-  final DateTime? checkOut;
-  final String? notes;
-  final String status;
-  final String createdByName;
-  final DateTime createdAt;
-
-  const ReservationHistoryItem({
-    required this.id,
-    required this.tableId, // ← NEW
+    required this.tableId, 
     required this.tableNumber,
     required this.section,
     required this.customerName,

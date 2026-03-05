@@ -392,7 +392,7 @@ class _StickyTabsDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(_StickyTabsDelegate old) => true;
 }
 
-/*//nt scroll
+/*1//nt scroll
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/providers/tables_provider.dart';

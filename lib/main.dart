@@ -24,9 +24,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 🔥 Firebase Init
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // ⚠️ Testing only — remove in production
   await FirebaseAuth.instance.setSettings(
@@ -42,8 +40,9 @@ Future<void> main() async {
   // ✅ Initialize Local Notifications
   await ReservationNotificationService().initialize();
 
-
   await BackgroundTaskService.initialize();
+
+  // await FcmService.initialize();
 
   // 📱 System UI Styling
   SystemChrome.setSystemUIOverlayStyle(
@@ -65,9 +64,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     return MultiProvider(
@@ -86,9 +83,9 @@ class MyApp extends StatelessWidget {
                 themeMode: themeProvider.themeMode,
                 builder: (context, child) {
                   return MediaQuery(
-                    data: MediaQuery.of(context).copyWith(
-                      padding: MediaQuery.of(context).padding,
-                    ),
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(padding: MediaQuery.of(context).padding),
                     child: child!,
                   );
                 },

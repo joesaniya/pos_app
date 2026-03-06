@@ -27,26 +27,26 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
-  // ── Controllers ───────────────────────────────────────────────
+ 
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
 
-  // ── Animation ─────────────────────────────────────────────────
+
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  // ── Track if auto-fill banner was dismissed ───────────────────
+
   bool _autoFillBannerDismissed = false;
 
   @override
   void initState() {
     super.initState();
     _setupAnimations();
-    // Load remembered credentials after first frame so provider is ready
+  
     WidgetsBinding.instance.addPostFrameCallback((_) => _initRememberMe());
   }
 
@@ -71,7 +71,7 @@ class _LoginScreenState extends State<LoginScreen>
     _animController.forward();
   }
 
-  /// Loads remembered credentials and auto-fills fields.
+
   Future<void> _initRememberMe() async {
     final provider = Provider.of<AppAuthenticationProvider>(
       context,
@@ -91,7 +91,7 @@ class _LoginScreenState extends State<LoginScreen>
       _phoneController.text = creds.phone;
     }
 
-    // Show the auto-fill banner
+   
     setState(() => _autoFillBannerDismissed = false);
   }
 
@@ -105,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  // ── Snackbar Helper ───────────────────────────────────────────
+
   void _showSnackBar(String message, {bool isSuccess = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -118,11 +118,10 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ── Navigate to Home ──────────────────────────────────────────
+
   void _navigateToHome() {
     if (!mounted) return;
-    // Clear the navigation guard in the provider so the session
-    // watcher resumes normally once we're on the home screen.
+
     Provider.of<AppAuthenticationProvider>(
       context,
       listen: false,
@@ -138,7 +137,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ── Handle Login (Email/Password) ─────────────────────────────
+
   Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -157,7 +156,7 @@ class _LoginScreenState extends State<LoginScreen>
         _showSnackBar('Username not found.');
         break;
       case LoginResult.wrongPassword:
-        // If remembered password is wrong, clear it so user isn't stuck
+       
         _handleWrongPassword(provider);
         _showSnackBar('Invalid password.');
         break;
@@ -173,9 +172,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  /// Called on wrong password — clears saved password so the user
-  /// must re-enter it; prevents them being permanently locked out
-  /// of the auto-fill loop.
+
   void _handleWrongPassword(AppAuthenticationProvider provider) {
     _passwordController.clear();
     if (provider.hasRememberedCredentials) {
@@ -184,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ── Social Login ──────────────────────────────────────────────
+
   Future<void> _handleSocialLogin(
     AppAuthenticationProvider provider,
     String type,
@@ -216,7 +213,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ── Handle Send OTP ───────────────────────────────────────────
+
   Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -241,7 +238,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ── Handle Verify OTP ─────────────────────────────────────────
+
   Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -250,11 +247,11 @@ class _LoginScreenState extends State<LoginScreen>
       otp: _otpController.text.trim(),
     );
 
-    // Check mounted IMMEDIATELY after await — before any other work
+
     if (!mounted) return;
 
     if (success) {
-      // Navigate straight away; don't let any setState / rebuild run first
+     
       _navigateToHome();
       return;
     }
@@ -262,7 +259,7 @@ class _LoginScreenState extends State<LoginScreen>
     _showSnackBar('Invalid OTP. Please check and try again.');
   }
 
-  // ── Unified action button handler ─────────────────────────────
+
   Future<void> _handleAction(AppAuthenticationProvider provider) async {
     if (provider.isEmailPasswordMethod) {
       await _handleEmailLogin(provider);
@@ -275,7 +272,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ── Handle Resend OTP ─────────────────────────────────────────
+
   Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final result = await provider.resendOTP(
       phone: _phoneController.text.trim(),
@@ -290,9 +287,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // BUILD
-  // ═══════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -320,7 +315,7 @@ class _LoginScreenState extends State<LoginScreen>
                           _buildHeader(),
                           SizedBox(height: 32.h),
 
-                          // ── Auto-fill banner ──────────────────
+                        
                           if (provider.hasRememberedCredentials &&
                               !_autoFillBannerDismissed)
                             _buildAutoFillBanner(provider),
@@ -352,9 +347,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // WIDGETS
-  // ═══════════════════════════════════════════════════════════
+
 
   Widget _buildHeader() {
     return const AuthHeader(
@@ -364,8 +357,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  /// Small banner that tells the user their credentials were auto-filled,
-  /// with a "Not you?" button to clear and start fresh.
+
   Widget _buildAutoFillBanner(AppAuthenticationProvider provider) {
     final creds = provider.rememberedCredentials!;
     final label = creds.isEmailMethod ? creds.email : creds.phone;

@@ -77,10 +77,7 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool _wasDeactivated = false;
   bool get wasDeactivated => _wasDeactivated;
 
-  // ── Guard: prevents session watcher / resetAll from firing
-  // notifyListeners while navigation is in progress after a
-  // successful login. Set true just before returning success,
-  // cleared by the UI once it has navigated away.
+
   bool _isNavigatingAway = false;
   void clearNavigatingFlag() {
     _isNavigatingAway = false;
@@ -111,11 +108,7 @@ class AppAuthenticationProvider with ChangeNotifier {
   RememberedCredentials? get rememberedCredentials => _rememberedCredentials;
   bool get hasRememberedCredentials => _rememberedCredentials != null;
 
-  // ═══════════════════════════════════════════════════════════
-  // PHONE HELPER
-  // Queries both raw and +91-prefixed variants in parallel so
-  // the lookup succeeds regardless of how the number is stored.
-  // ═══════════════════════════════════════════════════════════
+
   Future<QueryDocumentSnapshot?> _findUserByPhone(String phone) async {
     final normalised = phone.startsWith('+') ? phone : '+91$phone';
     final raw = phone.startsWith('+') ? phone.replaceFirst('+91', '') : phone;
@@ -139,9 +132,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     return null;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // REMEMBER ME
-  // ═══════════════════════════════════════════════════════════
   Future<void> loadRememberedCredentials() async {
     if (_rememberedCredentialsLoaded) return;
     _rememberedCredentialsLoaded = true;
@@ -170,9 +160,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // SESSION VALIDATION
-  // ═══════════════════════════════════════════════════════════
+
   Future<bool> validateSession() async {
     final firebaseUser = _auth.currentUser;
     if (firebaseUser == null) {
@@ -181,7 +169,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
 
     try {
-      // ── Try UID lookup first ───────────────────────────────
+  
       final uidDoc = await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
@@ -193,8 +181,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         data = uidDoc.data()!;
         log('validateSession: found user by UID');
       } else {
-        // ── Phone-auth users: doc is stored under original UID,
-        // not the Firebase phone-auth UID. Fall back to phone lookup.
+       
         log('validateSession: UID doc not found — trying phone/email fallback');
 
         if (firebaseUser.phoneNumber != null &&
@@ -208,7 +195,6 @@ class AppAuthenticationProvider with ChangeNotifier {
           }
         }
 
-        // Also try email fallback (Google / email-auth edge cases)
         if (data == null &&
             firebaseUser.email != null &&
             firebaseUser.email!.isNotEmpty) {
@@ -224,7 +210,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         }
       }
 
-      // Still not found → genuine orphan session, force logout
       if (data == null) {
         log('validateSession: user doc not found anywhere — forcing logout');
         await _forceLogout();
@@ -241,9 +226,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
-      // Always use the canonical uid from the Firestore doc —
-      // the firebaseUser.uid may be a phone-auth uid that differs
-      // from the account uid all data (revenue, tables) is linked to.
+
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
           ? data['uid'] as String
           : firebaseUser.uid;
@@ -277,12 +260,9 @@ class AppAuthenticationProvider with ChangeNotifier {
         .listen((snap) async {
           if (_isNavigatingAway) return;
 
-          // For phone-auth users the Firestore doc may be under a
-          // different UID — a missing snap here is not necessarily
-          // a deleted account, so only act on explicit flags.
+       
           if (!snap.exists) {
-            // Don't force logout — the doc is simply stored elsewhere.
-            // validateSession already verified the account is valid.
+        
             log(
               'Session watcher: UID doc not found (phone-auth user — ignoring)',
             );
@@ -317,7 +297,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     resetAll();
   }
 
-  // ─── Auth Mode / Method Control ───────────────────────────────
   void switchToLogin() {
     if (_authMode == AuthMode.login) return;
     _authMode = AuthMode.login;
@@ -461,9 +440,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     };
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // EMAIL / PASSWORD LOGIN
-  // ═══════════════════════════════════════════════════════════
   Future<LoginResult> loginWithEmail({
     required String email,
     required String password,
@@ -544,7 +520,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         _startSessionWatcher(firebaseUser.uid);
         log('Email login success: ${email.trim()} (${firebaseUser.uid})');
         _isNavigatingAway =
-            true; // block watcher from resetting state during nav
+            true; 
         setLoading(false);
         return LoginResult.success;
       } on FirebaseAuthException catch (e) {
@@ -560,9 +536,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // GOOGLE SIGN-IN
-  // ═══════════════════════════════════════════════════════════
+ 
   Future<String> signInWithGoogle() async {
     setLoading(true);
     HapticFeedback.mediumImpact();
@@ -636,7 +610,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       _startSessionWatcher(firebaseUser.uid);
 
       log('Google login success: ${firebaseUser.email} (${firebaseUser.uid})');
-      _isNavigatingAway = true; // block watcher from resetting state during nav
+      _isNavigatingAway = true;
       setLoading(false);
       return 'success';
     } on FirebaseAuthException catch (e) {
@@ -658,14 +632,12 @@ class AppAuthenticationProvider with ChangeNotifier {
     return false;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // PHONE / OTP  — FIXED
-  // ═══════════════════════════════════════════════════════════
+
   Future<String> sendOTP({required String phone}) async {
     setLoading(true);
     HapticFeedback.mediumImpact();
     try {
-      // Parallel lookup: raw + normalised
+      
       final doc = await _findUserByPhone(phone);
       if (doc == null) {
         setLoading(false);
@@ -727,7 +699,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      // ── Step 1: Verify with Firebase Auth ─────────────────
+      
       final PhoneAuthCredential credential = PhoneAuthProvider.credential(
         verificationId: _verificationId!,
         smsCode: otp,
@@ -743,8 +715,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       }
       log('verifyOTP: Firebase auth OK — uid=${firebaseUser.uid}');
 
-      // ── Step 2: Find Firestore doc ────────────────────────
-      // Try UID first (most reliable post-auth), then phone fallback.
+
       Map<String, dynamic>? data;
 
       final uidDoc = await _firestore
@@ -770,7 +741,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
-      // ── Step 3: Active / deleted check ────────────────────
+
       if (data['isActive'] != true || data['isDeleted'] == true) {
         log('verifyOTP: account inactive or deleted — signing out');
         await _auth.signOut();
@@ -778,12 +749,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
-      // ── Step 4: Resolve canonical UID ─────────────────────
-      // The Firestore doc's uid field is the canonical account uid
-      // (set when the account was created via email). ALL revenue,
-      // table, and campaign data is linked to this uid / businessId.
-      // The phone-auth Firebase uid (firebaseUser.uid) may differ —
-      // we must NEVER use it as the session uid or overwrite the doc.
+
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
           ? data['uid'] as String
           : firebaseUser.uid;
@@ -792,23 +758,15 @@ class AppAuthenticationProvider with ChangeNotifier {
         'verifyOTP: canonicalUid=$canonicalUid  firebaseUid=${firebaseUser.uid}',
       );
 
-      // ── Step 4b: Link phone credential to canonical account ──
-      // If the phone-auth UID differs from the canonical UID, the
-      // accounts are not yet linked in Firebase Auth. Link them now
-      // so future sessions always resolve to one unified UID.
       if (canonicalUid != firebaseUser.uid) {
         try {
-          // Sign in as the canonical account is not possible without
-          // the password, so instead we store the phone number on the
-          // Firestore doc and update phoneNumber field so lookups work.
-          // The phone-auth session itself is valid for this request.
-          // On next email login, Firebase will see both providers.
+
           log(
             'verifyOTP: phone UID differs from canonical UID — '
             'using canonical UID for session, leaving Firestore doc intact',
           );
 
-          // Update only the phone field if not already set correctly
+  
           final storedPhone = data['phone'] as String? ?? '';
           final normalised = phone.startsWith('+') ? phone : '+91$phone';
           if (storedPhone != phone && storedPhone != normalised) {
@@ -830,13 +788,11 @@ class AppAuthenticationProvider with ChangeNotifier {
         }
       }
 
-      // ── Step 4c: Persist session using CANONICAL uid ─────
-      // This ensures _userData['uid'] and _userData['businessId']
-      // match what all revenue/table/campaign queries expect.
+
       final String token = await firebaseUser.getIdToken() ?? '';
       await _persistUser(
         data: data,
-        uid: canonicalUid, // ← always the Firestore doc uid
+        uid: canonicalUid, 
         token: token,
         fallbackPhone: phone,
       );
@@ -846,7 +802,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         'businessId=${data['businessId']}',
       );
 
-      // ── Step 5: Remember Me ───────────────────────────────
       if (_rememberMe) {
         await _storage.saveRememberedPhone(phone: phone);
         _rememberedCredentials = RememberedCredentials.phone(phone);
@@ -856,7 +811,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         _rememberedCredentials = null;
       }
 
-      // ── Step 6: Start session watcher on CANONICAL doc ───
+
       _startSessionWatcher(canonicalUid);
 
       log(
@@ -902,9 +857,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // FORGOT PASSWORD
-  // ═══════════════════════════════════════════════════════════
   Future<bool> sendPasswordResetOTP({required String email}) async {
     setLoading(true);
     setResetEmail(email);
@@ -969,9 +921,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     required String newPassword,
   }) async => true;
 
-  // ═══════════════════════════════════════════════════════════
-  // LOGOUT / RESET
-  // ═══════════════════════════════════════════════════════════
+
   Future<void> logout() async {
     stopSessionWatcher();
     await _auth.signOut();

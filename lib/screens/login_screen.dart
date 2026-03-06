@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/app_auth_provider.dart';
@@ -609,8 +609,8 @@ class _LoginScreenState extends State<LoginScreen>
       ],
     );
   }
-}
-/*phoneotp login issue
+}*/
+//phoneotp login issue
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1234,4 +1234,3 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 }
- */

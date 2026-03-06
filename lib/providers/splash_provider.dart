@@ -57,6 +57,8 @@ class SplashProvider with ChangeNotifier {
       // In release builds this causes false "logged in" state on fresh install
       try {
         final firebaseUser = FirebaseAuth.instance.currentUser;
+        final storedData = await StorageService.instance.getUserData();
+        final String canonicalUid = storedData['uid'] as String? ?? firebaseUser?.uid ?? '';
         if (firebaseUser == null) {
           // No Firebase session — force clear everything
           await _storage.clearUserData();

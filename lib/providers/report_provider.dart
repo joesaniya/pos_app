@@ -10,6 +10,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,7 +175,10 @@ class ReportProvider extends ChangeNotifier {
     try {
       final fbUser = FirebaseAuth.instance.currentUser;
       if (fbUser == null) return;
-      _uid = fbUser.uid;
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? fbUser.uid;
+      _uid = canonicalUid;
+
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(_uid)

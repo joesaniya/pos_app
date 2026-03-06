@@ -265,9 +265,12 @@ class EmployeeManagementProvider extends ChangeNotifier {
     if (_businessId.isEmpty || _currentUid.isEmpty) {
       final fbUser = _auth.currentUser;
       if (fbUser != null) {
-        final doc = await _db.collection('users').doc(fbUser.uid).get();
+        final storedData = await StorageService.instance.getUserData();
+        final String canonicalUid = storedData['uid'] as String? ?? fbUser.uid;
+
+        final doc = await _db.collection('users').doc(canonicalUid).get();
         if (doc.exists) {
-          _currentUid = fbUser.uid;
+          _currentUid = canonicalUid;
           _currentRole = doc.data()?['role'] ?? '';
           _businessId = doc.data()?['businessId'] ?? '';
         }

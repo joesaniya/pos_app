@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer';
 import 'package:flutter/foundation.dart';
+import 'package:pos_app/services/storage_service.dart';
 import 'package:pos_app/utils/ist_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -187,11 +188,15 @@ class TablesProvider extends ChangeNotifier {
   Future<void> _loadUserCtx() async {
     final user = _auth.currentUser;
     if (user == null) return;
-    final doc = await _fs.collection('users').doc(user.uid).get();
+    
+    final storedData = await StorageService.instance.getUserData();
+    final String canonicalUid = storedData['uid'] as String? ?? user.uid;
+
+    final doc = await _fs.collection('users').doc(canonicalUid).get();
     if (!doc.exists) return;
     final d = doc.data()!;
     _userCtx = _UserCtx(
-      uid: user.uid,
+      uid: canonicalUid,
       name: d['name'] ?? 'Staff',
       email: user.email,
       role: d['role'] ?? 'staff',

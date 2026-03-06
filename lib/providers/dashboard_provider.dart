@@ -28,6 +28,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,7 +164,10 @@ class DashboardProvider extends ChangeNotifier {
         debugPrint('📊 DashboardProvider: No Firebase user');
         return;
       }
-      _uid = firebaseUser.uid;
+      
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? firebaseUser.uid;
+      _uid = canonicalUid;
 
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -772,7 +776,9 @@ class DashboardProvider extends ChangeNotifier {
         return;
       }
 
-      _uid = firebaseUser.uid;
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? firebaseUser.uid;
+      _uid = canonicalUid;
 
       final doc = await FirebaseFirestore.instance
           .collection('users')

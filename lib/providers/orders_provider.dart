@@ -126,7 +126,9 @@ class OrdersProvider extends ChangeNotifier {
         return;
       }
 
-      _uid = firebaseUser.uid;
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? firebaseUser.uid;
+      _uid = canonicalUid;
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(_uid)
@@ -553,7 +555,9 @@ class OrdersProvider extends ChangeNotifier {
         return;
       }
 
-      _uid = firebaseUser.uid;
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? firebaseUser.uid;
+      _uid = canonicalUid;
       debugPrint('📦 _loadUserFromFirestore: uid=$_uid');
 
       final doc = await FirebaseFirestore.instance

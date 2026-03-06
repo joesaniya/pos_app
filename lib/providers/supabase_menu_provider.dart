@@ -8,6 +8,7 @@ import 'package:pos_app/models/menu_category.dart';
 import 'package:pos_app/models/menu_item.dart';
 
 import 'package:pos_app/services/menu_services.dart';
+import 'package:pos_app/services/storage_service.dart';
 
 enum MenuLoadState { idle, loading, loaded, error }
 
@@ -68,12 +69,14 @@ class SupabaseMenuProvider extends ChangeNotifier {
       final fbUser = FirebaseAuth.instance.currentUser;
       if (fbUser == null) return;
 
-      _userUid  = fbUser.uid;
+      final storedData = await StorageService.instance.getUserData();
+      final String canonicalUid = storedData['uid'] as String? ?? fbUser.uid;
+      _userUid = canonicalUid;
       _userEmail = fbUser.email;
 
       final doc = await FirebaseFirestore.instance
           .collection('users')
-          .doc(fbUser.uid)
+          .doc(_userUid)
           .get();
 
       if (doc.exists) {

@@ -19,6 +19,7 @@ import 'theme/app_theme.dart';
 // ✅ ADD THESE IMPORTS
 import 'package:pos_app/services/reservation_notification_service.dart';
 import 'package:pos_app/services/background_task_service.dart';
+import 'package:pos_app/widgets/network_aware_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,7 +87,7 @@ class MyApp extends StatelessWidget {
                     data: MediaQuery.of(
                       context,
                     ).copyWith(padding: MediaQuery.of(context).padding),
-                    child: child!,
+                    child: NetworkAwareWidget(child: child!),
                   );
                 },
                 home: const SplashScreen(),

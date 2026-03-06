@@ -1,19 +1,3 @@
-// lib/screens/reports/report_screen.dart
-//
-// Report Generation Screen
-// Flow: Select Company → Select Period → [Generate] → Preview → [Download PDF]
-//
-// ROLE GATE: Only admin / system / owner / manager.
-// The PDF is generated using the `pdf` + `printing` packages:
-//   pdf: ^3.10.8
-//   printing: ^5.12.0
-//   path_provider: ^2.1.3
-//
-// Add to pubspec.yaml:
-//   pdf: ^3.10.8
-//   printing: ^5.12.0
-//   path_provider: ^2.1.3
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -1040,8 +1024,99 @@ class _ReportScreenState extends State<ReportScreen>
   // ─────────────────────────────────────────────────────────────────────────
   //  PDF GENERATION
   // ─────────────────────────────────────────────────────────────────────────
-
   Future<void> _downloadPdf(ReportData data) async {
+    setState(() => _pdfDownloading = true);
+    try {
+      final pdfBytes = await _buildPdf(data);
+      final fileName =
+          '${data.companyName.replaceAll(' ', '_')}_${data.period}_Report_'
+          '${DateFormat('yyyyMMdd').format(data.generatedAt)}.pdf';
+
+      if (Platform.isAndroid || Platform.isIOS) {
+        await _saveToDevice(pdfBytes, fileName);
+      } else {
+        // Fallback for desktop / web — share sheet
+        await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF error: $e'), backgroundColor: _C.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pdfDownloading = false);
+    }
+  }
+
+  Future<void> _saveToDevice(Uint8List bytes, String fileName) async {
+    late Directory dir;
+
+    if (Platform.isAndroid) {
+      // Saves to Downloads folder — visible in Files app
+      dir = Directory('/storage/emulated/0/Download');
+      if (!await dir.exists()) {
+        // Fallback to app's external storage if Downloads isn't accessible
+        dir =
+            (await getExternalStorageDirectory()) ??
+            await getApplicationDocumentsDirectory();
+      }
+    } else {
+      // iOS: saves to app's Documents folder (accessible via Files app → On My iPhone)
+      dir = await getApplicationDocumentsDirectory();
+    }
+
+    final file = File('${dir.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'PDF saved successfully!',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      file.path,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.white70,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: _C.green,
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadPdf1(ReportData data) async {
     setState(() => _pdfDownloading = true);
     try {
       final pdfBytes = await _buildPdf(data);

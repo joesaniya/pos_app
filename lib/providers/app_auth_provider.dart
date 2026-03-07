@@ -24,6 +24,12 @@ enum LoginResult {
   error,
 }
 
+enum OtpResult {
+  success,
+  subscriptionExpired,
+  error,
+}
+
 // ── Remember Me credentials returned to the UI ───────────────
 class RememberedCredentials {
   final String method;
@@ -82,6 +88,11 @@ class AppAuthenticationProvider with ChangeNotifier {
 
   bool _subscriptionExpired = false;
   bool get subscriptionExpired => _subscriptionExpired;
+
+  /// Set to true by [validateSession] when the app is reopened with an expired
+  /// subscription. The splash screen reads this to route to the expired screen.
+  bool _subscriptionExpiredOnReopen = false;
+  bool get subscriptionExpiredOnReopen => _subscriptionExpiredOnReopen;
 
   bool _isNavigatingAway = false;
   void clearNavigatingFlag() {
@@ -236,6 +247,22 @@ class AppAuthenticationProvider with ChangeNotifier {
       }
 
       if (data['isActive'] == false) {
+        // Check if deactivation is due to subscription expiry
+        final bizId = data['businessId'] as String? ?? '';
+        if (bizId.isNotEmpty) {
+          try {
+            final subDoc = await _firestore
+                .collection('subscriptions')
+                .doc(bizId)
+                .get();
+            if (subDoc.exists && subDoc.data()!['isActive'] == false) {
+              _subscriptionExpiredOnReopen = true;
+              _subscriptionExpired = true;
+              await _forceLogout();
+              return false;
+            }
+          } catch (_) {}
+        }
         _wasDeactivated = true;
         await _forceLogout();
         return false;
@@ -247,6 +274,7 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       final businessId = data['businessId'] as String? ?? '';
       if (await _isSubscriptionExpired(businessId)) {
+        _subscriptionExpiredOnReopen = true;
         _subscriptionExpired = true;
         await _forceLogout();
         return false;
@@ -308,6 +336,22 @@ class AppAuthenticationProvider with ChangeNotifier {
             log(
               'Session watcher: account deactivated/deleted — forcing logout',
             );
+            // Check if the deactivation is due to subscription expiry
+            final bizId = data['businessId'] as String? ?? '';
+            if (bizId.isNotEmpty) {
+              try {
+                final subDoc = await _firestore
+                    .collection('subscriptions')
+                    .doc(bizId)
+                    .get();
+                if (subDoc.exists && subDoc.data()!['isActive'] == false) {
+                  _subscriptionExpired = true;
+                  notifyListeners();
+                  await _forceLogout();
+                  return;
+                }
+              } catch (_) {}
+            }
             _wasDeactivated = true;
             notifyListeners();
             await _forceLogout();
@@ -538,7 +582,10 @@ class AppAuthenticationProvider with ChangeNotifier {
     } catch (_) {}
     await _storage.clearUserData();
     _userData = {};
-    resetAll();
+    // Do NOT call resetAll here — it would clear _subscriptionExpired and
+    // _subscriptionExpiredOnReopen flags that the UI needs to read after logout.
+    _resetFormState();
+    _isNavigatingAway = false;
   }
 
   void switchToLogin() {
@@ -949,10 +996,10 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  Future<bool> verifyOTP({required String phone, required String otp}) async {
+  Future<OtpResult> verifyOTP({required String phone, required String otp}) async {
     if (_verificationId == null) {
       debugPrint('verifyOTP: no verificationId — OTP was never sent');
-      return false;
+      return OtpResult.error;
     }
     setLoading(true);
     HapticFeedback.mediumImpact();
@@ -969,7 +1016,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       if (firebaseUser == null) {
         debugPrint('verifyOTP: Firebase returned null user');
         setLoading(false);
-        return false;
+        return OtpResult.error;
       }
       log('verifyOTP: Firebase auth OK — uid=${firebaseUser.uid}');
 
@@ -995,14 +1042,14 @@ class AppAuthenticationProvider with ChangeNotifier {
         log('verifyOTP: user not found in Firestore — signing out');
         await _auth.signOut();
         setLoading(false);
-        return false;
+        return OtpResult.error;
       }
 
       if (data['isActive'] != true || data['isDeleted'] == true) {
         log('verifyOTP: account inactive or deleted — signing out');
         await _auth.signOut();
         setLoading(false);
-        return false;
+        return OtpResult.error;
       }
 
       final bizId = data['businessId'] as String? ?? '';
@@ -1011,7 +1058,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         log('verifyOTP: subscription expired — signing out');
         await _auth.signOut();
         setLoading(false);
-        return false;
+        return OtpResult.subscriptionExpired;
       }
 
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
@@ -1080,15 +1127,15 @@ class AppAuthenticationProvider with ChangeNotifier {
       );
       _isNavigatingAway = true;
       setLoading(false);
-      return true;
+      return OtpResult.success;
     } on FirebaseAuthException catch (e) {
       debugPrint('verifyOTP FirebaseAuthException: ${e.code} — ${e.message}');
       setLoading(false);
-      return false;
+      return OtpResult.error;
     } catch (e) {
       debugPrint('verifyOTP error: $e');
       setLoading(false);
-      return false;
+      return OtpResult.error;
     }
   }
 

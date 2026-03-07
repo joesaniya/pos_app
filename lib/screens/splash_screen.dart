@@ -4,10 +4,12 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/onboarding_screen.dart';
 import 'package:pos_app/screens/page_switcher.dart';
+import 'package:pos_app/screens/subscription_expired_screen.dart';
 import 'package:provider/provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,7 +238,8 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _initializeApp() async {
     final splashProvider = context.read<SplashProvider>();
-    await splashProvider.initializeApp();
+    final authProvider = context.read<AppAuthenticationProvider>();
+    await splashProvider.initializeApp(authProvider: authProvider);
     if (!mounted) return;
 
     // Ensure entry animation finishes before exit
@@ -251,11 +254,14 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     log(
-      'Splash done. firstLaunch=${splashProvider.isFirstLaunch} loggedIn=${splashProvider.isLoggedIn}',
+      'Splash done. firstLaunch=${splashProvider.isFirstLaunch} loggedIn=${splashProvider.isLoggedIn} subscriptionExpired=${splashProvider.subscriptionExpired}',
     );
 
     if (splashProvider.isFirstLaunch) {
       _navigate(const OnboardingScreen());
+    } else if (splashProvider.subscriptionExpired) {
+      // Subscription expired — show the renewal screen, do NOT go to home.
+      _navigate(const SubscriptionExpiredScreen());
     } else if (splashProvider.isLoggedIn) {
       _navigate(const PageSwitcher());
     } else {

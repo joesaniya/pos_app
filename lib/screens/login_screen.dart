@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/screens/forgot_pwd_screen.dart';
 import 'package:pos_app/screens/page_switcher.dart';
+import 'package:pos_app/screens/subscription_expired_screen.dart';
 import 'package:pos_app/screens/widgets/AuthTextField_widgets.dart';
 import 'package:pos_app/screens/widgets/auth_divider_widget.dart';
 import 'package:pos_app/screens/widgets/auth_header_widget.dart';
@@ -130,6 +131,20 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  void _navigateToSubscriptionExpired() {
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, animation, __) => const SubscriptionExpiredScreen(),
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 400),
+      ),
+      (route) => false,
+    );
+  }
+
   Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -162,7 +177,8 @@ class _LoginScreenState extends State<LoginScreen>
         break;
 
       case LoginResult.subscriptionExpired:
-        _showSnackBar('Your subscription has expired. Please renew your plan.');
+        // Redirect to the subscription expired screen — same as phone OTP flow.
+        _navigateToSubscriptionExpired();
         break;
 
       case LoginResult.error:
@@ -259,19 +275,25 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
-    final success = await provider.verifyOTP(
+    final result = await provider.verifyOTP(
       phone: _phoneController.text.trim(),
       otp: _otpController.text.trim(),
     );
 
     if (!mounted) return;
 
-    if (success) {
-      _navigateToHome();
-      return;
+    switch (result) {
+      case OtpResult.success:
+        _navigateToHome();
+        break;
+      case OtpResult.subscriptionExpired:
+        // Redirect to the subscription expired screen — same as email flow.
+        _navigateToSubscriptionExpired();
+        break;
+      case OtpResult.error:
+        _showSnackBar('Invalid OTP. Please check and try again.');
+        break;
     }
-
-    _showSnackBar('Invalid OTP. Please check and try again.');
   }
 
   Future<void> _handleAction(AppAuthenticationProvider provider) async {

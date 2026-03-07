@@ -670,6 +670,9 @@ import 'package:timezone/data/latest_all.dart' as tzData;
 import 'package:workmanager/workmanager.dart';
 import 'package:pos_app/config/app_config.dart';
 import 'package:internet_connection_checker/internet_connection_checker.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pos_app/firebase_options.dart';
 
 
 const kLongSeatedTask = 'long_seated_check';
@@ -723,6 +726,17 @@ const _chExpiry = AndroidNotificationDetails(
   enableVibration: true,
   icon: '@mipmap/ic_launcher',
   channelShowBadge: true,
+);
+
+const _chSubscriptionAlerts = AndroidNotificationDetails(
+  'ch_subscription_alerts',
+  'Subscription Alerts',
+  channelDescription: 'Alerts when your subscription is about to expire',
+  importance: Importance.max,
+  priority: Priority.max,
+  playSound: true,
+  enableVibration: true,
+  icon: '@mipmap/ic_launcher',
 );
 
 const _iosHigh = DarwinNotificationDetails(
@@ -1110,6 +1124,9 @@ Future<void> _runBackgroundChecks() async {
     }
   }
 
+  // ── 9.5. Subscription Expiry Reminders ────────────────────────────────────
+  await _checkSubscriptionExpiryReminders(plugin, businessId, biz, sentKeys, today, now);
+
   // ── 10. Persist sent-keys ─────────────────────────────────────────────────
   final cleaned = sentKeys.where((k) => k.startsWith(today)).toList();
   await prefs.setStringList(_kSentKeys, cleaned);
@@ -1263,6 +1280,102 @@ Future<void> _directExpireStaleReservations(
     }
   } catch (e) {
     log('[BG] ⚠️ Direct expiry error: $e');
+  }
+}
+
+Future<void> _ensureFirebase() async {
+  try {
+    Firebase.app();
+  } catch (_) {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    log('[BG] Firebase initialized');
+  }
+}
+
+Future<void> _checkSubscriptionExpiryReminders(
+  FlutterLocalNotificationsPlugin plugin,
+  String businessId,
+  String biz,
+  Set<String> sentKeys,
+  String today,
+  DateTime now,
+) async {
+  try {
+    await _ensureFirebase();
+    final subDoc = await FirebaseFirestore.instance.collection('subscriptions').doc(businessId).get();
+    if (!subDoc.exists) return;
+    
+    final data = subDoc.data()!;
+    if (data['isActive'] == false) return;
+    
+    final expiryRaw = data['expiryDate'];
+    if (expiryRaw is! Timestamp) return;
+    
+    final expiryDate = expiryRaw.toDate();
+    final planType = (data['planType'] as String?)?.toLowerCase() ?? 'monthly';
+    
+    final diff = expiryDate.difference(now);
+    if (diff.isNegative) return; // Already expired, app will handle lockout
+    
+    final isMonthly = planType == 'monthly';
+    
+    // Determine thresholds based on plan type
+    final thresholds = isMonthly
+        ? [
+            const Duration(days: 7),
+            const Duration(days: 3),
+            const Duration(days: 2),
+            const Duration(days: 1),
+            const Duration(hours: 1),
+          ]
+        : [
+            const Duration(days: 90), // 3 months
+            const Duration(days: 30), // 1 month
+            const Duration(days: 7),  // 1 week
+            const Duration(days: 1),
+            const Duration(hours: 1),
+          ];
+
+    final thresholdLabels = isMonthly
+        ? ['one week', 'three days', 'two days', 'one day', 'one hour']
+        : ['three months', 'one month', 'one week', 'one day', 'one hour'];
+
+    // Find if we are currently inside any of these specific threshold windows
+    for (int i = 0; i < thresholds.length; i++) {
+      final t = thresholds[i];
+      final isHour = t.inHours == 1;
+      
+      bool isMatch = false;
+      if (isHour) {
+        // Trigger if 1 hour or less remains (in case Workmanager delayed the check)
+        isMatch = diff.inHours <= 1;
+      } else {
+        // Trigger if exactly on this day
+        isMatch = diff.inDays == t.inDays;
+      }
+
+      if (isMatch) {
+        final label = thresholdLabels[i];
+        final key = '${today}_subAlert_${businessId}_${t.inHours}h';
+        
+        if (!sentKeys.contains(key)) {
+          sentKeys.add(key);
+          await plugin.show(
+            id: 99999, // Unique ID for subscription alerts
+            title: '⚠️ Subscription Expiring Soon!',
+            body: 'Your $planType subscription will expire in $label. Please renew to avoid interruption.$biz',
+            notificationDetails: const NotificationDetails(
+              android: _chSubscriptionAlerts,
+              iOS: _iosHigh,
+            ),
+          );
+          log('[BG] 🔔 Subscription alert sent ($label remaining)');
+        }
+        break; // We only want to fire the 1 matching alert for the current window
+      }
+    }
+  } catch (e) {
+    log('[BG] ⚠️ Subscription reminder error: $e');
   }
 }
 

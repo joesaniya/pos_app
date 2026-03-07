@@ -27,18 +27,15 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
- 
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
 
-
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-
 
   bool _autoFillBannerDismissed = false;
 
@@ -46,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _setupAnimations();
-  
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _initRememberMe());
   }
 
@@ -71,7 +68,6 @@ class _LoginScreenState extends State<LoginScreen>
     _animController.forward();
   }
 
-
   Future<void> _initRememberMe() async {
     final provider = Provider.of<AppAuthenticationProvider>(
       context,
@@ -91,7 +87,6 @@ class _LoginScreenState extends State<LoginScreen>
       _phoneController.text = creds.phone;
     }
 
-   
     setState(() => _autoFillBannerDismissed = false);
   }
 
@@ -105,7 +100,6 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-
   void _showSnackBar(String message, {bool isSuccess = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -117,7 +111,6 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-
 
   void _navigateToHome() {
     if (!mounted) return;
@@ -137,7 +130,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-
   Future<void> _handleEmailLogin(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -147,8 +139,37 @@ class _LoginScreenState extends State<LoginScreen>
     );
 
     if (!mounted) return;
-
     switch (result) {
+      case LoginResult.success:
+        _navigateToHome();
+        break;
+
+      case LoginResult.emailNotFound:
+        _showSnackBar('Username not found.');
+        break;
+
+      case LoginResult.wrongPassword:
+        _handleWrongPassword(provider);
+        _showSnackBar('Invalid password.');
+        break;
+
+      case LoginResult.invalidCredentials:
+        _showSnackBar('Invalid credentials.');
+        break;
+
+      case LoginResult.inactive:
+        _showSnackBar('Your account is inactive. Please contact your admin.');
+        break;
+
+      case LoginResult.subscriptionExpired:
+        _showSnackBar('Your subscription has expired. Please renew your plan.');
+        break;
+
+      case LoginResult.error:
+        _showSnackBar('Something went wrong. Please try again.');
+        break;
+    }
+    /*switch (result) {
       case LoginResult.success:
         _navigateToHome();
         break;
@@ -169,9 +190,8 @@ class _LoginScreenState extends State<LoginScreen>
       case LoginResult.error:
         _showSnackBar('Something went wrong. Please try again.');
         break;
-    }
+    }*/
   }
-
 
   void _handleWrongPassword(AppAuthenticationProvider provider) {
     _passwordController.clear();
@@ -180,7 +200,6 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _autoFillBannerDismissed = true);
     }
   }
-
 
   Future<void> _handleSocialLogin(
     AppAuthenticationProvider provider,
@@ -213,7 +232,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-
   Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -238,7 +256,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-
   Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -247,18 +264,15 @@ class _LoginScreenState extends State<LoginScreen>
       otp: _otpController.text.trim(),
     );
 
-
     if (!mounted) return;
 
     if (success) {
-     
       _navigateToHome();
       return;
     }
 
     _showSnackBar('Invalid OTP. Please check and try again.');
   }
-
 
   Future<void> _handleAction(AppAuthenticationProvider provider) async {
     if (provider.isEmailPasswordMethod) {
@@ -271,7 +285,6 @@ class _LoginScreenState extends State<LoginScreen>
       }
     }
   }
-
 
   Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
     final result = await provider.resendOTP(
@@ -286,7 +299,6 @@ class _LoginScreenState extends State<LoginScreen>
       _showSnackBar('Failed to resend OTP. Please try again.');
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -315,7 +327,6 @@ class _LoginScreenState extends State<LoginScreen>
                           _buildHeader(),
                           SizedBox(height: 32.h),
 
-                        
                           if (provider.hasRememberedCredentials &&
                               !_autoFillBannerDismissed)
                             _buildAutoFillBanner(provider),
@@ -347,8 +358,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-
-
   Widget _buildHeader() {
     return const AuthHeader(
       title: 'Welcome Back!',
@@ -356,7 +365,6 @@ class _LoginScreenState extends State<LoginScreen>
       showLogo: true,
     );
   }
-
 
   Widget _buildAutoFillBanner(AppAuthenticationProvider provider) {
     final creds = provider.rememberedCredentials!;

@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'dashboard_screen.dart';
 import 'orders_screen.dart';
 import 'tables_screen.dart';
+import 'package:pos_app/screens/subscription_expired_screen.dart';
 import 'menu_screen.dart';
 import 'inventory_screen.dart';
 
@@ -37,6 +38,16 @@ class _PageSwitcherState extends State<PageSwitcher> {
       if (!mounted) return;
 
       if (!valid) {
+        // Check if failed due to subscription expiry
+        if (authProvider.subscriptionExpired) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => const SubscriptionExpiredScreen()),
+            (route) => false,
+          );
+          return;
+        }
+
         // Deactivated or deleted — redirect to login
         final wasDeactivated = authProvider.wasDeactivated;
         Navigator.pushAndRemoveUntil(
@@ -92,24 +103,32 @@ class _PageSwitcherState extends State<PageSwitcher> {
     return Consumer<AppAuthenticationProvider>(
       builder: (context, auth, child) {
         // Real-time deactivation: session watcher fired mid-session
-        if (auth.wasDeactivated) {
+        if (auth.wasDeactivated || auth.subscriptionExpired) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Your account has been deactivated. Please contact your admin.',
+            if (auth.wasDeactivated) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Your account has been deactivated. Please contact your admin.',
+                  ),
+                  backgroundColor: Color(0xFFE11D48),
+                  behavior: SnackBarBehavior.floating,
+                  duration: Duration(seconds: 4),
                 ),
-                backgroundColor: Color(0xFFE11D48),
-                behavior: SnackBarBehavior.floating,
-                duration: Duration(seconds: 4),
-              ),
-            );
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const LoginScreen()),
-              (route) => false,
-            );
+              );
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                (route) => false,
+              );
+            } else if (auth.subscriptionExpired) {
+               Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionExpiredScreen()),
+                (route) => false,
+              );
+            }
           });
           return const Scaffold(
             backgroundColor: Color(0xFFF4F7FF),

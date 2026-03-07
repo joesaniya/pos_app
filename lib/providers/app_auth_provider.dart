@@ -20,6 +20,7 @@ enum LoginResult {
   wrongPassword,
   invalidCredentials,
   inactive,
+  subscriptionExpired,
   error,
 }
 
@@ -77,6 +78,8 @@ class AppAuthenticationProvider with ChangeNotifier {
   bool _wasDeactivated = false;
   bool get wasDeactivated => _wasDeactivated;
 
+  bool _subscriptionExpired = false;
+  bool get subscriptionExpired => _subscriptionExpired;
 
   bool _isNavigatingAway = false;
   void clearNavigatingFlag() {
@@ -107,7 +110,6 @@ class AppAuthenticationProvider with ChangeNotifier {
 
   RememberedCredentials? get rememberedCredentials => _rememberedCredentials;
   bool get hasRememberedCredentials => _rememberedCredentials != null;
-
 
   Future<QueryDocumentSnapshot?> _findUserByPhone(String phone) async {
     final normalised = phone.startsWith('+') ? phone : '+91$phone';
@@ -160,7 +162,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     notifyListeners();
   }
 
-
   Future<bool> validateSession() async {
     final firebaseUser = _auth.currentUser;
     if (firebaseUser == null) {
@@ -171,13 +172,12 @@ class AppAuthenticationProvider with ChangeNotifier {
     try {
       final storedData = await _storage.getUserData();
       final canonicalUidFromStorage = storedData['uid'] as String? ?? '';
-      
-      final docIdToFetch = canonicalUidFromStorage.isNotEmpty ? canonicalUidFromStorage : firebaseUser.uid;
 
-      var uidDoc = await _firestore
-          .collection('users')
-          .doc(docIdToFetch)
-          .get();
+      final docIdToFetch = canonicalUidFromStorage.isNotEmpty
+          ? canonicalUidFromStorage
+          : firebaseUser.uid;
+
+      var uidDoc = await _firestore.collection('users').doc(docIdToFetch).get();
 
       Map<String, dynamic>? data;
 
@@ -185,12 +185,17 @@ class AppAuthenticationProvider with ChangeNotifier {
         data = uidDoc.data()!;
         log('validateSession: found user by canonical UID ($docIdToFetch)');
       } else if (docIdToFetch != firebaseUser.uid) {
-         // Also check the firebase user uid just in case
-         final uidDoc2 = await _firestore.collection('users').doc(firebaseUser.uid).get();
-         if (uidDoc2.exists) {
-           data = uidDoc2.data()!;
-           log('validateSession: found user by Firebase UID (${firebaseUser.uid})');
-         }
+        // Also check the firebase user uid just in case
+        final uidDoc2 = await _firestore
+            .collection('users')
+            .doc(firebaseUser.uid)
+            .get();
+        if (uidDoc2.exists) {
+          data = uidDoc2.data()!;
+          log(
+            'validateSession: found user by Firebase UID (${firebaseUser.uid})',
+          );
+        }
       }
 
       if (data == null) {
@@ -238,6 +243,12 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
+      final businessId = data['businessId'] as String? ?? '';
+      if (await _isSubscriptionExpired(businessId)) {
+        _subscriptionExpired = true;
+        await _forceLogout();
+        return false;
+      }
 
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
           ? data['uid'] as String
@@ -260,7 +271,9 @@ class AppAuthenticationProvider with ChangeNotifier {
     } catch (e) {
       debugPrint('validateSession error: $e');
       if (_auth.currentUser != null) {
-        log('validateSession: Encountered expected/unexpected error — falling back to cached StorageService session.');
+        log(
+          'validateSession: Encountered expected/unexpected error — falling back to cached StorageService session.',
+        );
         final storedCache = await _storage.getUserData();
         if (storedCache.isNotEmpty && storedCache['uid'] != '') {
           _userData = storedCache;
@@ -280,9 +293,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         .listen((snap) async {
           if (_isNavigatingAway) return;
 
-       
           if (!snap.exists) {
-        
             log(
               'Session watcher: UID doc not found (phone-auth user — ignoring)',
             );
@@ -305,6 +316,26 @@ class AppAuthenticationProvider with ChangeNotifier {
     _sessionWatcher?.cancel();
     _sessionWatcher = null;
   }
+
+  Future<bool> _isSubscriptionExpired(String businessId) async {
+    if (businessId.isEmpty) return false;
+    try {
+      final subDoc = await _firestore
+          .collection('subscriptions')
+          .doc(businessId)
+          .get();
+      if (!subDoc.exists) return false;
+      final subData = subDoc.data()!;
+      if (subData['isActive'] == false) return true;
+      final expiry = subData['expiryDate'];
+      if (expiry is Timestamp) {
+        return expiry.toDate().isBefore(DateTime.now());
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  Future<void> logout() async => _forceLogout();
 
   Future<void> _forceLogout() async {
     stopSessionWatcher();
@@ -514,6 +545,14 @@ class AppAuthenticationProvider with ChangeNotifier {
           return LoginResult.inactive;
         }
 
+        final bizId = data['businessId'] as String? ?? '';
+        if (await _isSubscriptionExpired(bizId)) {
+          _subscriptionExpired = true;
+          await _auth.signOut();
+          setLoading(false);
+          return LoginResult.subscriptionExpired;
+        }
+
         final token = await firebaseUser.getIdToken() ?? '';
         await _persistUser(
           data: data,
@@ -539,8 +578,7 @@ class AppAuthenticationProvider with ChangeNotifier {
 
         _startSessionWatcher(firebaseUser.uid);
         log('Email login success: ${email.trim()} (${firebaseUser.uid})');
-        _isNavigatingAway =
-            true; 
+        _isNavigatingAway = true;
         setLoading(false);
         return LoginResult.success;
       } on FirebaseAuthException catch (e) {
@@ -556,7 +594,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
- 
   Future<String> signInWithGoogle() async {
     setLoading(true);
     HapticFeedback.mediumImpact();
@@ -619,6 +656,15 @@ class AppAuthenticationProvider with ChangeNotifier {
         return 'inactive';
       }
 
+      final bizId = data['businessId'] as String? ?? '';
+      if (await _isSubscriptionExpired(bizId)) {
+        _subscriptionExpired = true;
+        await _auth.signOut();
+        await _googleSignIn.signOut();
+        setLoading(false);
+        return 'subscriptionExpired';
+      }
+
       final token = await firebaseUser.getIdToken() ?? '';
       await _persistUser(
         data: data,
@@ -652,12 +698,10 @@ class AppAuthenticationProvider with ChangeNotifier {
     return false;
   }
 
-
   Future<String> sendOTP({required String phone}) async {
     setLoading(true);
     HapticFeedback.mediumImpact();
     try {
-      
       final doc = await _findUserByPhone(phone);
       if (doc == null) {
         setLoading(false);
@@ -719,7 +763,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     HapticFeedback.mediumImpact();
 
     try {
-      
       final PhoneAuthCredential credential = PhoneAuthProvider.credential(
         verificationId: _verificationId!,
         smsCode: otp,
@@ -734,7 +777,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
       log('verifyOTP: Firebase auth OK — uid=${firebaseUser.uid}');
-
 
       Map<String, dynamic>? data;
 
@@ -761,7 +803,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
-
       if (data['isActive'] != true || data['isDeleted'] == true) {
         log('verifyOTP: account inactive or deleted — signing out');
         await _auth.signOut();
@@ -769,6 +810,14 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
+      final bizId = data['businessId'] as String? ?? '';
+      if (await _isSubscriptionExpired(bizId)) {
+        _subscriptionExpired = true;
+        log('verifyOTP: subscription expired — signing out');
+        await _auth.signOut();
+        setLoading(false);
+        return false;
+      }
 
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
           ? data['uid'] as String
@@ -780,13 +829,11 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       if (canonicalUid != firebaseUser.uid) {
         try {
-
           log(
             'verifyOTP: phone UID differs from canonical UID — '
             'using canonical UID for session, leaving Firestore doc intact',
           );
 
-  
           final storedPhone = data['phone'] as String? ?? '';
           final normalised = phone.startsWith('+') ? phone : '+91$phone';
           if (storedPhone != phone && storedPhone != normalised) {
@@ -808,11 +855,10 @@ class AppAuthenticationProvider with ChangeNotifier {
         }
       }
 
-
       final String token = await firebaseUser.getIdToken() ?? '';
       await _persistUser(
         data: data,
-        uid: canonicalUid, 
+        uid: canonicalUid,
         token: token,
         fallbackPhone: phone,
       );
@@ -830,7 +876,6 @@ class AppAuthenticationProvider with ChangeNotifier {
         await _storage.clearRememberedCredentials();
         _rememberedCredentials = null;
       }
-
 
       _startSessionWatcher(canonicalUid);
 
@@ -941,8 +986,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     required String newPassword,
   }) async => true;
 
-
-  Future<void> logout() async {
+  Future<void> logout1() async {
     stopSessionWatcher();
     await _auth.signOut();
     await _googleSignIn.signOut();

@@ -100,6 +100,27 @@ class CreateAccountProvider extends ChangeNotifier {
       return false;
     }
 
+    try {
+      final subDoc = await _db.collection('subscriptions').doc(businessId).get();
+      if (subDoc.exists) {
+        final subData = subDoc.data()!;
+        final maxUsers = subData['maxUsers'] as int? ?? 0;
+        if (maxUsers > 0) {
+          final countQuery = await _db.collection('users')
+             .where('businessId', isEqualTo: businessId)
+             .where('isActive', isEqualTo: true)
+             .where('isDeleted', isNotEqualTo: true)
+             .count()
+             .get();
+          final count = countQuery.count;
+          if (count != null && count >= maxUsers) {
+            _setError('User limit reached. Please upgrade your plan to add more users.');
+            return false;
+          }
+        }
+      }
+    } catch (_) {}
+
     _status = CreateAccountStatus.loading;
     _errorMessage = '';
     notifyListeners();
@@ -473,6 +494,27 @@ class CreateAccountProvider extends ChangeNotifier {
       _setError('Password must be at least 6 characters.');
       return false;
     }
+
+    try {
+      final subDoc = await _db.collection('subscriptions').doc(businessId).get();
+      if (subDoc.exists) {
+        final subData = subDoc.data()!;
+        final maxUsers = subData['maxUsers'] as int? ?? 0;
+        if (maxUsers > 0) {
+          final countQuery = await _db.collection('users')
+             .where('businessId', isEqualTo: businessId)
+             .where('isActive', isEqualTo: true)
+             .where('isDeleted', isNotEqualTo: true)
+             .count()
+             .get();
+          final count = countQuery.count;
+          if (count != null && count >= maxUsers) {
+            _setError('User limit reached. Please upgrade your plan to add more users.');
+            return false;
+          }
+        }
+      }
+    } catch (_) {}
 
     _status = CreateAccountStatus.loading;
     _errorMessage = '';

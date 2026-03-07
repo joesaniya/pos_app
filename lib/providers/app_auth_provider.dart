@@ -169,19 +169,31 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
 
     try {
-  
-      final uidDoc = await _firestore
+      final storedData = await _storage.getUserData();
+      final canonicalUidFromStorage = storedData['uid'] as String? ?? '';
+      
+      final docIdToFetch = canonicalUidFromStorage.isNotEmpty ? canonicalUidFromStorage : firebaseUser.uid;
+
+      var uidDoc = await _firestore
           .collection('users')
-          .doc(firebaseUser.uid)
+          .doc(docIdToFetch)
           .get();
 
       Map<String, dynamic>? data;
 
       if (uidDoc.exists) {
         data = uidDoc.data()!;
-        log('validateSession: found user by UID');
-      } else {
-       
+        log('validateSession: found user by canonical UID ($docIdToFetch)');
+      } else if (docIdToFetch != firebaseUser.uid) {
+         // Also check the firebase user uid just in case
+         final uidDoc2 = await _firestore.collection('users').doc(firebaseUser.uid).get();
+         if (uidDoc2.exists) {
+           data = uidDoc2.data()!;
+           log('validateSession: found user by Firebase UID (${firebaseUser.uid})');
+         }
+      }
+
+      if (data == null) {
         log('validateSession: UID doc not found — trying phone/email fallback');
 
         if (firebaseUser.phoneNumber != null &&
@@ -216,7 +228,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         return false;
       }
 
-      if (data['isActive'] != true) {
+      if (data['isActive'] == false) {
         _wasDeactivated = true;
         await _forceLogout();
         return false;
@@ -229,13 +241,13 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       final String canonicalUid = (data['uid'] as String?)?.isNotEmpty == true
           ? data['uid'] as String
-          : firebaseUser.uid;
+          : docIdToFetch;
 
       log(
         'validateSession: canonicalUid=$canonicalUid  businessId=${data['businessId']}',
       );
 
-      final token = await firebaseUser.getIdToken(true) ?? '';
+      final token = await firebaseUser.getIdToken() ?? '';
       await _persistUser(
         data: data,
         uid: canonicalUid,
@@ -247,7 +259,15 @@ class AppAuthenticationProvider with ChangeNotifier {
       return true;
     } catch (e) {
       debugPrint('validateSession error: $e');
-      return _auth.currentUser != null;
+      if (_auth.currentUser != null) {
+        log('validateSession: Encountered expected/unexpected error — falling back to cached StorageService session.');
+        final storedCache = await _storage.getUserData();
+        if (storedCache.isNotEmpty && storedCache['uid'] != '') {
+          _userData = storedCache;
+        }
+        return true;
+      }
+      return false;
     }
   }
 

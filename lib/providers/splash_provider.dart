@@ -55,23 +55,29 @@ class SplashProvider with ChangeNotifier {
     if (_isLoggedIn) {
       // Firebase Auth persists tokens in secure storage even after uninstall
       // In release builds this causes false "logged in" state on fresh install
-      try {
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        final storedData = await StorageService.instance.getUserData();
-        final String canonicalUid = storedData['uid'] as String? ?? firebaseUser?.uid ?? '';
-        if (firebaseUser == null) {
-          // No Firebase session — force clear everything
-          await _storage.clearUserData();
-          _isLoggedIn = false;
-        } else {
-          // Firebase has a user — verify token is still valid
-          await firebaseUser.getIdToken(true); // force refresh
-        }
-      } catch (e) {
-        // Token refresh failed — session expired or invalid
-        await FirebaseAuth.instance.signOut();
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser == null) {
+        // No Firebase session — force clear everything
         await _storage.clearUserData();
         _isLoggedIn = false;
+      } else {
+        try {
+          // Verify token is still valid (do NOT force refresh to prevent unnecessary rate limiting)
+          await firebaseUser.getIdToken(); 
+        } on FirebaseAuthException catch (authError) {
+          final code = authError.code;
+          // Only log out if specifically unauthorized or token expired/invalid
+          if (code == 'user-disabled' || code == 'user-not-found' || code == 'user-token-expired' || code == 'invalid-user-token') {
+            log('Splash: Session invalid ($code), forcing logout.');
+            await FirebaseAuth.instance.signOut();
+            await _storage.clearUserData();
+            _isLoggedIn = false;
+          } else {
+            log('Splash: Ignored auth error: $code');
+          }
+        } catch (e) {
+          log('Splash: Ignored generic error on token check: $e');
+        }
       }
     }
   }

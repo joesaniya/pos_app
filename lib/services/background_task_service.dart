@@ -669,6 +669,8 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest_all.dart' as tzData;
 import 'package:workmanager/workmanager.dart';
 import 'package:pos_app/config/app_config.dart';
+import 'package:internet_connection_checker/internet_connection_checker.dart';
+
 
 const kLongSeatedTask = 'long_seated_check';
 const kLongSeatedTag = 'reservation_checks';
@@ -764,6 +766,7 @@ void callbackDispatcher() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  MAIN BACKGROUND CHECK FUNCTION
 // ─────────────────────────────────────────────────────────────────────────────
+
 Future<void> _runBackgroundChecks() async {
   // ── 1. Bootstrap notifications + timezone ────────────────────────────────
   final plugin = FlutterLocalNotificationsPlugin();
@@ -779,6 +782,12 @@ Future<void> _runBackgroundChecks() async {
       iOS: DarwinInitializationSettings(),
     ),
   );
+
+  bool hasConnection = await InternetConnectionChecker.createInstance().hasConnection;
+  if (!hasConnection) {
+    log('[BG] Device is offline — skipping background notifications');
+    return;
+  }
 
   // ── 2. Load context from SharedPreferences ────────────────────────────────
   final prefs = await SharedPreferences.getInstance();

@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -79,6 +81,9 @@ class CreateAccountProvider extends ChangeNotifier {
     required String businessId,
     required String businessName,
   }) async {
+    log(
+      'Starting account creation for email: $email, phone: $phone, businessId: $businessId',
+    );
     if (!isRoleSelected) {
       _setError('Please select a role to continue.');
       return false;
@@ -99,22 +104,39 @@ class CreateAccountProvider extends ChangeNotifier {
       _setError('Password must be at least 6 characters.');
       return false;
     }
-
+    log('Passed basic validation for email: $email, phone: $phone');
     try {
-      final subDoc = await _db.collection('subscriptions').doc(businessId).get();
+      log('Checking subscription limits for businessId: $businessId');
+      final subDoc = await _db
+          .collection('subscriptions')
+          .doc(businessId)
+          .get();
+      log(
+        'Fetched subscription doc for businessId $businessId: exists=${subDoc.exists}',
+      );
       if (subDoc.exists) {
+        log('Subscription doc data: ${subDoc.data()}');
         final subData = subDoc.data()!;
         final maxUsers = subData['maxUsers'] as int? ?? 0;
+        log('Subscription maxUsers: $maxUsers');
         if (maxUsers > 0) {
-          final countQuery = await _db.collection('users')
-             .where('businessId', isEqualTo: businessId)
-             .where('isActive', isEqualTo: true)
-             .where('isDeleted', isNotEqualTo: true)
-             .count()
-             .get();
-          final count = countQuery.count;
-          if (count != null && count >= maxUsers) {
-            _setError('User limit reached. Please upgrade your plan to add more users.');
+          // Use a simple query + client-side filter to avoid composite-index issues
+          // that arise when combining isEqualTo + isNotEqualTo in Firestore count().
+          final usersSnap = await _db
+              .collection('users')
+              .where('businessId', isEqualTo: businessId)
+              .where('isActive', isEqualTo: true)
+              .get();
+          // Exclude soft-deleted users on the client side
+          final count = usersSnap.docs
+              .where((d) => d.data()['isDeleted'] != true)
+              .length;
+          if (count >= maxUsers) {
+            _setError(
+              'Maximum user limit of $maxUsers has been reached for your current plan. '
+              'Once the user completes payment and the plan is renewed, '
+              'new users can be added again.',
+            );
             return false;
           }
         }

@@ -59,6 +59,8 @@ class AppAuthenticationProvider with ChangeNotifier {
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   StreamSubscription<DocumentSnapshot>? _sessionWatcher;
+  StreamSubscription<DocumentSnapshot>? _subscriptionWatcher;
+  Timer? _subscriptionExpiryTimer;
 
   AuthMode _authMode = AuthMode.login;
   LoginMethod _loginMethod = LoginMethod.emailPassword;
@@ -267,6 +269,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         fallbackPhone: firebaseUser.phoneNumber ?? '',
       );
       _startSessionWatcher(canonicalUid);
+      _startSubscriptionWatcher(data['businessId'] as String? ?? '');
       return true;
     } catch (e) {
       debugPrint('validateSession error: $e');
@@ -317,6 +320,137 @@ class AppAuthenticationProvider with ChangeNotifier {
     _sessionWatcher = null;
   }
 
+  // ── Subscription Real-Time Watcher ────────────────────────────────────────
+  /// Starts a Firestore listener on the subscription document.
+  /// • If `isActive` flips to false externally → triggers logout.
+  /// • Schedules a precise in-process [Timer] that fires at the exact
+  ///   `expiryDate` to auto-deactivate without waiting for WorkManager.
+  void _startSubscriptionWatcher(String businessId) {
+    if (businessId.isEmpty) return;
+    _subscriptionWatcher?.cancel();
+    _subscriptionExpiryTimer?.cancel();
+
+    _subscriptionWatcher = _firestore
+        .collection('subscriptions')
+        .doc(businessId)
+        .snapshots()
+        .listen((snap) async {
+          if (!snap.exists) return;
+          final data = snap.data()!;
+
+          // If subscription was externally deactivated (e.g. admin action)
+          if (data['isActive'] == false) {
+            log('SubWatcher: isActive=false detected — expiring session');
+            await _handleSubscriptionExpired(businessId, data);
+            return;
+          }
+
+          // Schedule precise timer for expiry date
+          final expiryRaw = data['expiryDate'];
+          if (expiryRaw is Timestamp) {
+            final expiryDate = expiryRaw.toDate();
+            _scheduleExpiryTimer(businessId, expiryDate, data);
+          }
+        },
+        onError: (e) => debugPrint('SubWatcher error: $e'));
+  }
+
+  void _scheduleExpiryTimer(
+    String businessId,
+    DateTime expiryDate,
+    Map<String, dynamic> subData,
+  ) {
+    _subscriptionExpiryTimer?.cancel();
+
+    final now = DateTime.now();
+    final diff = expiryDate.difference(now);
+
+    if (diff.isNegative || diff.inSeconds == 0) {
+      // Already expired — act immediately
+      log('SubWatcher: expiryDate already past — expiring now');
+      _handleSubscriptionExpired(businessId, subData);
+      return;
+    }
+
+    // Cap at max Timer duration (~24.8 days); reschedule if longer
+    const maxDuration = Duration(days: 24);
+    final fireDuration = diff > maxDuration ? maxDuration : diff;
+
+    log('SubWatcher: scheduling expiry timer in ${diff.inMinutes} min(s)');
+    _subscriptionExpiryTimer = Timer(fireDuration, () async {
+      if (diff > maxDuration) {
+        // Not yet expired — reschedule for next window
+        _scheduleExpiryTimer(businessId, expiryDate, subData);
+      } else {
+        log('SubWatcher: expiry timer fired — deactivating subscription');
+        await _handleSubscriptionExpired(businessId, subData);
+      }
+    });
+  }
+
+  Future<void> _handleSubscriptionExpired(
+    String businessId,
+    Map<String, dynamic> subData,
+  ) async {
+    try {
+      final planType =
+          (subData['planType'] as String?)?.toLowerCase() ?? 'monthly';
+
+      // 1. Deactivate subscription doc (only if still active)
+      final currentSnap = await _firestore
+          .collection('subscriptions')
+          .doc(businessId)
+          .get();
+      if (!currentSnap.exists) return;
+      if (currentSnap.data()!['isActive'] == false) {
+        // Already deactivated — just force logout
+        _subscriptionExpired = true;
+        notifyListeners();
+        await _forceLogout();
+        return;
+      }
+
+      await _firestore.collection('subscriptions').doc(businessId).update({
+        'isActive': false,
+        'deactivatedAt': FieldValue.serverTimestamp(),
+        'deactivatedReason': 'subscription_expired',
+      });
+      log('SubWatcher: subscription doc deactivated for $businessId');
+
+      // 2. Batch-deactivate all active users of this business
+      final usersSnap = await _firestore
+          .collection('users')
+          .where('businessId', isEqualTo: businessId)
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      if (usersSnap.docs.isNotEmpty) {
+        final batch = _firestore.batch();
+        for (final doc in usersSnap.docs) {
+          batch.update(doc.reference, {
+            'isActive': false,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        log('SubWatcher: deactivated ${usersSnap.docs.length} user(s) — '
+            'session watcher will trigger logout');
+      }
+
+      // 3. Set flag & notify — the session watcher will handle the UI
+      //    (it watches users/{uid}.isActive and will force logout)
+    } catch (e) {
+      debugPrint('_handleSubscriptionExpired error: $e');
+    }
+  }
+
+  void _cancelSubscriptionWatcher() {
+    _subscriptionWatcher?.cancel();
+    _subscriptionWatcher = null;
+    _subscriptionExpiryTimer?.cancel();
+    _subscriptionExpiryTimer = null;
+  }
+
   Future<bool> _isSubscriptionExpired(String businessId) async {
     if (businessId.isEmpty) return false;
     try {
@@ -335,10 +469,69 @@ class AppAuthenticationProvider with ChangeNotifier {
     return false;
   }
 
+  // ── Subscription Renewal ──────────────────────────────────────────────────
+  /// Call this after a successful payment to reactivate the subscription and
+  /// restore access to all users of that business.
+  Future<bool> renewSubscription({
+    required String businessId,
+    required DateTime newExpiryDate,
+    String planType = 'monthly',
+    int maxUsers = 5,
+  }) async {
+    if (businessId.isEmpty) return false;
+    try {
+      log('renewSubscription: activating businessId=$businessId until $newExpiryDate');
+
+      // 1. Update subscription document
+      await _firestore.collection('subscriptions').doc(businessId).update({
+        'isActive': true,
+        'expiryDate': Timestamp.fromDate(newExpiryDate),
+        'planType': planType,
+        'maxUsers': maxUsers,
+        'renewedAt': FieldValue.serverTimestamp(),
+        'deactivatedReason': FieldValue.delete(),
+        'deactivatedAt': FieldValue.delete(),
+      });
+
+      // 2. Re-enable all users for this business (that were deactivated by expiry)
+      //    Only re-enable those NOT explicitly soft-deleted (isDeleted != true).
+      final usersSnap = await _firestore
+          .collection('users')
+          .where('businessId', isEqualTo: businessId)
+          .get();
+
+      final batch = _firestore.batch();
+      int reactivated = 0;
+      for (final doc in usersSnap.docs) {
+        final d = doc.data();
+        if (d['isDeleted'] == true) continue; // skip soft-deleted users
+        if (d['isActive'] == true) continue;  // already active — skip
+        batch.update(doc.reference, {
+          'isActive': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        reactivated++;
+      }
+      await batch.commit();
+      log('renewSubscription: reactivated $reactivated user(s)');
+
+      // 3. Clear the in-memory expiry flag so the current session is aware
+      _subscriptionExpired = false;
+      notifyListeners();
+
+      return true;
+    } catch (e) {
+      debugPrint('renewSubscription error: $e');
+      return false;
+    }
+  }
+
   Future<void> logout() async => _forceLogout();
+
 
   Future<void> _forceLogout() async {
     stopSessionWatcher();
+    _cancelSubscriptionWatcher();
     try {
       await _auth.signOut();
       await _googleSignIn.signOut();
@@ -577,6 +770,7 @@ class AppAuthenticationProvider with ChangeNotifier {
         }
 
         _startSessionWatcher(firebaseUser.uid);
+        _startSubscriptionWatcher(bizId);
         log('Email login success: ${email.trim()} (${firebaseUser.uid})');
         _isNavigatingAway = true;
         setLoading(false);
@@ -674,6 +868,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       );
       if (!_rememberMe) await _storage.clearRememberedCredentials();
       _startSessionWatcher(firebaseUser.uid);
+      _startSubscriptionWatcher(bizId);
 
       log('Google login success: ${firebaseUser.email} (${firebaseUser.uid})');
       _isNavigatingAway = true;
@@ -878,6 +1073,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       }
 
       _startSessionWatcher(canonicalUid);
+      _startSubscriptionWatcher(data['businessId'] as String? ?? '');
 
       log(
         'Phone login success — canonicalUid=$canonicalUid, phone=${data['phone']}',

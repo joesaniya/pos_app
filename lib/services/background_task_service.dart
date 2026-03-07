@@ -1302,23 +1302,73 @@ Future<void> _checkSubscriptionExpiryReminders(
 ) async {
   try {
     await _ensureFirebase();
-    final subDoc = await FirebaseFirestore.instance.collection('subscriptions').doc(businessId).get();
+    final db = FirebaseFirestore.instance;
+    final subDoc = await db.collection('subscriptions').doc(businessId).get();
     if (!subDoc.exists) return;
-    
+
     final data = subDoc.data()!;
     if (data['isActive'] == false) return;
-    
+
     final expiryRaw = data['expiryDate'];
     if (expiryRaw is! Timestamp) return;
-    
+
     final expiryDate = expiryRaw.toDate();
     final planType = (data['planType'] as String?)?.toLowerCase() ?? 'monthly';
-    
+
     final diff = expiryDate.difference(now);
-    if (diff.isNegative) return; // Already expired, app will handle lockout
-    
+
+    // ── AUTO-EXPIRE: subscription time has passed ─────────────────────────────
+    if (diff.isNegative) {
+      final expiryKey = '${today}_subExpired_$businessId';
+      if (!sentKeys.contains(expiryKey)) {
+        sentKeys.add(expiryKey);
+        log('[BG] ⏰ Subscription expired for business $businessId — setting isActive=false');
+
+        // 1. Deactivate subscription document
+        await db.collection('subscriptions').doc(businessId).update({
+          'isActive': false,
+          'deactivatedAt': FieldValue.serverTimestamp(),
+          'deactivatedReason': 'subscription_expired',
+        });
+
+        // 2. Deactivate ALL users belonging to this business
+        //    The session watcher in app_auth_provider.dart will pick this up
+        //    and force-log out any active sessions automatically.
+        final usersSnap = await db
+            .collection('users')
+            .where('businessId', isEqualTo: businessId)
+            .where('isActive', isEqualTo: true)
+            .get();
+
+        final batch = db.batch();
+        for (final doc in usersSnap.docs) {
+          batch.update(doc.reference, {
+            'isActive': false,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        log('[BG] ✅ Deactivated ${usersSnap.docs.length} user(s) for expired subscription');
+
+        // 3. Send expiry notification
+        await plugin.show(
+          id: 99998,
+          title: '🔴 Subscription Expired',
+          body:
+              'Your $planType subscription has expired. Please renew to restore access.$biz',
+          notificationDetails: const NotificationDetails(
+            android: _chSubscriptionAlerts,
+            iOS: _iosHigh,
+          ),
+        );
+        log('[BG] 🔴 Subscription expiry notification sent for $businessId');
+      }
+      return; // Nothing more to do — sub is now expired
+    }
+
+    // ── UPCOMING EXPIRY REMINDERS ─────────────────────────────────────────────
     final isMonthly = planType == 'monthly';
-    
+
     // Determine thresholds based on plan type
     final thresholds = isMonthly
         ? [
@@ -1331,7 +1381,7 @@ Future<void> _checkSubscriptionExpiryReminders(
         : [
             const Duration(days: 90), // 3 months
             const Duration(days: 30), // 1 month
-            const Duration(days: 7),  // 1 week
+            const Duration(days: 7), // 1 week
             const Duration(days: 1),
             const Duration(hours: 1),
           ];
@@ -1344,7 +1394,7 @@ Future<void> _checkSubscriptionExpiryReminders(
     for (int i = 0; i < thresholds.length; i++) {
       final t = thresholds[i];
       final isHour = t.inHours == 1;
-      
+
       bool isMatch = false;
       if (isHour) {
         // Trigger if 1 hour or less remains (in case Workmanager delayed the check)
@@ -1357,13 +1407,14 @@ Future<void> _checkSubscriptionExpiryReminders(
       if (isMatch) {
         final label = thresholdLabels[i];
         final key = '${today}_subAlert_${businessId}_${t.inHours}h';
-        
+
         if (!sentKeys.contains(key)) {
           sentKeys.add(key);
           await plugin.show(
             id: 99999, // Unique ID for subscription alerts
             title: '⚠️ Subscription Expiring Soon!',
-            body: 'Your $planType subscription will expire in $label. Please renew to avoid interruption.$biz',
+            body:
+                'Your $planType subscription will expire in $label. Please renew to avoid interruption.$biz',
             notificationDetails: const NotificationDetails(
               android: _chSubscriptionAlerts,
               iOS: _iosHigh,

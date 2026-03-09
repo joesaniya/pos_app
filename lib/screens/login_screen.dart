@@ -248,7 +248,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
+  Future<void> _handleSendOTP1(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
     final result = await provider.sendOTP(phone: _phoneController.text.trim());
@@ -272,7 +272,7 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
+  Future<void> _handleVerifyOTP1(AppAuthenticationProvider provider) async {
     if (!_formKey.currentState!.validate()) return;
 
     final result = await provider.verifyOTP(
@@ -307,8 +307,80 @@ class _LoginScreenState extends State<LoginScreen>
       }
     }
   }
+  // ── Replace these three methods in login_screen.dart ──────────────────────
+
+  Future<void> _handleSendOTP(AppAuthenticationProvider provider) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final result = await provider.sendOTP(phone: _phoneController.text.trim());
+
+    if (!mounted) return;
+
+    switch (result) {
+      case 'success':
+        _showSnackBar('OTP sent successfully!', isSuccess: true);
+        break;
+      case 'not_found':
+        _showSnackBar(
+          'This phone number is not registered. Please contact your admin.',
+        );
+        break;
+      case 'inactive':
+        _showSnackBar('Your account is inactive. Please contact your admin.');
+        break;
+      case 'subscription_expired':
+        // Subscription is expired — redirect to renewal screen immediately.
+        // No OTP was sent; the user cannot proceed with login.
+        _navigateToSubscriptionExpired();
+        break;
+      default:
+        _showSnackBar('Failed to send OTP. Please try again.');
+    }
+  }
 
   Future<void> _handleResendOTP(AppAuthenticationProvider provider) async {
+    final result = await provider.resendOTP(
+      phone: _phoneController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (result == 'success') {
+      _showSnackBar('OTP resent successfully!', isSuccess: true);
+    } else if (result == 'subscription_expired') {
+      // Subscription expired while the user was on the OTP entry screen.
+      _navigateToSubscriptionExpired();
+    } else {
+      _showSnackBar('Failed to resend OTP. Please try again.');
+    }
+  }
+
+  Future<void> _handleVerifyOTP(AppAuthenticationProvider provider) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final result = await provider.verifyOTP(
+      phone: _phoneController.text.trim(),
+      otp: _otpController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    switch (result) {
+      case OtpResult.success:
+        _navigateToHome();
+        break;
+      case OtpResult.subscriptionExpired:
+        // Subscription was expired at send time (cached) or expired between
+        // send and verify — redirect to the renewal screen.
+        _navigateToSubscriptionExpired();
+        break;
+      case OtpResult.error:
+        _showSnackBar('Invalid OTP. Please check and try again.');
+        break;
+    }
+  }
+
+  Future<void> _handleResendOTP1(AppAuthenticationProvider provider) async {
     final result = await provider.resendOTP(
       phone: _phoneController.text.trim(),
     );

@@ -96,6 +96,7 @@ extension StockStatusExt on StockStatus {
 
 // ─────────────────────────────────────────────────────────────────────────────
 extension StockUnitExt on StockUnit {
+  /// Short label shown in the UI  — NEVER write this to the database
   String get label {
     switch (this) {
       case StockUnit.kg:
@@ -103,28 +104,47 @@ extension StockUnitExt on StockUnit {
       case StockUnit.g:
         return 'g';
       case StockUnit.litre:
-        return 'L';
+        return 'L'; // UI only
       case StockUnit.ml:
         return 'ml';
       case StockUnit.pieces:
-        return 'pcs';
+        return 'pcs'; // UI only
       case StockUnit.dozen:
-        return 'doz';
+        return 'doz'; // UI only
       case StockUnit.packet:
-        return 'pkt';
+        return 'pkt'; // UI only
       case StockUnit.bottle:
-        return 'btl';
+        return 'btl'; // UI only
     }
   }
 
-  // DB stores the same short label (kg, g, L, ml, pcs, doz, pkt, btl)
-  String get dbValue => label;
+  /// Value written to / read from Supabase — must match the DB check constraint
+  String get dbValue {
+    switch (this) {
+      case StockUnit.kg:
+        return 'kg';
+      case StockUnit.g:
+        return 'g';
+      case StockUnit.litre:
+        return 'litre'; // ← was 'L'   → constraint violation
+      case StockUnit.ml:
+        return 'ml';
+      case StockUnit.pieces:
+        return 'pieces'; // ← was 'pcs' → constraint violation
+      case StockUnit.dozen:
+        return 'dozen'; // ← was 'doz' → constraint violation
+      case StockUnit.packet:
+        return 'packet'; // ← was 'pkt' → constraint violation
+      case StockUnit.bottle:
+        return 'bottle'; // ← was 'btl' → constraint violation
+    }
+  }
 
   static StockUnit fromString(String s) {
-    switch (s) {
+    switch (s.toLowerCase()) {
       case 'g':
         return StockUnit.g;
-      case 'L':
+      case 'l':
       case 'litre':
       case 'liter':
         return StockUnit.litre;
@@ -132,6 +152,7 @@ extension StockUnitExt on StockUnit {
         return StockUnit.ml;
       case 'pcs':
       case 'pieces':
+      case 'piece':
         return StockUnit.pieces;
       case 'doz':
       case 'dozen':
@@ -242,17 +263,17 @@ class StockTransaction {
   });
 
   factory StockTransaction.fromJson(Map<String, dynamic> j) => StockTransaction(
-        id: j['id'] as String,
-        type: TransactionTypeExt.fromString(j['transaction_type'] ?? 'stock_in'),
-        quantity: (j['quantity'] as num).toDouble(),
-        stockBefore: (j['stock_before'] as num).toDouble(),
-        stockAfter: (j['stock_after'] as num).toDouble(),
-        unit: StockUnitExt.fromString(j['unit'] ?? 'kg'),
-        date: DateTime.parse(j['created_at'] as String),
-        note: j['note'] as String? ?? '—',
-        updatedBy: j['updated_by_name'] as String? ?? 'Unknown',
-        updatedByRole: j['updated_by_role'] as String? ?? '',
-      );
+    id: j['id'] as String,
+    type: TransactionTypeExt.fromString(j['transaction_type'] ?? 'stock_in'),
+    quantity: (j['quantity'] as num).toDouble(),
+    stockBefore: (j['stock_before'] as num).toDouble(),
+    stockAfter: (j['stock_after'] as num).toDouble(),
+    unit: StockUnitExt.fromString(j['unit'] ?? 'kg'),
+    date: DateTime.parse(j['created_at'] as String),
+    note: j['note'] as String? ?? '—',
+    updatedBy: j['updated_by_name'] as String? ?? 'Unknown',
+    updatedByRole: j['updated_by_role'] as String? ?? '',
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +312,8 @@ class InventoryItem {
 
   StockStatus get status {
     if (currentStock <= 0) return StockStatus.outOfStock;
-    if (maxCapacity > 0 && currentStock / maxCapacity <= 0.10) return StockStatus.critical;
+    if (maxCapacity > 0 && currentStock / maxCapacity <= 0.10)
+      return StockStatus.critical;
     if (currentStock <= minThreshold) return StockStatus.lowStock;
     return StockStatus.inStock;
   }
@@ -334,42 +356,41 @@ class InventoryItem {
   }
 
   Map<String, dynamic> toJson(String businessId) => {
-        'business_id': businessId,
-        'name': name,
-        'category': category,
-        'emoji': emoji,
-        'current_stock': currentStock,
-        'min_threshold': minThreshold,
-        'max_capacity': maxCapacity,
-        'unit': unit.label, // stores 'kg', 'L', 'pcs' etc.
-        'cost_per_unit': costPerUnit,
-        'supplier_name': supplier,
-        'last_updated': lastUpdated.toIso8601String(),
-        'notes': notes,
-        'is_active': true,
-      };
+    'business_id': businessId,
+    'name': name,
+    'category': category,
+    'emoji': emoji,
+    'current_stock': currentStock,
+    'min_threshold': minThreshold,
+    'max_capacity': maxCapacity,
+    'unit': unit.dbValue, // ✅ 'litre' not 'L', 'pieces' not 'pcs' etc.
+    'cost_per_unit': costPerUnit,
+    'supplier_name': supplier,
+    'last_updated': lastUpdated.toIso8601String(),
+    'notes': notes,
+    'is_active': true,
+  };
 
   InventoryItem copyWith({
     double? currentStock,
     DateTime? lastUpdated,
     List<StockTransaction>? transactions,
     String? notes,
-  }) =>
-      InventoryItem(
-        id: id,
-        name: name,
-        category: category,
-        emoji: emoji,
-        currentStock: currentStock ?? this.currentStock,
-        minThreshold: minThreshold,
-        maxCapacity: maxCapacity,
-        unit: unit,
-        costPerUnit: costPerUnit,
-        supplier: supplier,
-        lastUpdated: lastUpdated ?? this.lastUpdated,
-        transactions: transactions ?? this.transactions,
-        notes: notes ?? this.notes,
-      );
+  }) => InventoryItem(
+    id: id,
+    name: name,
+    category: category,
+    emoji: emoji,
+    currentStock: currentStock ?? this.currentStock,
+    minThreshold: minThreshold,
+    maxCapacity: maxCapacity,
+    unit: unit,
+    costPerUnit: costPerUnit,
+    supplier: supplier,
+    lastUpdated: lastUpdated ?? this.lastUpdated,
+    transactions: transactions ?? this.transactions,
+    notes: notes ?? this.notes,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -447,162 +468,3 @@ class StockNotificationRecord {
     }
   }
 }
-
-
-
-/*enum StockStatus { inStock, lowStock, critical, outOfStock }
-enum StockUnit { kg, g, litre, ml, pieces, dozen, packet, bottle }
-enum TransactionType { stockIn, stockOut, adjustment, waste }
-
-extension StockStatusExt on StockStatus {
-  String get label {
-    switch (this) {
-      case StockStatus.inStock:    return 'In Stock';
-      case StockStatus.lowStock:   return 'Low Stock';
-      case StockStatus.critical:   return 'Critical';
-      case StockStatus.outOfStock: return 'Out of Stock';
-    }
-  }
-  String get emoji {
-    switch (this) {
-      case StockStatus.inStock:    return '✅';
-      case StockStatus.lowStock:   return '⚠️';
-      case StockStatus.critical:   return '🔴';
-      case StockStatus.outOfStock: return '❌';
-    }
-  }
-}
-
-extension StockUnitExt on StockUnit {
-  String get label {
-    switch (this) {
-      case StockUnit.kg:     return 'kg';
-      case StockUnit.g:      return 'g';
-      case StockUnit.litre:  return 'L';
-      case StockUnit.ml:     return 'ml';
-      case StockUnit.pieces: return 'pcs';
-      case StockUnit.dozen:  return 'doz';
-      case StockUnit.packet: return 'pkt';
-      case StockUnit.bottle: return 'btl';
-    }
-  }
-}
-
-extension TransactionTypeExt on TransactionType {
-  String get label {
-    switch (this) {
-      case TransactionType.stockIn:     return 'Stock In';
-      case TransactionType.stockOut:    return 'Stock Out';
-      case TransactionType.adjustment:  return 'Adjustment';
-      case TransactionType.waste:       return 'Waste';
-    }
-  }
-  String get emoji {
-    switch (this) {
-      case TransactionType.stockIn:     return '📥';
-      case TransactionType.stockOut:    return '📤';
-      case TransactionType.adjustment:  return '🔧';
-      case TransactionType.waste:       return '🗑️';
-    }
-  }
-  bool get isPositive => this == TransactionType.stockIn || this == TransactionType.adjustment;
-}
-
-class StockTransaction {
-  final String id;
-  final TransactionType type;
-  final double quantity;
-  final StockUnit unit;
-  final DateTime date;
-  final String note;
-  final String updatedBy;
-
-  const StockTransaction({
-    required this.id,
-    required this.type,
-    required this.quantity,
-    required this.unit,
-    required this.date,
-    required this.note,
-    required this.updatedBy,
-  });
-}
-
-class InventoryItem {
-  final String id;
-  final String name;
-  final String category;
-  final String emoji;
-  final double currentStock;
-  final double minThreshold;
-  final double maxCapacity;
-  final StockUnit unit;
-  final double costPerUnit;
-  final String supplier;
-  final DateTime lastUpdated;
-  final List<StockTransaction> transactions;
-
-  const InventoryItem({
-    required this.id,
-    required this.name,
-    required this.category,
-    required this.emoji,
-    required this.currentStock,
-    required this.minThreshold,
-    required this.maxCapacity,
-    required this.unit,
-    required this.costPerUnit,
-    required this.supplier,
-    required this.lastUpdated,
-    this.transactions = const [],
-  });
-
-  StockStatus get status {
-    if (currentStock <= 0) return StockStatus.outOfStock;
-    final pct = currentStock / maxCapacity;
-    if (pct <= 0.10) return StockStatus.critical;
-    if (currentStock <= minThreshold) return StockStatus.lowStock;
-    return StockStatus.inStock;
-  }
-
-  double get stockPercent => (currentStock / maxCapacity).clamp(0.0, 1.0);
-
-  String get stockDisplay =>
-      '${currentStock % 1 == 0 ? currentStock.toInt() : currentStock.toStringAsFixed(1)} ${unit.label}';
-
-  double get totalValue => currentStock * costPerUnit;
-
-  InventoryItem copyWith({
-    double? currentStock,
-    String? name,
-    String? category,
-    double? minThreshold,
-    double? maxCapacity,
-    double? costPerUnit,
-    String? supplier,
-    DateTime? lastUpdated,
-    List<StockTransaction>? transactions,
-  }) {
-    return InventoryItem(
-      id: id,
-      name: name ?? this.name,
-      category: category ?? this.category,
-      emoji: emoji,
-      currentStock: currentStock ?? this.currentStock,
-      minThreshold: minThreshold ?? this.minThreshold,
-      maxCapacity: maxCapacity ?? this.maxCapacity,
-      unit: unit,
-      costPerUnit: costPerUnit ?? this.costPerUnit,
-      supplier: supplier ?? this.supplier,
-      lastUpdated: lastUpdated ?? this.lastUpdated,
-      transactions: transactions ?? this.transactions,
-    );
-  }
-
-  String get lastUpdatedLabel {
-    final diff = DateTime.now().difference(lastUpdated);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
-}*/

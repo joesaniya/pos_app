@@ -2346,6 +2346,9 @@ class _StockUpdateSheetState extends State<_StockUpdateSheet> {
       note: _noteCtrl.text.isEmpty ? '—' : _noteCtrl.text,
       updatedBy: widget.provider.userName,
     );
+    log(
+      'Stock updated: ${_type.label} ${_qtyCtrl.text} ${widget.item.unit.label}',
+    );
     if (mounted) Navigator.pop(context);
   }
 }
@@ -2951,6 +2954,7 @@ class _AddEditSheetState extends State<_AddEditSheet> {
               ? widget.provider.errorMessage
               : 'Failed to save item. Please try again.';
         });
+        log('Error saving item: ${widget.provider.errorMessage}');
       }
     }
   }

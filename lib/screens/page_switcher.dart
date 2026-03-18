@@ -9,7 +9,6 @@ import 'package:pos_app/theme/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'dashboard_screen.dart';
 import 'orders_screen.dart';
-import 'tables_screen.dart';
 import 'package:pos_app/screens/subscription_expired_screen.dart';
 import 'menu_screen.dart';
 import 'inventory_screen.dart';

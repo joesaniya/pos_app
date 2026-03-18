@@ -16,7 +16,6 @@ import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProviderHelperClass {
   static ProviderHelperClass? _instance;

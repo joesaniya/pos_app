@@ -1,6 +1,6 @@
 // lib/models/supabase_menu_item.dart
 
-import 'package:pos_app/models/menu_item.dart';
+
 
 class SupabaseMenuItem {
   final String id;

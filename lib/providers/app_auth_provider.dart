@@ -157,41 +157,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
-  Future<bool> _isSubscriptionExpired1(String businessId) async {
-    if (businessId.isEmpty) {
-      log('SUB_CHECK: businessId empty → ALLOW');
-      return false;
-    }
-    try {
-      log('SUB_CHECK: reading subscriptions/$businessId ...');
-      final subDoc = await _firestore
-          .collection('subscriptions')
-          .doc(businessId)
-          .get();
-
-      if (!subDoc.exists) {
-        log('SUB_CHECK: doc does not exist → ALLOW');
-        return false;
-      }
-
-      final rawIsActive = subDoc.data()!['isActive'];
-      log('SUB_CHECK: subscriptions/$businessId → isActive=$rawIsActive');
-
-      // Block ONLY when isActive is explicitly the boolean false
-      if (rawIsActive == false) {
-        log('SUB_CHECK: isActive=false → BLOCK');
-        return true;
-      }
-
-      log('SUB_CHECK: isActive=$rawIsActive (not false) → ALLOW');
-      return false;
-    } catch (e) {
-      // Fail-open — never block due to a read error
-      log('SUB_CHECK: read error for $businessId → ALLOW (error: $e)');
-      return false;
-    }
-  }
-
+ 
   Future<QueryDocumentSnapshot?> _findUserByPhone(String phone) async {
     final normalised = phone.startsWith('+') ? phone : '+91$phone';
     final raw = phone.startsWith('+') ? phone.replaceFirst('+91', '') : phone;

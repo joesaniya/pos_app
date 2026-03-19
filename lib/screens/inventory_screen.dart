@@ -375,7 +375,7 @@ class _Header extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        /*  GestureDetector(
+        GestureDetector(
           onTap: onSupplierTap,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -401,7 +401,7 @@ class _Header extends StatelessWidget {
             ),
           ),
         ),
-        GestureDetector(
+        /*GestureDetector(
           onTap: onNotifTap,
           child: Stack(
             clipBehavior: Clip.none,

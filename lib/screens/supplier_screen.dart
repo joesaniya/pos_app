@@ -1,16 +1,28 @@
+// lib/screens/supplier_screen.dart
+// ══════════════════════════════════════════════════════════════════════════════
+//  SUPPLIERS SCREEN — complete implementation
+//  • Status management (active / inactive / blacklisted)
+//  • Overview metrics (credit limit, credit days, on-time %, totals, pending)
+//  • Payment recording with mandatory mode + transaction ref
+//  • Mark-as-paid on existing pending records
+//  • Document upload via UploadDocumentSheet (PDF · Image · Word · Camera)
+//  • Delivery history with add / view
+// ══════════════════════════════════════════════════════════════════════════════
+
 import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/models/supplier_modal.dart';
 import 'package:pos_app/providers/inventory_provider.dart';
+import 'package:pos_app/screens/sheet/suppliers_upload_document_sheet.dart';
 import 'package:pos_app/screens/supplier_stock_history_tab.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/supplier_provider.dart';
 
-// ═══════════════════════════════════════════════════════════════
-//  DESIGN TOKENS  — slate-blue / amber / clean white
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  DESIGN TOKENS
+// ══════════════════════════════════════════════════════════════════════════════
 class SC {
   static const bg = Color(0xFFF4F6FB);
   static const surface = Color(0xFFFFFFFF);
@@ -47,6 +59,7 @@ class SC {
   static const divider = Color(0xFFEEF1F7);
 }
 
+// ── Color helpers ─────────────────────────────────────────────────────────────
 Color _payColor(PaymentStatus s) {
   switch (s) {
     case PaymentStatus.paid:
@@ -95,9 +108,9 @@ Color _supBg(SupplierStatus s) {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  ENTRY POINT
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class SuppliersScreen extends StatelessWidget {
   const SuppliersScreen({Key? key}) : super(key: key);
 
@@ -106,9 +119,6 @@ class SuppliersScreen extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => SupplierProvider()),
-        // InventoryProvider is needed for SupplierStockHistoryTab inside
-        // SupplierDetailScreen. We create it once here at the root so it's
-        // available throughout the whole Suppliers flow.
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
       ],
       child: const _SuppliersBody(),
@@ -116,9 +126,9 @@ class SuppliersScreen extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  MAIN BODY
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _SuppliersBody extends StatefulWidget {
   const _SuppliersBody();
   @override
@@ -175,9 +185,9 @@ class _SuppliersBodyState extends State<_SuppliersBody> {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  HEADER
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _Header extends StatelessWidget {
   final SupplierProvider prov;
   const _Header({required this.prov});
@@ -248,9 +258,9 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  ALERT BANNER
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _AlertBanner extends StatelessWidget {
   final SupplierProvider prov;
   const _AlertBanner({required this.prov});
@@ -325,9 +335,9 @@ class _AlertChip extends StatelessWidget {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  SUMMARY STRIP
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _SummaryStrip extends StatelessWidget {
   final SupplierProvider prov;
   const _SummaryStrip({required this.prov});
@@ -429,9 +439,9 @@ class _MetricCard extends StatelessWidget {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  SEARCH + SORT BAR
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _SearchSortBar extends StatelessWidget {
   final TextEditingController ctrl;
   final SupplierProvider prov;
@@ -609,9 +619,9 @@ class _SearchSortBar extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  CATEGORY CHIPS
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _CategoryChips extends StatelessWidget {
   final SupplierProvider prov;
   const _CategoryChips({required this.prov});
@@ -654,9 +664,9 @@ class _CategoryChips extends StatelessWidget {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  STATUS PILLS
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _StatusPills extends StatelessWidget {
   final SupplierProvider prov;
   const _StatusPills({required this.prov});
@@ -711,9 +721,9 @@ class _StatusPills extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  SUPPLIER LIST
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _SupplierList extends StatelessWidget {
   final SupplierProvider prov;
   const _SupplierList({required this.prov});
@@ -729,10 +739,6 @@ class _SupplierList extends StatelessWidget {
   );
 
   void _openDetail(BuildContext ctx, Supplier sup, SupplierProvider prov) {
-    // ── IMPORTANT: Pass both SupplierProvider AND InventoryProvider
-    // so SupplierStockHistoryTab can access inventory data.
-    // We use .value to reuse the existing instances already created at
-    // SuppliersScreen level — no double-fetching.
     final invProv = ctx.read<InventoryProvider>();
     Navigator.push(
       ctx,
@@ -756,9 +762,9 @@ class _SupplierList extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  SUPPLIER CARD
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _SupplierCard extends StatelessWidget {
   final Supplier supplier;
   final VoidCallback onTap;
@@ -949,9 +955,9 @@ class _StatDiv extends StatelessWidget {
       Container(width: 1, height: 24, color: SC.divider);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SUPPLIER DETAIL SCREEN  — 5 tabs (added Stocks tab)
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  SUPPLIER DETAIL SCREEN
+// ══════════════════════════════════════════════════════════════════════════════
 class SupplierDetailScreen extends StatefulWidget {
   final Supplier supplier;
   const SupplierDetailScreen({Key? key, required this.supplier})
@@ -963,7 +969,6 @@ class SupplierDetailScreen extends StatefulWidget {
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen>
     with SingleTickerProviderStateMixin {
-  // ── Changed length 4 → 5 ──────────────────────────────────────────────────
   late TabController _tabs;
   late Supplier _supplier;
 
@@ -971,7 +976,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
   void initState() {
     super.initState();
     _supplier = widget.supplier;
-    _tabs = TabController(length: 5, vsync: this); // ← was 4
+    _tabs = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -1004,7 +1009,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
                   controller: _tabs,
                   labelColor: SC.primary,
                   unselectedLabelColor: SC.textMute,
-                  isScrollable: true, // ← makes 5 tabs fit on small screens
+                  isScrollable: true,
                   tabAlignment: TabAlignment.start,
                   labelStyle: const TextStyle(
                     fontSize: 12,
@@ -1021,7 +1026,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
                     Tab(text: 'Payments'),
                     Tab(text: 'Documents'),
                     Tab(text: 'Deliveries'),
-                    Tab(text: 'Stocks'), // ← NEW
+                    Tab(text: 'Stocks'),
                   ],
                 ),
               ),
@@ -1033,11 +1038,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
                     _OverviewTab(supplier: _supplier),
                     _PaymentsTab(supplier: _supplier, prov: prov),
                     _DocumentsTab(supplier: _supplier, prov: prov),
-                    _HistoryTab(supplier: _supplier),
-                    // ── NEW: Stock history tab ────────────────────────
-                    // InventoryProvider is already in the tree via
-                    // MultiProvider in _openDetail(). SupplierStockHistoryTab
-                    // calls context.watch<InventoryProvider>() internally.
+                    _HistoryTab(supplier: _supplier, prov: prov),
                     SupplierStockHistoryTab(supplier: _supplier),
                   ],
                 ),
@@ -1062,9 +1063,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  DETAIL HERO
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Detail Hero ───────────────────────────────────────────────────────────────
 class _DetailHero extends StatelessWidget {
   final Supplier supplier;
   final VoidCallback onBack, onEdit;
@@ -1266,9 +1265,9 @@ class _HeroDivider extends StatelessWidget {
       Container(width: 1, height: 28, color: Colors.white.withOpacity(0.15));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 //  OVERVIEW TAB
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 class _OverviewTab extends StatelessWidget {
   final Supplier supplier;
   const _OverviewTab({required this.supplier});
@@ -1280,6 +1279,14 @@ class _OverviewTab extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
         _SectionHeader('Contacts'),
+        if (s.contacts.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'No contacts added.',
+              style: TextStyle(fontSize: 13, color: SC.textMute),
+            ),
+          ),
         ...s.contacts.map((c) => _ContactCard(contact: c)),
         const SizedBox(height: 8),
         _SectionHeader('Business Info'),
@@ -1302,24 +1309,7 @@ class _OverviewTab extends StatelessWidget {
             _InfoItem(
               icon: '🗓️',
               label: 'Onboarded',
-              value: () {
-                final d = s.onboardedDate;
-                const m = [
-                  'Jan',
-                  'Feb',
-                  'Mar',
-                  'Apr',
-                  'May',
-                  'Jun',
-                  'Jul',
-                  'Aug',
-                  'Sep',
-                  'Oct',
-                  'Nov',
-                  'Dec',
-                ];
-                return '${m[d.month - 1]} ${d.day}, ${d.year}';
-              }(),
+              value: _fmtDate(s.onboardedDate),
             ),
           ],
         ),
@@ -1397,7 +1387,7 @@ class _OverviewTab extends StatelessWidget {
 }
 
 class _PerfRow extends StatelessWidget {
-  final String label, subValue, mainValue;
+  final String label, mainValue, subValue;
   final Color color;
   const _PerfRow(this.label, this.mainValue, this.subValue, this.color);
 
@@ -1427,9 +1417,9 @@ class _PerfRow extends StatelessWidget {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 //  PAYMENTS TAB
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 class _PaymentsTab extends StatelessWidget {
   final Supplier supplier;
   final SupplierProvider prov;
@@ -1443,7 +1433,7 @@ class _PaymentsTab extends StatelessWidget {
     return Column(
       children: [
         if (pendingAmt > 0 || overdueAmt > 0)
-          Container(
+          Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
               children: [
@@ -1511,8 +1501,8 @@ class _PaymentsTab extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   itemCount: supplier.payments.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) =>
-                      _PaymentCard(payment: supplier.payments[i]),
+                  itemBuilder: (ctx, i) =>
+                      _PaymentCard(payment: supplier.payments[i], prov: prov),
                 ),
         ),
       ],
@@ -1573,13 +1563,15 @@ class _PaySummaryTile extends StatelessWidget {
 
 class _PaymentCard extends StatelessWidget {
   final PaymentRecord payment;
-  const _PaymentCard({required this.payment});
+  final SupplierProvider prov;
+  const _PaymentCard({required this.payment, required this.prov});
 
   @override
   Widget build(BuildContext context) {
     final p = payment;
     final color = _payColor(p.status);
     final bg = _payBg(p.status);
+    final canMarkPaid = p.status != PaymentStatus.paid;
 
     return Container(
       decoration: BoxDecoration(
@@ -1660,23 +1652,17 @@ class _PaymentCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Row(
+                    Wrap(
+                      spacing: 6,
                       children: [
                         Text(
-                          p.mode.emoji,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          p.mode.label,
+                          '${p.mode.emoji} ${p.mode.label}',
                           style: const TextStyle(
                             fontSize: 11,
                             color: SC.textSec,
                           ),
                         ),
-                        const SizedBox(width: 8),
                         const Text('·', style: TextStyle(color: SC.textMute)),
-                        const SizedBox(width: 8),
                         Text(
                           p.dateLabel,
                           style: const TextStyle(
@@ -1685,9 +1671,7 @@ class _PaymentCard extends StatelessWidget {
                           ),
                         ),
                         if (p.invoiceRef != null) ...[
-                          const SizedBox(width: 8),
                           const Text('·', style: TextStyle(color: SC.textMute)),
-                          const SizedBox(width: 8),
                           Text(
                             p.invoiceRef!,
                             style: const TextStyle(
@@ -1697,36 +1681,50 @@ class _PaymentCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                        if (p.transactionRef != null) ...[
+                          const Text('·', style: TextStyle(color: SC.textMute)),
+                          Text(
+                            'Ref: ${p.transactionRef!}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: SC.textSec,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '₹${_fmt(p.amount)}',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: SC.textPri,
-                              ),
-                            ),
-                            if (p.status == PaymentStatus.partial &&
-                                p.paidAmount != null)
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                'Paid ₹${_fmt(p.paidAmount!)} · Balance ₹${_fmt(p.outstanding)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: SC.partial,
+                                '₹${_fmt(p.amount)}',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  color: SC.textPri,
                                 ),
                               ),
-                          ],
+                              if (p.status == PaymentStatus.partial &&
+                                  p.paidAmount != null)
+                                Text(
+                                  'Paid ₹${_fmt(p.paidAmount!)} · Balance ₹${_fmt(p.outstanding)}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: SC.partial,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                         if (p.dueDate != null)
                           Container(
+                            margin: const EdgeInsets.only(right: 8),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 9,
                               vertical: 4,
@@ -1744,6 +1742,31 @@ class _PaymentCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                        if (canMarkPaid)
+                          GestureDetector(
+                            onTap: () => _markPaid(context, p),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: SC.paidBg,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: SC.paid.withOpacity(0.3),
+                                ),
+                              ),
+                              child: const Text(
+                                '✓ Mark Paid',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: SC.paid,
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ],
@@ -1755,11 +1778,214 @@ class _PaymentCard extends StatelessWidget {
       ),
     );
   }
+
+  void _markPaid(BuildContext ctx, PaymentRecord p) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: prov,
+        child: _MarkPaidSheet(
+          paymentId: p.id,
+          amount: p.amount,
+          provider: prov,
+        ),
+      ),
+    );
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  MARK PAID SHEET
+// ══════════════════════════════════════════════════════════════════════════════
+class _MarkPaidSheet extends StatefulWidget {
+  final String paymentId;
+  final double amount;
+  final SupplierProvider provider;
+  const _MarkPaidSheet({
+    required this.paymentId,
+    required this.amount,
+    required this.provider,
+  });
+
+  @override
+  State<_MarkPaidSheet> createState() => _MarkPaidSheetState();
+}
+
+class _MarkPaidSheetState extends State<_MarkPaidSheet> {
+  final _refCtrl = TextEditingController();
+  PaymentMode _mode = PaymentMode.upi;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _refCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_mode.requiresRef && _refCtrl.text.trim().isEmpty) {
+      setState(
+        () => _error = 'Transaction reference is required for ${_mode.label}.',
+      );
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final ok = await widget.provider.markPaymentAsPaid(
+      paymentId: widget.paymentId,
+      mode: _mode,
+      transactionRef: _refCtrl.text.trim(),
+    );
+    if (mounted) {
+      if (ok) {
+        Navigator.pop(context);
+      } else {
+        setState(() {
+          _loading = false;
+          _error = widget.provider.errorMessage;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      decoration: const BoxDecoration(
+        color: SC.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Handle(),
+          _SheetTop(
+            emoji: '✅',
+            title: 'Mark as Paid',
+            subtitle: 'Confirm payment of ₹${_fmt(widget.amount)}',
+            color: SC.paid,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _FieldLabel('Payment Mode'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: PaymentMode.values.map((m) {
+                    final isSel = _mode == m;
+                    return GestureDetector(
+                      onTap: () => setState(() => _mode = m),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 140),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 13,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSel ? SC.primaryLight : SC.surfaceAlt,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSel ? SC.primary : SC.border,
+                            width: isSel ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(m.emoji, style: const TextStyle(fontSize: 13)),
+                            const SizedBox(width: 5),
+                            Text(
+                              m.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: isSel ? SC.primary : SC.textSec,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+                _FieldLabel(
+                  'Transaction Ref${_mode.requiresRef ? ' *' : ' (optional)'}',
+                ),
+                _TField(
+                  ctrl: _refCtrl,
+                  hint: _mode == PaymentMode.upi
+                      ? 'UPI Transaction ID'
+                      : _mode == PaymentMode.cheque
+                      ? 'Cheque Number'
+                      : _mode == PaymentMode.bank
+                      ? 'UTR / NEFT Ref'
+                      : 'Reference',
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: const TextStyle(fontSize: 12, color: SC.overdue),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: SC.paid,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'Confirm Payment',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  DOCUMENTS TAB
-// ─────────────────────────────────────────────────────────────────────────────
+//  ↓↓ THIS IS WHERE UploadDocumentSheet IS USED ↓↓
+// ══════════════════════════════════════════════════════════════════════════════
 class _DocumentsTab extends StatelessWidget {
   final Supplier supplier;
   final SupplierProvider prov;
@@ -1772,7 +1998,7 @@ class _DocumentsTab extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: GestureDetector(
-            onTap: () => _openAddDoc(context),
+            onTap: () => _openUploadSheet(context), // ← calls the new sheet
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 11),
               decoration: BoxDecoration(
@@ -1811,30 +2037,45 @@ class _DocumentsTab extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   itemCount: supplier.documents.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) =>
-                      _DocumentCard(doc: supplier.documents[i]),
+                  itemBuilder: (ctx, i) => _DocumentCard(
+                    doc: supplier.documents[i],
+                    prov: prov,
+                    supplierId: supplier.id,
+                  ),
                 ),
         ),
       ],
     );
   }
 
-  void _openAddDoc(BuildContext ctx) {
+  // ── This method now opens UploadDocumentSheet (from upload_document_sheet.dart)
+  void _openUploadSheet(BuildContext ctx) {
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => ChangeNotifierProvider.value(
         value: prov,
-        child: _AddDocumentSheet(supplierId: supplier.id, provider: prov),
+        child: UploadDocumentSheet(
+          // ← uses the new imported sheet
+          supplierId: supplier.id,
+          provider: prov,
+        ),
       ),
     );
   }
 }
 
+// ── Document Card ─────────────────────────────────────────────────────────────
 class _DocumentCard extends StatelessWidget {
   final SupplierDocument doc;
-  const _DocumentCard({required this.doc});
+  final SupplierProvider prov;
+  final String supplierId;
+  const _DocumentCard({
+    required this.doc,
+    required this.prov,
+    required this.supplierId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1913,7 +2154,7 @@ class _DocumentCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      _uploadDate(doc.uploadedOn),
+                      _fmtDate(doc.uploadedOn),
                       style: const TextStyle(fontSize: 11, color: SC.textMute),
                     ),
                   ],
@@ -1921,6 +2162,7 @@ class _DocumentCard extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
@@ -1944,123 +2186,342 @@ class _DocumentCard extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(width: 6),
+          Column(
+            children: [
+              if (doc.hasFile)
+                GestureDetector(
+                  onTap: () => _viewDocument(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: SC.primaryLight,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.visibility_outlined,
+                      color: SC.primary,
+                      size: 16,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => _confirmDelete(context),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: SC.overdueBg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: SC.overdue,
+                    size: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  String _uploadDate(DateTime d) {
-    const m = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${m[d.month - 1]} ${d.day}, ${d.year}';
+  Future<void> _viewDocument(BuildContext ctx) async {
+    final snack = ScaffoldMessenger.of(ctx);
+    snack.showSnackBar(
+      const SnackBar(
+        content: Text('Loading document...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    final url = await prov.getDocumentViewUrl(doc);
+    if (url == null) {
+      snack.showSnackBar(
+        const SnackBar(content: Text('Could not load document URL.')),
+      );
+      return;
+    }
+
+    if (ctx.mounted) {
+      showDialog(
+        context: ctx,
+        builder: (_) => AlertDialog(
+          backgroundColor: SC.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            doc.title,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: SC.textPri,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Document is stored securely. Copy the link to view in your browser:',
+                style: TextStyle(fontSize: 13, color: SC.textSec),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: url));
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Link copied to clipboard!')),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: SC.primaryLight,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: SC.primary.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.link_rounded,
+                        color: SC.primary,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          url,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: SC.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close', style: TextStyle(color: SC.textSec)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: url));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Link copied to clipboard!')),
+                );
+              },
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy Link'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: SC.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 0,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _confirmDelete(BuildContext ctx) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: SC.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Delete Document?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: SC.textPri),
+        ),
+        content: Text(
+          'Remove "${doc.title}" permanently?',
+          style: const TextStyle(color: SC.textSec),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: SC.textSec)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              prov.deleteDocument(supplierId, doc.id, doc.fileRef);
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: SC.overdue,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  HISTORY TAB  (delivery log)
-// ─────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  HISTORY TAB (Deliveries)
+// ══════════════════════════════════════════════════════════════════════════════
 class _HistoryTab extends StatelessWidget {
   final Supplier supplier;
-  const _HistoryTab({required this.supplier});
+  final SupplierProvider prov;
+  const _HistoryTab({required this.supplier, required this.prov});
 
   @override
   Widget build(BuildContext context) {
     final deliveries = supplier.deliveries;
-    if (deliveries.isEmpty) {
-      return const Center(
-        child: Text(
-          'No delivery history',
-          style: TextStyle(color: SC.textMute),
-        ),
-      );
-    }
 
-    final onTime = deliveries.where((d) => d.onTime).length;
-    final total = deliveries.length;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+    return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [SC.primary, SC.primaryMid],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              const Text('🚚', style: TextStyle(fontSize: 28)),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Delivery Performance',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white60,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$onTime/$total on-time',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: GestureDetector(
+            onTap: () => _openAddDelivery(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              decoration: BoxDecoration(
+                color: SC.primaryLight,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: SC.primary.withOpacity(0.3)),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  Icon(Icons.add, color: SC.primary, size: 17),
+                  SizedBox(width: 6),
                   Text(
-                    '${supplier.deliveryScore.toInt()}%',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: SC.amberBright,
+                    'Add Delivery Record',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: SC.primary,
                     ),
-                  ),
-                  const Text(
-                    'score',
-                    style: TextStyle(fontSize: 11, color: Colors.white54),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
-        const SizedBox(height: 14),
-        ...deliveries.asMap().entries.map((e) {
-          final i = e.key;
-          final d = e.value;
-          return _DeliveryTimelineItem(
-            delivery: d,
-            isLast: i == deliveries.length - 1,
-          );
-        }),
+        const Divider(height: 1, color: SC.divider),
+        if (deliveries.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text(
+                'No delivery history',
+                style: TextStyle(color: SC.textMute),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [SC.primary, SC.primaryMid],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('🚚', style: TextStyle(fontSize: 28)),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Delivery Performance',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white60,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${deliveries.where((d) => d.onTime).length}/${deliveries.length} on-time',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${supplier.deliveryScore.toInt()}%',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                              color: SC.amberBright,
+                            ),
+                          ),
+                          const Text(
+                            'score',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ...deliveries.asMap().entries.map(
+                  (e) => _DeliveryTimelineItem(
+                    delivery: e.value,
+                    isLast: e.key == deliveries.length - 1,
+                    prov: prov,
+                    supplierId: supplier.id,
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
+    );
+  }
+
+  void _openAddDelivery(BuildContext ctx) {
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: prov,
+        child: _AddDeliverySheet(supplierId: supplier.id, provider: prov),
+      ),
     );
   }
 }
@@ -2068,7 +2529,14 @@ class _HistoryTab extends StatelessWidget {
 class _DeliveryTimelineItem extends StatelessWidget {
   final SupplierDelivery delivery;
   final bool isLast;
-  const _DeliveryTimelineItem({required this.delivery, required this.isLast});
+  final SupplierProvider prov;
+  final String supplierId;
+  const _DeliveryTimelineItem({
+    required this.delivery,
+    required this.isLast,
+    required this.prov,
+    required this.supplierId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2140,6 +2608,22 @@ class _DeliveryTimelineItem extends StatelessWidget {
                           color: SC.primary,
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => _deleteDelivery(context, d.id),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: SC.overdueBg,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: SC.overdue,
+                            size: 14,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -2196,11 +2680,387 @@ class _DeliveryTimelineItem extends StatelessWidget {
       ),
     );
   }
+
+  void _deleteDelivery(BuildContext ctx, String id) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: SC.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Delete Delivery?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: SC.textPri),
+        ),
+        content: const Text(
+          'Remove this delivery record?',
+          style: TextStyle(color: SC.textSec),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: SC.textSec)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              prov.deleteDelivery(id);
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: SC.overdue,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  ADD DELIVERY SHEET
+// ══════════════════════════════════════════════════════════════════════════════
+class _AddDeliverySheet extends StatefulWidget {
+  final String supplierId;
+  final SupplierProvider provider;
+  const _AddDeliverySheet({required this.supplierId, required this.provider});
+
+  @override
+  State<_AddDeliverySheet> createState() => _AddDeliverySheetState();
+}
+
+class _AddDeliverySheetState extends State<_AddDeliverySheet> {
+  final _itemCtrl = TextEditingController();
+  final _valueCtrl = TextEditingController();
+  final _noteCtrl = TextEditingController();
+  final _itemsList = <String>[];
+  DateTime _date = DateTime.now();
+  bool _onTime = true;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _itemCtrl.dispose();
+    _valueCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addItem() {
+    final v = _itemCtrl.text.trim();
+    if (v.isEmpty) return;
+    setState(() {
+      _itemsList.add(v);
+      _itemCtrl.clear();
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_itemsList.isEmpty) {
+      setState(() => _error = 'Add at least one item.');
+      return;
+    }
+    final value = double.tryParse(_valueCtrl.text.trim()) ?? 0;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final delivery = SupplierDelivery(
+      id: 'del_${DateTime.now().millisecondsSinceEpoch}',
+      deliveredOn: _date,
+      items: List.from(_itemsList),
+      totalValue: value,
+      onTime: _onTime,
+      note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+    );
+
+    final ok = await widget.provider.addDelivery(widget.supplierId, delivery);
+    if (mounted) {
+      if (ok) {
+        Navigator.pop(context);
+      } else {
+        setState(() {
+          _loading = false;
+          _error = widget.provider.errorMessage;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      decoration: const BoxDecoration(
+        color: SC.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Handle(),
+          _SheetTop(
+            emoji: '🚚',
+            title: 'Add Delivery',
+            subtitle: 'Record a new delivery',
+            color: SC.primary,
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      final d = await showDatePicker(
+                        context: context,
+                        initialDate: _date,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                      );
+                      if (d != null) setState(() => _date = d);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 13,
+                      ),
+                      decoration: BoxDecoration(
+                        color: SC.surfaceAlt,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: SC.border),
+                      ),
+                      child: Row(
+                        children: [
+                          const Text('🗓️', style: TextStyle(fontSize: 16)),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Delivered: ${_fmtDate(_date)}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: SC.textPri,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _FieldLabel('Total Value (₹)'),
+                  _TField(
+                    ctrl: _valueCtrl,
+                    hint: '0.00',
+                    type: TextInputType.number,
+                  ),
+                  const SizedBox(height: 12),
+                  _FieldLabel('Delivery Status'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _StatusToggle(
+                        label: '✅ On Time',
+                        selected: _onTime,
+                        onTap: () => setState(() => _onTime = true),
+                        color: SC.active,
+                        bg: SC.activeBg,
+                      ),
+                      const SizedBox(width: 10),
+                      _StatusToggle(
+                        label: '⚠️ Delayed',
+                        selected: !_onTime,
+                        onTap: () => setState(() => _onTime = false),
+                        color: SC.overdue,
+                        bg: SC.overdueBg,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _FieldLabel('Items Delivered'),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _TField(
+                          ctrl: _itemCtrl,
+                          hint: 'e.g. Rice Batter 50kg',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _addItem,
+                        child: Container(
+                          height: 46,
+                          width: 46,
+                          decoration: BoxDecoration(
+                            color: SC.primaryLight,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: SC.primary.withOpacity(0.3),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.add_rounded,
+                            color: SC.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_itemsList.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _itemsList
+                          .asMap()
+                          .entries
+                          .map(
+                            (e) => GestureDetector(
+                              onTap: () =>
+                                  setState(() => _itemsList.removeAt(e.key)),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: SC.primaryLight,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: SC.primary.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      e.value,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: SC.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Icon(
+                                      Icons.close_rounded,
+                                      size: 13,
+                                      color: SC.primary,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _FieldLabel('Note (optional)'),
+                  _TField(ctrl: _noteCtrl, hint: 'Any delivery notes...'),
+                  if (_error != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _error!,
+                      style: const TextStyle(fontSize: 12, color: SC.overdue),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SC.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: _loading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Save Delivery',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusToggle extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color color, bg;
+  const _StatusToggle({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    required this.color,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? bg : SC.surfaceAlt,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? color : SC.border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: selected ? color : SC.textSec,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  ADD PAYMENT SHEET
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _AddPaymentSheet extends StatefulWidget {
   final String supplierId;
   final SupplierProvider provider;
@@ -2213,41 +3073,84 @@ class _AddPaymentSheet extends StatefulWidget {
 class _AddPaymentSheetState extends State<_AddPaymentSheet> {
   final _formKey = GlobalKey<FormState>();
   final _amtCtrl = TextEditingController();
+  final _paidCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _refCtrl = TextEditingController();
+  final _txRefCtrl = TextEditingController();
   PaymentStatus _status = PaymentStatus.pending;
   PaymentMode _mode = PaymentMode.upi;
   DateTime _date = DateTime.now();
   DateTime? _due;
   bool _loading = false;
+  String? _error;
 
   @override
   void dispose() {
     _amtCtrl.dispose();
+    _paidCtrl.dispose();
     _descCtrl.dispose();
     _refCtrl.dispose();
+    _txRefCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
+    if (_mode.requiresRef && _txRefCtrl.text.trim().isEmpty) {
+      setState(
+        () => _error = 'Transaction reference is required for ${_mode.label}.',
+      );
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final paidAmt = _paidCtrl.text.trim().isNotEmpty
+        ? double.tryParse(_paidCtrl.text.trim())
+        : null;
+
     final p = PaymentRecord(
       id: 'pay_${DateTime.now().millisecondsSinceEpoch}',
-      amount: double.parse(_amtCtrl.text),
+      amount: double.parse(_amtCtrl.text.trim()),
+      paidAmount: paidAmt,
       status: _status,
       mode: _mode,
       date: _date,
       dueDate: _due,
       description: _descCtrl.text.trim(),
       invoiceRef: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+      transactionRef: _txRefCtrl.text.trim().isEmpty
+          ? null
+          : _txRefCtrl.text.trim(),
     );
-    await widget.provider.addPayment(widget.supplierId, p);
-    if (mounted) Navigator.pop(context);
+
+    final ok = await widget.provider.addPayment(widget.supplierId, p);
+    if (mounted) {
+      if (ok) {
+        Navigator.pop(context);
+      } else {
+        setState(() {
+          _loading = false;
+          _error = widget.provider.errorMessage;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final refHint = _mode == PaymentMode.upi
+        ? 'UPI Transaction ID *'
+        : _mode == PaymentMode.cheque
+        ? 'Cheque Number *'
+        : _mode == PaymentMode.bank
+        ? 'UTR / NEFT Ref *'
+        : _mode == PaymentMode.credit
+        ? 'Credit Ref *'
+        : 'Reference (optional)';
+
     return Container(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -2274,13 +3177,22 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _FieldLabel('Amount (₹) *'),
+                    _FieldLabel('Total Amount (₹) *'),
                     _TField(
                       ctrl: _amtCtrl,
                       hint: '0.00',
                       type: TextInputType.number,
                       validator: (v) =>
                           (v == null || v.isEmpty) ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    _FieldLabel(
+                      'Amount Paid (₹) — leave blank if fully pending',
+                    ),
+                    _TField(
+                      ctrl: _paidCtrl,
+                      hint: '0.00',
+                      type: TextInputType.number,
                     ),
                     const SizedBox(height: 12),
                     _FieldLabel('Description *'),
@@ -2294,7 +3206,65 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
                     _FieldLabel('Invoice Ref'),
                     _TField(ctrl: _refCtrl, hint: 'INV-2025-001'),
                     const SizedBox(height: 14),
-                    _FieldLabel('Payment Status'),
+                    _FieldLabel('Payment Mode *'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: PaymentMode.values.map((m) {
+                        final isSel = _mode == m;
+                        return GestureDetector(
+                          onTap: () => setState(() => _mode = m),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 13,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSel ? SC.primaryLight : SC.surfaceAlt,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSel ? SC.primary : SC.border,
+                                width: isSel ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  m.emoji,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  m.label,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: isSel ? SC.primary : SC.textSec,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    _FieldLabel(refHint),
+                    _TField(
+                      ctrl: _txRefCtrl,
+                      hint: _mode == PaymentMode.upi
+                          ? 'e.g. 423512345678'
+                          : _mode == PaymentMode.cheque
+                          ? 'e.g. 001234'
+                          : _mode == PaymentMode.bank
+                          ? 'e.g. UTIB0001234'
+                          : 'Optional for cash',
+                    ),
+                    const SizedBox(height: 14),
+                    _FieldLabel('Status'),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -2340,51 +3310,66 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 14),
-                    _FieldLabel('Payment Mode'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: PaymentMode.values.map((m) {
-                        final isSel = _mode == m;
-                        return GestureDetector(
-                          onTap: () => setState(() => _mode = m),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 13,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isSel ? SC.primaryLight : SC.surfaceAlt,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSel ? SC.primary : SC.border,
-                                width: isSel ? 1.5 : 1,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  m.emoji,
-                                  style: const TextStyle(fontSize: 13),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  m.label,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: isSel ? SC.primary : SC.textSec,
-                                  ),
-                                ),
-                              ],
-                            ),
+                    GestureDetector(
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate:
+                              _due ??
+                              DateTime.now().add(const Duration(days: 14)),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
                           ),
                         );
-                      }).toList(),
+                        if (d != null) setState(() => _due = d);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
+                        decoration: BoxDecoration(
+                          color: SC.surfaceAlt,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: SC.border),
+                        ),
+                        child: Row(
+                          children: [
+                            const Text('📅', style: TextStyle(fontSize: 16)),
+                            const SizedBox(width: 8),
+                            Text(
+                              _due == null
+                                  ? 'Set due date (optional)'
+                                  : 'Due: ${_fmtDate(_due!)}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: _due != null ? SC.textPri : SC.textMute,
+                              ),
+                            ),
+                            if (_due != null) ...[
+                              const Spacer(),
+                              GestureDetector(
+                                onTap: () => setState(() => _due = null),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  size: 16,
+                                  color: SC.textMute,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _error!,
+                        style: const TextStyle(fontSize: 12, color: SC.overdue),
+                      ),
+                    ],
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
@@ -2428,211 +3413,9 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  ADD DOCUMENT SHEET
-// ═════════════════════════════════════════════════════════════════════════════
-class _AddDocumentSheet extends StatefulWidget {
-  final String supplierId;
-  final SupplierProvider provider;
-  const _AddDocumentSheet({required this.supplierId, required this.provider});
-
-  @override
-  State<_AddDocumentSheet> createState() => _AddDocumentSheetState();
-}
-
-class _AddDocumentSheetState extends State<_AddDocumentSheet> {
-  final _titleCtrl = TextEditingController();
-  DocumentType _type = DocumentType.invoice;
-  DateTime? _expiry;
-  bool _loading = false;
-
-  @override
-  void dispose() {
-    _titleCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_titleCtrl.text.trim().isEmpty) return;
-    setState(() => _loading = true);
-    final doc = SupplierDocument(
-      id: 'doc_${DateTime.now().millisecondsSinceEpoch}',
-      type: _type,
-      title: _titleCtrl.text.trim(),
-      uploadedOn: DateTime.now(),
-      expiryDate: _expiry,
-    );
-    await widget.provider.addDocument(widget.supplierId, doc);
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _pickExpiry() async {
-    final d = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 365)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 3650)),
-    );
-    if (d != null) setState(() => _expiry = d);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      decoration: const BoxDecoration(
-        color: SC.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _Handle(),
-          _SheetTop(
-            emoji: '📎',
-            title: 'Upload Document',
-            subtitle: 'Add a new document record',
-            color: SC.primary,
-          ),
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _FieldLabel('Document Title *'),
-                  _TField(ctrl: _titleCtrl, hint: 'e.g. GST Certificate 2025'),
-                  const SizedBox(height: 14),
-                  _FieldLabel('Document Type'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: DocumentType.values.map((t) {
-                      final isSel = _type == t;
-                      return GestureDetector(
-                        onTap: () => setState(() => _type = t),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 140),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSel ? SC.primaryLight : SC.surfaceAlt,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isSel ? SC.primary : SC.border,
-                              width: isSel ? 1.5 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                t.emoji,
-                                style: const TextStyle(fontSize: 13),
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                t.label,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: isSel ? SC.primary : SC.textSec,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 14),
-                  GestureDetector(
-                    onTap: _pickExpiry,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 13,
-                      ),
-                      decoration: BoxDecoration(
-                        color: SC.surfaceAlt,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: SC.border),
-                      ),
-                      child: Row(
-                        children: [
-                          const Text('📅', style: TextStyle(fontSize: 16)),
-                          const SizedBox(width: 8),
-                          Text(
-                            _expiry == null
-                                ? 'Set expiry date (optional)'
-                                : () {
-                                    const m = [
-                                      'Jan',
-                                      'Feb',
-                                      'Mar',
-                                      'Apr',
-                                      'May',
-                                      'Jun',
-                                      'Jul',
-                                      'Aug',
-                                      'Sep',
-                                      'Oct',
-                                      'Nov',
-                                      'Dec',
-                                    ];
-                                    return 'Expires ${m[_expiry!.month - 1]} ${_expiry!.day}, ${_expiry!.year}';
-                                  }(),
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: _expiry != null ? SC.textPri : SC.textMute,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: SC.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Text(
-                        'Save Document',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  ADD / EDIT SUPPLIER SHEET
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _AddEditSupplierSheet extends StatefulWidget {
   final Supplier? editSupplier;
   const _AddEditSupplierSheet({this.editSupplier});
@@ -2647,9 +3430,9 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
       _cityCtrl,
       _gstCtrl,
       _addrCtrl,
-      _notesCtrl;
+      _notesCtrl,
+      _creditLimitCtrl;
   late int _creditDays;
-  late double _creditLimit;
   late String _category;
   late String _emoji;
   late SupplierStatus _status;
@@ -2694,8 +3477,10 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
     _gstCtrl = TextEditingController(text: e?.gstNumber ?? '');
     _addrCtrl = TextEditingController(text: e?.address ?? '');
     _notesCtrl = TextEditingController(text: e?.notes ?? '');
+    _creditLimitCtrl = TextEditingController(
+      text: e?.creditLimit.toStringAsFixed(0) ?? '25000',
+    );
     _creditDays = e?.creditDays ?? 14;
-    _creditLimit = e?.creditLimit ?? 25000;
     _category = e?.category ?? 'Grains & Pulses';
     _emoji = e?.emoji ?? '🏭';
     _status = e?.status ?? SupplierStatus.active;
@@ -2703,7 +3488,14 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
 
   @override
   void dispose() {
-    for (final c in [_nameCtrl, _cityCtrl, _gstCtrl, _addrCtrl, _notesCtrl]) {
+    for (final c in [
+      _nameCtrl,
+      _cityCtrl,
+      _gstCtrl,
+      _addrCtrl,
+      _notesCtrl,
+      _creditLimitCtrl,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -2722,7 +3514,7 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
       gstNumber: _gstCtrl.text.trim().isEmpty ? null : _gstCtrl.text.trim(),
       address: _addrCtrl.text.trim().isEmpty ? null : _addrCtrl.text.trim(),
       city: _cityCtrl.text.trim().isEmpty ? null : _cityCtrl.text.trim(),
-      creditLimit: _creditLimit,
+      creditLimit: double.tryParse(_creditLimitCtrl.text.trim()) ?? 25000,
       creditDays: _creditDays,
       rating: widget.editSupplier?.rating ?? 0,
       contacts: widget.editSupplier?.contacts ?? [],
@@ -2732,7 +3524,7 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
       onboardedDate: widget.editSupplier?.onboardedDate ?? DateTime.now(),
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
     );
-    log('Submitting supplier: $sup, isEdit: $isEdit');
+    log('Submitting supplier: ${sup.name}, isEdit: $isEdit');
     isEdit ? await prov.updateSupplier(sup) : await prov.addSupplier(sup);
     if (mounted) Navigator.pop(context);
   }
@@ -2842,6 +3634,13 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                     const SizedBox(height: 12),
                     _FieldLabel('Address'),
                     _TField(ctrl: _addrCtrl, hint: 'Street, Market, Area'),
+                    const SizedBox(height: 12),
+                    _FieldLabel('Credit Limit (₹)'),
+                    _TField(
+                      ctrl: _creditLimitCtrl,
+                      hint: '25000',
+                      type: TextInputType.number,
+                    ),
                     const SizedBox(height: 14),
                     _FieldLabel('Category'),
                     const SizedBox(height: 8),
@@ -3070,9 +3869,9 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 //  SHARED MICRO-WIDGETS
-// ═════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 class _StatusBadge extends StatelessWidget {
   final SupplierStatus status;
   final bool light;
@@ -3209,55 +4008,51 @@ class _InfoBlock extends StatelessWidget {
       border: Border.all(color: SC.border),
     ),
     child: Column(
-      children: items
-          .asMap()
-          .entries
-          .map(
-            (e) => Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  child: Row(
-                    children: [
-                      Text(e.value.icon, style: const TextStyle(fontSize: 16)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              e.value.label,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: SC.textMute,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            Text(
-                              e.value.value,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: SC.textPri,
-                              ),
-                            ),
-                          ],
+      children: items.asMap().entries.map((e) {
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
+                  Text(e.value.icon, style: const TextStyle(fontSize: 16)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          e.value.label,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: SC.textMute,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
-                    ],
+                        Text(
+                          e.value.value,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: SC.textPri,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                if (e.key < items.length - 1)
-                  const Divider(
-                    height: 1,
-                    indent: 16,
-                    endIndent: 16,
-                    color: SC.divider,
-                  ),
-              ],
+                ],
+              ),
             ),
-          )
-          .toList(),
+            if (e.key < items.length - 1)
+              const Divider(
+                height: 1,
+                indent: 16,
+                endIndent: 16,
+                color: SC.divider,
+              ),
+          ],
+        );
+      }).toList(),
     ),
   );
 }
@@ -3502,9 +4297,27 @@ class _AddFAB extends StatelessWidget {
   );
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 String _fmt(double v) {
   if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
   if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
   return v.toInt().toString();
+}
+
+String _fmtDate(DateTime d) {
+  const m = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${m[d.month - 1]} ${d.day}, ${d.year}';
 }

@@ -4,62 +4,40 @@
 
     <!-- 🔐 INTERNET -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <!-- 📦 Storage / Media -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission
-        android:name="android.permission.READ_MEDIA_IMAGES" />
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+
+    <!-- 📷 Camera -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
 
     <!-- 🔔 Notifications & Alarms -->
     <uses-permission android:name="android.permission.VIBRATE"/>
-
-    <!--
-        POST_NOTIFICATIONS — REQUIRED on Android 13+ (API 33+)
-        Without this, flutter_local_notifications silently fails.
-        Runtime request is handled by requestNotificationsPermission()
-    -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-
-    <!--
-        SCHEDULE_EXACT_ALARM + USE_EXACT_ALARM
-        Required for zonedSchedule() to fire at the EXACT time even when
-        the app is killed, screen is locked, or phone is in Doze mode.
-        Without these, Android may delay the alarm by up to 15 minutes.
-    -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
-
-    <!--
-        RECEIVE_BOOT_COMPLETED
-        Allows ScheduledNotificationBootReceiver to re-schedule pending
-        zonedSchedule() alarms after the phone reboots.
-        Without this, ALL scheduled reminders are lost on device restart.
-    -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <!--
-        FOREGROUND_SERVICE + DATA_SYNC
-        Required for WorkManager to run as a foreground service on Android 12+.
-        Used by the long-seated background check task.
-    -->
+    <!-- ⚙️ Background / WorkManager -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
-
-    <!--
-        REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-        Prevents aggressive battery-saving on Xiaomi / Huawei / OnePlus / Samsung
-        from killing WorkManager background tasks.
-    -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <application
         android:label="pos_app"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true">
 
         <!-- ── Main Flutter activity ──────────────────────────────────── -->
         <activity
@@ -82,33 +60,46 @@
             </intent-filter>
         </activity>
 
-        <!-- ── UCrop (image cropper — existing) ──────────────────────── -->
+        <!-- ── UCrop (image cropper) ──────────────────────────────────── -->
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
 
-        <!-- ── Firebase Recaptcha (existing) ─────────────────────────── -->
+        <!-- ── Firebase Recaptcha ─────────────────────────────────────── -->
         <activity
             android:name="com.google.firebase.auth.internal.RecaptchaActivity"
             android:launchMode="singleTask"
             tools:replace="android:launchMode"/>
 
-        <!-- ═══════════════════════════════════════════════════════════════
-             flutter_local_notifications — SCHEDULED NOTIFICATION RECEIVERS
-             ═══════════════════════════════════════════════════════════════
+        <!--
+            ══════════════════════════════════════════════════════════════
+            FileProvider — THE FIX FOR CAMERA CRASH on Android 11+
 
-             ScheduledNotificationReceiver
-               Receives the AlarmManager broadcast and shows the notification.
-               THIS is what makes zonedSchedule() fire when the app is killed.
-               Android OS wakes up this receiver at the scheduled time,
-               completely independently of whether the app is alive.
+            image_picker v1.x uses ${applicationId}.fileprovider as the
+            authority when it saves the camera capture temp file.
+            If this provider is missing or has the wrong authority the OS
+            throws FileUriExposedException and the app dies immediately.
 
-             ScheduledNotificationBootReceiver
-               Re-schedules all pending alarms after the phone reboots.
-               Without this, every device restart wipes all pending reminders.
-               Covers 4 boot action variants for full device compatibility.
-        ═══════════════════════════════════════════════════════════════ -->
+            CRITICAL RULES:
+              • android:name  must be exactly androidx.core.content.FileProvider
+              • android:authorities must be exactly ${applicationId}.fileprovider
+              • android:exported must be false
+              • android:grantUriPermissions must be true
+              • meta-data resource must point to xml/file_provider_paths
+            ══════════════════════════════════════════════════════════════
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths"/>
+        </provider>
+
+        <!-- ── flutter_local_notifications receivers ─────────────────── -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false"/>
@@ -124,34 +115,41 @@
             </intent-filter>
         </receiver>
 
-        <!-- ═══════════════════════════════════════════════════════════════
-             WorkManager — FOREGROUND SERVICE DECLARATION
-             Required on Android 12+ (API 31+) when WorkManager runs tasks
-             as foreground services (used for long-seated background checks).
-             foregroundServiceType must match the permission declared above.
-        ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── WorkManager foreground service ────────────────────────── -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false"/>
 
-        <!-- Flutter embedding version (existing) -->
+        <!-- Flutter embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
 
     </application>
 
-    <!-- ── Intent queries ─────────────────────────────────────────────── -->
+    <!-- ── Intent queries (Android 11+ package visibility) ───────────── -->
     <queries>
-        <!-- Text processing (existing) -->
+        <!-- Text processing -->
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- Required for flutter_local_notifications on some Android versions -->
+        <!-- flutter_local_notifications -->
         <intent>
             <action android:name="android.intent.action.MAIN"/>
+        </intent>
+        <!-- image_picker: gallery -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT"/>
+        </intent>
+        <!-- image_picker: camera -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE"/>
+        </intent>
+        <!-- file_picker: any file -->
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT"/>
         </intent>
     </queries>
 

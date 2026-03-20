@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SAVE AT:  android/app/src/main/res/xml/file_provider_paths.xml
+
+    Create the folder android/app/src/main/res/xml/ if it doesn't exist.
+
+    WHY THIS FILE EXISTS:
+    image_picker uses Android's camera intent to capture photos. The intent
+    needs to write the captured image to a temp file. On Android 11+, apps
+    cannot share raw file:// URIs — they must use content:// URIs via a
+    FileProvider. This file tells the FileProvider which directories it is
+    allowed to share as content:// URIs.
+
+    If this file is missing → app crashes at launch.
+    If the paths are too restrictive → camera capture crashes at runtime.
+    This version covers every OEM variant (Samsung, Xiaomi, OnePlus, etc.)
+-->
+<paths>
+
+    <!--
+        External storage root — covers gallery picks and some OEMs that
+        write camera captures to external storage.
+    -->
+    <external-path
+        name="external_files"
+        path="." />
+
+    <!--
+        App-specific external files directory
+        (Context.getExternalFilesDir()) — some OEMs use this for camera.
+    -->
+    <external-files-path
+        name="external_app_files"
+        path="." />
+
+    <!--
+        External cache directory (Context.getExternalCacheDir()) —
+        image_picker writes the camera temp file here on most devices.
+        This is the most commonly missing path that causes the crash.
+    -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+
+    <!--
+        Internal cache directory (Context.getCacheDir()) — fallback for
+        devices that write to internal cache instead of external cache.
+    -->
+    <cache-path
+        name="cache_files"
+        path="." />
+
+    <!--
+        Internal files directory (Context.getFilesDir()) — rarely used
+        by image_picker but included for completeness.
+    -->
+    <files-path
+        name="internal_files"
+        path="." />
+
+</paths>

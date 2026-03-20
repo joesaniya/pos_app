@@ -1,19 +1,3 @@
-// lib/providers/supplier_provider.dart
-// ══════════════════════════════════════════════════════════════════════════════
-//  SUPPLIER PROVIDER
-//
-//  Features:
-//  ① Active / inactive / blacklisted status management
-//  ② Overview metrics: credit limit, credit days, on-time deliveries,
-//     total purchase, pending dues
-//  ③ Payment recording with mandatory mode + transaction ref;
-//     auto-promotes pending → paid when fully settled
-//  ④ Mark-as-paid on existing pending records
-//  ⑤ Document upload to Supabase Storage + signed URL for viewing
-//  ⑥ Document add (without file) + delete
-//  ⑦ Delivery record add / update / delete
-//  ⑧ Realtime subscription — auto-created suppliers appear instantly
-// ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:developer';
 import 'dart:io';

@@ -3,6 +3,8 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/models/supplier_modal.dart';
+import 'package:pos_app/providers/inventory_provider.dart';
+import 'package:pos_app/screens/supplier_stock_history_tab.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/supplier_provider.dart';
 
@@ -15,17 +17,14 @@ class SC {
   static const surfaceAlt = Color(0xFFF8F9FD);
   static const border = Color(0xFFE4E8F0);
 
-  // Primary — deep indigo-blue
   static const primary = Color(0xFF1E3A5F);
   static const primaryMid = Color(0xFF2D5282);
   static const primaryLight = Color(0xFFE8EEF8);
 
-  // Accent — electric amber
   static const amber = Color(0xFFD97706);
   static const amberLight = Color(0xFFFEF3C7);
   static const amberBright = Color(0xFFF59E0B);
 
-  // Status
   static const paid = Color(0xFF059669);
   static const paidBg = Color(0xFFECFDF5);
   static const pending = Color(0xFF0284C7);
@@ -42,7 +41,6 @@ class SC {
   static const blacklisted = Color(0xFFDC2626);
   static const blackBg = Color(0xFFFEF2F2);
 
-  // Text
   static const textPri = Color(0xFF0F172A);
   static const textSec = Color(0xFF64748B);
   static const textMute = Color(0xFFABB8CC);
@@ -105,8 +103,14 @@ class SuppliersScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => SupplierProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => SupplierProvider()),
+        // InventoryProvider is needed for SupplierStockHistoryTab inside
+        // SupplierDetailScreen. We create it once here at the root so it's
+        // available throughout the whole Suppliers flow.
+        ChangeNotifierProvider(create: (_) => InventoryProvider()),
+      ],
       child: const _SuppliersBody(),
     );
   }
@@ -208,7 +212,6 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          // Pending badge
           if (prov.totalPending > 0)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -246,7 +249,7 @@ class _Header extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  ALERT BANNER (overdue / expiring docs)
+//  ALERT BANNER
 // ═════════════════════════════════════════════════════════════════════════════
 class _AlertBanner extends StatelessWidget {
   final SupplierProvider prov;
@@ -726,11 +729,19 @@ class _SupplierList extends StatelessWidget {
   );
 
   void _openDetail(BuildContext ctx, Supplier sup, SupplierProvider prov) {
+    // ── IMPORTANT: Pass both SupplierProvider AND InventoryProvider
+    // so SupplierStockHistoryTab can access inventory data.
+    // We use .value to reuse the existing instances already created at
+    // SuppliersScreen level — no double-fetching.
+    final invProv = ctx.read<InventoryProvider>();
     Navigator.push(
       ctx,
       PageRouteBuilder(
-        pageBuilder: (_, a, __) => ChangeNotifierProvider.value(
-          value: prov,
+        pageBuilder: (_, a, __) => MultiProvider(
+          providers: [
+            ChangeNotifierProvider.value(value: prov),
+            ChangeNotifierProvider.value(value: invProv),
+          ],
           child: SupplierDetailScreen(supplier: sup),
         ),
         transitionsBuilder: (_, a, __, child) => SlideTransition(
@@ -784,7 +795,6 @@ class _SupplierCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
               child: Row(
                 children: [
-                  // Emoji avatar
                   Container(
                     width: 50,
                     height: 50,
@@ -845,7 +855,6 @@ class _SupplierCard extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        // Rating stars
                         _StarRating(rating: s.rating),
                       ],
                     ),
@@ -853,8 +862,6 @@ class _SupplierCard extends StatelessWidget {
                 ],
               ),
             ),
-
-            // ── Bottom stats row ──────────────────────────────
             Container(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
               decoration: BoxDecoration(
@@ -943,7 +950,7 @@ class _StatDiv extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  SUPPLIER DETAIL SCREEN  (full page with tabs)
+//  SUPPLIER DETAIL SCREEN  — 5 tabs (added Stocks tab)
 // ═════════════════════════════════════════════════════════════════════════════
 class SupplierDetailScreen extends StatefulWidget {
   final Supplier supplier;
@@ -956,6 +963,7 @@ class SupplierDetailScreen extends StatefulWidget {
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen>
     with SingleTickerProviderStateMixin {
+  // ── Changed length 4 → 5 ──────────────────────────────────────────────────
   late TabController _tabs;
   late Supplier _supplier;
 
@@ -963,7 +971,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
   void initState() {
     super.initState();
     _supplier = widget.supplier;
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 5, vsync: this); // ← was 4
   }
 
   @override
@@ -976,7 +984,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
   Widget build(BuildContext context) {
     return Consumer<SupplierProvider>(
       builder: (ctx, prov, _) {
-        // Keep in sync if updated
         final fresh = prov.filtered
             .where((s) => s.id == _supplier.id)
             .firstOrNull;
@@ -986,19 +993,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
           backgroundColor: SC.bg,
           body: Column(
             children: [
-              // ── Hero header ─────────────────────────────────
               _DetailHero(
                 supplier: _supplier,
                 onBack: () => Navigator.pop(context),
                 onEdit: () => _openEdit(ctx, prov),
               ),
-              // ── Tab bar ──────────────────────────────────────
               Container(
                 color: SC.surface,
                 child: TabBar(
                   controller: _tabs,
                   labelColor: SC.primary,
                   unselectedLabelColor: SC.textMute,
+                  isScrollable: true, // ← makes 5 tabs fit on small screens
+                  tabAlignment: TabAlignment.start,
                   labelStyle: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -1013,12 +1020,12 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
                     Tab(text: 'Overview'),
                     Tab(text: 'Payments'),
                     Tab(text: 'Documents'),
-                    Tab(text: 'History'),
+                    Tab(text: 'Deliveries'),
+                    Tab(text: 'Stocks'), // ← NEW
                   ],
                 ),
               ),
               const Divider(height: 1, color: SC.divider),
-              // ── Tab content ──────────────────────────────────
               Expanded(
                 child: TabBarView(
                   controller: _tabs,
@@ -1027,6 +1034,11 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen>
                     _PaymentsTab(supplier: _supplier, prov: prov),
                     _DocumentsTab(supplier: _supplier, prov: prov),
                     _HistoryTab(supplier: _supplier),
+                    // ── NEW: Stock history tab ────────────────────────
+                    // InventoryProvider is already in the tree via
+                    // MultiProvider in _openDetail(). SupplierStockHistoryTab
+                    // calls context.watch<InventoryProvider>() internally.
+                    SupplierStockHistoryTab(supplier: _supplier),
                   ],
                 ),
               ),
@@ -1193,7 +1205,6 @@ class _DetailHero extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Quick stats
           Row(
             children: [
               _HeroStat(
@@ -1268,12 +1279,9 @@ class _OverviewTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        // Contact cards
         _SectionHeader('Contacts'),
         ...s.contacts.map((c) => _ContactCard(contact: c)),
         const SizedBox(height: 8),
-
-        // Business details
         _SectionHeader('Business Info'),
         _InfoBlock(
           items: [
@@ -1316,8 +1324,6 @@ class _OverviewTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-
-        // Performance
         _SectionHeader('Performance'),
         Container(
           padding: const EdgeInsets.all(16),
@@ -1360,7 +1366,6 @@ class _OverviewTab extends StatelessWidget {
             ],
           ),
         ),
-
         if (s.notes != null) ...[
           const SizedBox(height: 8),
           _SectionHeader('Notes'),
@@ -1437,7 +1442,6 @@ class _PaymentsTab extends StatelessWidget {
 
     return Column(
       children: [
-        // Summary bar
         if (pendingAmt > 0 || overdueAmt > 0)
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -1465,8 +1469,6 @@ class _PaymentsTab extends StatelessWidget {
               ],
             ),
           ),
-
-        // Add payment button
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: GestureDetector(
@@ -1497,7 +1499,6 @@ class _PaymentsTab extends StatelessWidget {
           ),
         ),
         const Divider(height: 1, color: SC.divider),
-
         Expanded(
           child: supplier.payments.isEmpty
               ? const Center(
@@ -1599,7 +1600,6 @@ class _PaymentCard extends StatelessWidget {
       child: IntrinsicHeight(
         child: Row(
           children: [
-            // Status sidebar
             Container(
               width: 5,
               decoration: BoxDecoration(
@@ -1675,7 +1675,7 @@ class _PaymentCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('·', style: const TextStyle(color: SC.textMute)),
+                        const Text('·', style: TextStyle(color: SC.textMute)),
                         const SizedBox(width: 8),
                         Text(
                           p.dateLabel,
@@ -1686,7 +1686,7 @@ class _PaymentCard extends StatelessWidget {
                         ),
                         if (p.invoiceRef != null) ...[
                           const SizedBox(width: 8),
-                          Text('·', style: const TextStyle(color: SC.textMute)),
+                          const Text('·', style: TextStyle(color: SC.textMute)),
                           const SizedBox(width: 8),
                           Text(
                             p.invoiceRef!,
@@ -1993,7 +1993,6 @@ class _HistoryTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        // Delivery score card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -2053,8 +2052,6 @@ class _HistoryTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-
-        // Timeline
         ...deliveries.asMap().entries.map((e) {
           final i = e.key;
           final d = e.value;
@@ -2080,7 +2077,6 @@ class _DeliveryTimelineItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline track
           Column(
             children: [
               Container(
@@ -2106,7 +2102,6 @@ class _DeliveryTimelineItem extends StatelessWidget {
             ],
           ),
           const SizedBox(width: 12),
-          // Card
           Expanded(
             child: Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -2708,8 +2703,9 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
 
   @override
   void dispose() {
-    for (final c in [_nameCtrl, _cityCtrl, _gstCtrl, _addrCtrl, _notesCtrl])
+    for (final c in [_nameCtrl, _cityCtrl, _gstCtrl, _addrCtrl, _notesCtrl]) {
       c.dispose();
+    }
     super.dispose();
   }
 
@@ -2736,7 +2732,7 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
       onboardedDate: widget.editSupplier?.onboardedDate ?? DateTime.now(),
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
     );
-    log('Submitting supplier: ${sup}, isEdit: $isEdit');
+    log('Submitting supplier: $sup, isEdit: $isEdit');
     isEdit ? await prov.updateSupplier(sup) : await prov.addSupplier(sup);
     if (mounted) Navigator.pop(context);
   }
@@ -2773,7 +2769,6 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                   controller: ctrl,
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
                   children: [
-                    // Emoji
                     _FieldLabel('Icon'),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -2813,7 +2808,6 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                       ),
                     ),
                     const SizedBox(height: 14),
-
                     _FieldLabel('Supplier Name *'),
                     _TField(
                       ctrl: _nameCtrl,
@@ -2822,7 +2816,6 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                           (v == null || v.isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -2850,8 +2843,6 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                     _FieldLabel('Address'),
                     _TField(ctrl: _addrCtrl, hint: 'Street, Market, Area'),
                     const SizedBox(height: 14),
-
-                    // Category
                     _FieldLabel('Category'),
                     const SizedBox(height: 8),
                     Wrap(
@@ -2888,63 +2879,41 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 14),
-
-                    // Credit
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _FieldLabel('Credit Days'),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 6,
-                                children: [7, 14, 21, 30, 45, 60].map((d) {
-                                  final isSel = _creditDays == d;
-                                  return GestureDetector(
-                                    onTap: () =>
-                                        setState(() => _creditDays = d),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 130,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 11,
-                                        vertical: 7,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isSel
-                                            ? SC.primaryLight
-                                            : SC.surfaceAlt,
-                                        borderRadius: BorderRadius.circular(9),
-                                        border: Border.all(
-                                          color: isSel ? SC.primary : SC.border,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        '$d days',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: isSel
-                                              ? SC.primary
-                                              : SC.textSec,
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
+                    _FieldLabel('Credit Days'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [7, 14, 21, 30, 45, 60].map((d) {
+                        final isSel = _creditDays == d;
+                        return GestureDetector(
+                          onTap: () => setState(() => _creditDays = d),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 130),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 11,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSel ? SC.primaryLight : SC.surfaceAlt,
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: isSel ? SC.primary : SC.border,
                               ),
-                            ],
+                            ),
+                            child: Text(
+                              '$d days',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isSel ? SC.primary : SC.textSec,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        );
+                      }).toList(),
                     ),
                     const SizedBox(height: 14),
-
-                    // Status
                     _FieldLabel('Status'),
                     const SizedBox(height: 8),
                     Row(
@@ -2982,14 +2951,12 @@ class _AddEditSupplierSheetState extends State<_AddEditSupplierSheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 14),
-
                     _FieldLabel('Notes'),
                     _TField(
                       ctrl: _notesCtrl,
                       hint: 'Any special instructions or remarks...',
                     ),
                     const SizedBox(height: 22),
-
                     Row(
                       children: [
                         if (isEdit) ...[
@@ -3138,7 +3105,7 @@ class _StarRating extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text('⭐', style: const TextStyle(fontSize: 11)),
+      const Text('⭐', style: TextStyle(fontSize: 11)),
       const SizedBox(width: 3),
       Text(
         rating.toStringAsFixed(1),

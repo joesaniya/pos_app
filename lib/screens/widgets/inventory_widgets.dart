@@ -5,17 +5,12 @@ import 'package:pos_app/models/inventory_modal.dart';
 //  DESIGN TOKENS
 // ═══════════════════════════════════════════════════════════════
 class IColors {
-  // Page background — warm off-white with subtle warmth
   static const bg = Color(0xFFF5F4F0);
   static const surface = Color(0xFFFFFFFF);
   static const surfaceAlt = Color(0xFFF9F8F5);
-
-  // Accent — deep teal/slate-green (unique for inventory)
   static const accent = Color(0xFF1B4D3E);
   static const accentMid = Color(0xFF2D7A5F);
   static const accentLight = Color(0xFFE8F5F0);
-
-  // Status
   static const inStock = Color(0xFF1E8A5E);
   static const inStockBg = Color(0xFFE6F5EE);
   static const lowStock = Color(0xFFB8800A);
@@ -24,19 +19,16 @@ class IColors {
   static const criticalBg = Color(0xFFFFEDE8);
   static const outOfStock = Color(0xFF5A5A6E);
   static const outOfStockBg = Color(0xFFF0EFF5);
-
-  // Text
   static const textPrimary = Color(0xFF1A1A28);
   static const textSecondary = Color(0xFF6B6B80);
   static const textMuted = Color(0xFFAAABBB);
-
-  // Misc
   static const divider = Color(0xFFEEEDF0);
   static const cardShadow = Color(0x14000000);
   static const inputFill = Color(0xFFF2F1EE);
+  static const supplierLink = Color(0xFF1E3A5F);
+  static const supplierLinkBg = Color(0xFFE8EEF8);
 }
 
-// Status → color mapping
 Color iStatusColor(StockStatus s) {
   switch (s) {
     case StockStatus.inStock:
@@ -67,7 +59,7 @@ Color iStatusBg(StockStatus s) {
 //  STOCK PROGRESS BAR
 // ═══════════════════════════════════════════════════════════════
 class StockBar extends StatelessWidget {
-  final double percent; // 0.0–1.0
+  final double percent;
   final double height;
   final StockStatus status;
 
@@ -83,7 +75,6 @@ class StockBar extends StatelessWidget {
     final color = iStatusColor(status);
     return Stack(
       children: [
-        // Track
         Container(
           height: height,
           decoration: BoxDecoration(
@@ -91,7 +82,6 @@ class StockBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(height),
           ),
         ),
-        // Fill
         FractionallySizedBox(
           widthFactor: percent.clamp(0.0, 1.0),
           child: Container(
@@ -162,7 +152,7 @@ class StockStatusBadge extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  INVENTORY ITEM CARD
+//  INVENTORY ITEM CARD  — shows supplier badge at bottom
 // ═══════════════════════════════════════════════════════════════
 class InventoryItemCard extends StatelessWidget {
   final InventoryItem item;
@@ -203,13 +193,11 @@ class InventoryItemCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Top: emoji + badge + quick-add ──────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 10, 0),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Emoji in tinted box
                   Container(
                     width: 44,
                     height: 44,
@@ -224,7 +212,6 @@ class InventoryItemCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  // Quick add button
                   GestureDetector(
                     onTap: onAddStock,
                     child: Container(
@@ -243,10 +230,7 @@ class InventoryItemCard extends StatelessWidget {
                 ],
               ),
             ),
-
             const SizedBox(height: 10),
-
-            // ── Name + category ──────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Column(
@@ -275,18 +259,12 @@ class InventoryItemCard extends StatelessWidget {
                 ],
               ),
             ),
-
             const SizedBox(height: 10),
-
-            // ── Stock bar ────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: StockBar(percent: item.stockPercent, status: item.status),
             ),
-
             const SizedBox(height: 8),
-
-            // ── Stock amount + status ────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
               child: Row(
@@ -301,6 +279,219 @@ class InventoryItemCard extends StatelessWidget {
                     ),
                   ),
                   StockStatusBadge(status: item.status, compact: true),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INVENTORY ITEM CARD WIDGETS — with supplier badge
+// ═══════════════════════════════════════════════════════════════
+class InventoryItemCardWidgets extends StatelessWidget {
+  final InventoryItem item;
+  final bool canManage;
+  final VoidCallback onTap;
+  final VoidCallback onAddStock;
+
+  const InventoryItemCardWidgets({
+    Key? key,
+    required this.item,
+    required this.canManage,
+    required this.onTap,
+    required this.onAddStock,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final color = iStatusColor(item.status);
+    final bgColor = iStatusBg(item.status);
+    final isCritical =
+        item.status == StockStatus.critical ||
+        item.status == StockStatus.outOfStock;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        decoration: BoxDecoration(
+          color: IColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isCritical ? color.withOpacity(0.35) : IColors.divider,
+            width: isCritical ? 1.5 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isCritical ? color.withOpacity(0.08) : IColors.cardShadow,
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Top: emoji + quick add ─────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 10, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      item.emoji,
+                      style: const TextStyle(fontSize: 22),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (canManage)
+                    GestureDetector(
+                      onTap: onAddStock,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: IColors.accentLight,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.add,
+                          size: 16,
+                          color: IColors.accentMid,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // ── Name + category ────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: IColors.textPrimary,
+                      letterSpacing: -0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    item.category,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: IColors.textMuted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // ── Stock bar ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: StockBar(
+                percent: item.stockPercent,
+                height: 5,
+                status: item.status,
+              ),
+            ),
+            const SizedBox(height: 6),
+
+            // ── Stock value + status badge ─────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    item.stockDisplay,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                  StockStatusBadge(status: item.status, compact: true),
+                ],
+              ),
+            ),
+
+            // ── Supplier badge at bottom ────────────────────────────────
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+              decoration: BoxDecoration(
+                color: item.hasLinkedSupplier
+                    ? IColors.supplierLinkBg
+                    : IColors.surfaceAlt,
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(17),
+                ),
+                border: Border(
+                  top: BorderSide(
+                    color: item.hasLinkedSupplier
+                        ? IColors.supplierLink.withOpacity(0.15)
+                        : IColors.divider,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    item.hasLinkedSupplier
+                        ? Icons.store_rounded
+                        : Icons.store_outlined,
+                    size: 11,
+                    color: item.hasLinkedSupplier
+                        ? IColors.supplierLink
+                        : IColors.textMuted,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      item.supplier,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: item.hasLinkedSupplier
+                            ? IColors.supplierLink
+                            : IColors.textMuted,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (item.hasLinkedSupplier)
+                    const Icon(
+                      Icons.verified_rounded,
+                      size: 10,
+                      color: IColors.inStock,
+                    ),
                 ],
               ),
             ),
@@ -421,7 +612,6 @@ class TransactionTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
-          // Icon
           Container(
             width: 38,
             height: 38,
@@ -433,7 +623,6 @@ class TransactionTile extends StatelessWidget {
             child: Text(tx.type.emoji, style: const TextStyle(fontSize: 17)),
           ),
           const SizedBox(width: 12),
-          // Info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -459,7 +648,6 @@ class TransactionTile extends StatelessWidget {
               ],
             ),
           ),
-          // Amount + time
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -492,7 +680,7 @@ class TransactionTile extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  INVENTORY FORM FIELD  (consistent input across add/edit)
+//  INVENTORY FORM FIELD
 // ═══════════════════════════════════════════════════════════════
 class InventoryField extends StatelessWidget {
   final String label;
@@ -591,7 +779,7 @@ class InventoryField extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  SECTION HEADER (sheet sections)
+//  SECTION HEADER
 // ═══════════════════════════════════════════════════════════════
 class SheetSection extends StatelessWidget {
   final String title;
@@ -615,7 +803,7 @@ class SheetSection extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  BOTTOM SHEET HANDLE + HEADER
+//  BOTTOM SHEET HEADER
 // ═══════════════════════════════════════════════════════════════
 class SheetHeader extends StatelessWidget {
   final String title;
@@ -635,7 +823,6 @@ class SheetHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Handle
         Container(
           width: 36,
           height: 4,
@@ -645,7 +832,6 @@ class SheetHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        // Title row
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
           child: Row(
@@ -691,193 +877,16 @@ class SheetHeader extends StatelessWidget {
   }
 }
 
-
-class InventoryItemCardWidgets extends StatelessWidget {
-  final InventoryItem item;
-  final bool canManage;
-  final VoidCallback onTap;
-  final VoidCallback onAddStock;
-
-  const InventoryItemCardWidgets({
-    Key? key,
-    required this.item,
-    required this.canManage,
-    required this.onTap,
-    required this.onAddStock,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final color = iStatusColor(item.status);
-    final bgColor = iStatusBg(item.status);
-
-    final isCritical =
-        item.status == StockStatus.critical ||
-        item.status == StockStatus.outOfStock;
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        decoration: BoxDecoration(
-          color: IColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: isCritical ? color.withOpacity(0.35) : IColors.divider,
-            width: isCritical ? 1.5 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isCritical
-                  ? color.withOpacity(0.08)
-                  : IColors.cardShadow,
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-
-            /// ─────────────────────────────────────────────
-            /// TOP SECTION (Emoji + Quick Add)
-            /// ─────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 10, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Emoji Box
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: bgColor,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      item.emoji,
-                      style: const TextStyle(fontSize: 22),
-                    ),
-                  ),
-
-                  const Spacer(),
-
-                  // Quick Add (Role Controlled)
-                  if (canManage)
-                    GestureDetector(
-                      onTap: onAddStock,
-                      behavior: HitTestBehavior.opaque,
-                      child: Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: IColors.accentLight,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.add,
-                          size: 16,
-                          color: IColors.accentMid,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            /// ─────────────────────────────────────────────
-            /// NAME + CATEGORY
-            /// ─────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.name,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: IColors.textPrimary,
-                      letterSpacing: -0.2,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.category,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: IColors.textMuted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            /// ─────────────────────────────────────────────
-            /// STOCK BAR
-            /// ─────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: StockBar(
-                percent: item.stockPercent,
-                height: 5,
-                status: item.status,
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            /// ─────────────────────────────────────────────
-            /// STOCK VALUE + STATUS BADGE
-            /// ─────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    item.stockDisplay,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: color,
-                    ),
-                  ),
-
-                  // Compact Status Badge
-                  StockStatusBadge(
-                    status: item.status,
-                    compact: true,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// ═══════════════════════════════════════════════════════════════
+//  ICON ACTION BUTTON
+// ═══════════════════════════════════════════════════════════════
 class IconActionButtonWidgets extends StatelessWidget {
   final IconData? icon;
   final Color color;
   final VoidCallback onTap;
 
   const IconActionButtonWidgets({
-     this.icon,
+    this.icon,
     required this.color,
     required this.onTap,
   });
@@ -899,6 +908,9 @@ class IconActionButtonWidgets extends StatelessWidget {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ACTION BUTTON
+// ═══════════════════════════════════════════════════════════════
 class ActionButtonWidget extends StatelessWidget {
   final String label;
   final String emoji;
@@ -928,12 +940,17 @@ class ActionButtonWidget extends StatelessWidget {
           children: [
             Text(emoji, style: const TextStyle(fontSize: 14)),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: color,
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ),
           ],

@@ -1,5 +1,5 @@
 // lib/services/orders_service.dart
-// Supabase backend service for all order operations
+// v2: Added confirmPayment() — the only way to complete an order
 
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
@@ -11,14 +11,42 @@ class OrdersService {
 
   final _db = Supabase.instance.client;
 
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
   //  FETCH ORDERS
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
 
-  /// All orders for a business (admin/manager view)
+  Future<List<Order>> fetchTodayOrders({
+    required String businessId,
+    String? staffUid,
+  }) async {
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+    final istStartOfDay = DateTime(nowIst.year, nowIst.month, nowIst.day);
+    final istEndOfDay = istStartOfDay.add(const Duration(days: 1));
+    final utcStart = istStartOfDay.subtract(
+      const Duration(hours: 5, minutes: 30),
+    );
+    final utcEnd = istEndOfDay.subtract(const Duration(hours: 5, minutes: 30));
+
+    var query = Supabase.instance.client
+        .from('orders')
+        .select('*, order_items(*)')
+        .eq('business_id', businessId)
+        .gte('created_at', utcStart.toIso8601String())
+        .lt('created_at', utcEnd.toIso8601String());
+
+    if (staffUid != null) {
+      query = query.eq('created_by_uid', staffUid);
+    }
+
+    final data = await query.order('created_at', ascending: false);
+    return (data as List).map((e) => Order.fromJson(e)).toList();
+  }
+
   Future<List<Order>> fetchBusinessOrders({
     required String businessId,
     String? status,
+    String? paymentStatus,
     DateTime? from,
     DateTime? to,
     int limit = 100,
@@ -29,41 +57,18 @@ class OrdersService {
         .eq('business_id', businessId);
 
     if (status != null) query = query.eq('status', status);
+    if (paymentStatus != null) {
+      query = query.eq('payment_status', paymentStatus);
+    }
     if (from != null) query = query.gte('created_at', from.toIso8601String());
     if (to != null) query = query.lt('created_at', to.toIso8601String());
 
     final data = await query.order('created_at', ascending: false).limit(limit);
-
     return (data as List)
         .map((j) => Order.fromJson(j as Map<String, dynamic>))
         .toList();
   }
 
-  /// Orders for a specific staff member
-  Future<List<Order>> fetchStaffOrders({
-    required String businessId,
-    required String staffUid,
-    String? status,
-    DateTime? from,
-    DateTime? to,
-  }) async {
-    var query = _db
-        .from('vw_orders_with_items')
-        .select()
-        .eq('business_id', businessId)
-        .eq('created_by_uid', staffUid);
-
-    if (status != null) query = query.eq('status', status);
-    if (from != null) query = query.gte('created_at', from.toIso8601String());
-    if (to != null) query = query.lt('created_at', to.toIso8601String());
-
-    final data = await query.order('created_at', ascending: false);
-    return (data as List)
-        .map((j) => Order.fromJson(j as Map<String, dynamic>))
-        .toList();
-  }
-
-  /// Active orders for a specific table
   Future<List<Order>> fetchTableOrders({
     required String tableId,
     required String businessId,
@@ -81,76 +86,29 @@ class OrdersService {
         .toList();
   }
 
-  Future<List<Order>> fetchTodayOrders({
-    required String businessId,
-    String? staffUid,
-  }) async {
-    // ✅ FIX: Use IST (UTC+5:30) to determine "today's" boundaries
-    final nowUtc = DateTime.now().toUtc();
-    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+  // ══════════════════════════════════════════════════════════
+  //  FETCH SINGLE ORDER (for bill view)
+  // ══════════════════════════════════════════════════════════
 
-    final istStartOfDay = DateTime(nowIst.year, nowIst.month, nowIst.day);
-    final istEndOfDay = istStartOfDay.add(const Duration(days: 1));
-
-    final utcStart = istStartOfDay.subtract(
-      const Duration(hours: 5, minutes: 30),
-    );
-    final utcEnd = istEndOfDay.subtract(const Duration(hours: 5, minutes: 30));
-
-    debugPrint(
-      '📦 fetchTodayOrders: IST today=${nowIst.toIso8601String()}'
-      ' | UTC range: ${utcStart.toIso8601String()} → ${utcEnd.toIso8601String()}',
-    );
-
-    // ✅ FIX: Apply ALL filters on the PostgrestFilterBuilder BEFORE
-    // any transform operations. Never chain .eq() after .order().
-    var query = Supabase.instance.client
-        .from('orders')
-        .select('*, order_items(*)');
-
-    // Apply filters while still a PostgrestFilterBuilder
-    var filtered = query
-        .eq('business_id', businessId)
-        .gte('created_at', utcStart.toIso8601String())
-        .lt('created_at', utcEnd.toIso8601String());
-
-    // Conditionally add staffUid filter (still on FilterBuilder)
-    if (staffUid != null) {
-      filtered = filtered.eq('created_by_uid', staffUid);
+  Future<Order?> fetchOrder(String orderId) async {
+    try {
+      final data = await _db
+          .from('vw_orders_with_items')
+          .select()
+          .eq('id', orderId)
+          .maybeSingle();
+      if (data == null) return null;
+      return Order.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('[OrdersService] fetchOrder error: $e');
+      return null;
     }
-
-    // Apply transform (order) LAST — after all filters
-    final data = await filtered.order('created_at', ascending: false);
-
-    return (data as List).map((e) => Order.fromJson(e)).toList();
   }
 
-  Future<List<Order>> fetchTodayOrdersUST({
-    required String businessId,
-    String? staffUid, // null = all staff
-  }) async {
-    final today = DateTime.now();
-    final startOfDay = DateTime(today.year, today.month, today.day);
-    final endOfDay = startOfDay.add(const Duration(days: 1));
-
-    var query = _db
-        .from('vw_orders_with_items')
-        .select()
-        .eq('business_id', businessId)
-        .gte('created_at', startOfDay.toIso8601String())
-        .lt('created_at', endOfDay.toIso8601String());
-
-    if (staffUid != null) query = query.eq('created_by_uid', staffUid);
-
-    final data = await query.order('created_at', ascending: false);
-    return (data as List)
-        .map((j) => Order.fromJson(j as Map<String, dynamic>))
-        .toList();
-  }
-
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
   //  CREATE ORDER
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
+
   Future<Order> createOrder({
     required List<CartItem> cartItems,
     required String businessId,
@@ -166,18 +124,17 @@ class OrdersService {
     String? notes,
     double taxRate = 5.0,
   }) async {
-    // Calculate financials
     final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
 
-    // Insert order
     final orderData = await _db
         .from('orders')
         .insert({
           'business_id': businessId,
           'business_name': businessName,
           'status': 'pending',
+          'payment_status': 'unpaid', // always starts unpaid
           'order_type': orderType.value,
           'table_id': tableId,
           'table_number': tableNumber,
@@ -197,7 +154,6 @@ class OrdersService {
 
     final orderId = orderData['id'] as String;
 
-    // Insert order items
     if (cartItems.isNotEmpty) {
       await _db
           .from('order_items')
@@ -220,7 +176,6 @@ class OrdersService {
           );
     }
 
-    // If dine-in, update the table's current order info
     if (tableId != null) {
       await _db
           .from('restaurant_tables')
@@ -234,19 +189,65 @@ class OrdersService {
           .eq('id', tableId);
     }
 
-    // Fetch the full order with items
     final full = await _db
         .from('vw_orders_with_items')
         .select()
         .eq('id', orderId)
         .single();
-
     return Order.fromJson(full as Map<String, dynamic>);
   }
 
-  // ══════════════════════════════════════════════════════
-  //  UPDATE STATUS
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
+  //  CONFIRM PAYMENT → auto-completes order via DB trigger
+  // ══════════════════════════════════════════════════════════
+
+  Future<Order> confirmPayment({
+    required String orderId,
+    required OrderPaymentMode mode,
+    required String paidByUid,
+    required String paidByName,
+    required String businessId,
+    String? paymentRef,
+    double? tipAmount,
+    double? discountAmount,
+  }) async {
+    final updateMap = <String, dynamic>{
+      'payment_status': 'paid',
+      'payment_mode': mode.value,
+      'paid_by_uid': paidByUid,
+      'paid_by_name': paidByName,
+      'paid_at': DateTime.now().toIso8601String(),
+    };
+
+    if (paymentRef != null && paymentRef.isNotEmpty) {
+      updateMap['payment_ref'] = paymentRef;
+    }
+    if (tipAmount != null && tipAmount > 0) {
+      updateMap['tip_amount'] = tipAmount;
+    }
+    if (discountAmount != null && discountAmount > 0) {
+      updateMap['discount_amount'] = discountAmount;
+    }
+
+    // The DB trigger fn_auto_complete_on_payment will:
+    // 1. Set paid_at
+    // 2. Set bill_generated_at
+    // 3. Auto-set status = 'completed'
+    await _db.from('orders').update(updateMap).eq('id', orderId);
+
+    final data = await _db
+        .from('vw_orders_with_items')
+        .select()
+        .eq('id', orderId)
+        .single();
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  UPDATE STATUS (kitchen flow — pending→preparing→ready)
+  //  NOTE: 'completed' is NOT allowed here; use confirmPayment()
+  // ══════════════════════════════════════════════════════════
+
   Future<Order> updateOrderStatus({
     required String orderId,
     required OrderStatus newStatus,
@@ -254,8 +255,12 @@ class OrdersService {
     required String updatedByName,
     required String businessId,
   }) async {
-    final now = DateTime.now().toIso8601String();
+    assert(
+      newStatus != OrderStatus.completed,
+      'Use confirmPayment() to complete orders',
+    );
 
+    final now = DateTime.now().toIso8601String();
     final updateMap = <String, dynamic>{
       'status': newStatus.value,
       'updated_by_uid': updatedByUid,
@@ -268,9 +273,6 @@ class OrdersService {
         break;
       case OrderStatus.ready:
         updateMap['ready_at'] = now;
-        break;
-      case OrderStatus.completed:
-        updateMap['completed_at'] = now;
         break;
       case OrderStatus.cancelled:
         updateMap['cancelled_at'] = now;
@@ -286,13 +288,13 @@ class OrdersService {
         .select()
         .eq('id', orderId)
         .single();
-
     return Order.fromJson(data as Map<String, dynamic>);
   }
 
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
   //  NOTIFICATIONS
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
+
   Future<List<Map<String, dynamic>>> fetchUnreadNotifications({
     required String businessId,
     String? targetUid,
@@ -313,24 +315,20 @@ class OrdersService {
 
   Future<void> markNotificationsRead({
     required String businessId,
-    List<String>? ids, // null = mark all
+    List<String>? ids,
   }) async {
     var query = _db
         .from('order_notifications')
         .update({'is_read': true})
         .eq('business_id', businessId);
-
     if (ids != null) query = query.inFilter('id', ids);
-
     await query;
   }
 
-  // ══════════════════════════════════════════════════════
-  //  REAL-TIME SUBSCRIPTION
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
+  //  REALTIME
+  // ══════════════════════════════════════════════════════════
 
-  /// Subscribe to order changes for a business.
-  /// Returns a [RealtimeChannel] — call `.unsubscribe()` on dispose.
   RealtimeChannel subscribeToOrders({
     required String businessId,
     required void Function(Order order, String eventType) onEvent,
@@ -350,29 +348,23 @@ class OrdersService {
             try {
               final record = payload.newRecord;
               if (record.isEmpty) return;
-
-              // Fetch full order with items
               final full = await _db
                   .from('vw_orders_with_items')
                   .select()
                   .eq('id', record['id'])
                   .maybeSingle();
-
               if (full != null) {
                 onEvent(
                   Order.fromJson(full as Map<String, dynamic>),
                   payload.eventType.name,
                 );
               }
-            } catch (e) {
-              // ignore realtime errors silently
-            }
+            } catch (_) {}
           },
         )
         .subscribe();
   }
 
-  /// Subscribe to notifications for a business
   RealtimeChannel subscribeToNotifications({
     required String businessId,
     required void Function(Map<String, dynamic>) onNotification,
@@ -397,9 +389,10 @@ class OrdersService {
         .subscribe();
   }
 
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
   //  ANALYTICS
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════
+
   Future<Map<String, dynamic>> fetchRevenueSummary({
     required String businessId,
     required DateTime from,
@@ -415,11 +408,9 @@ class OrdersService {
         'p_staff_uid': staffUid,
       },
     );
-
     final row = (data as List).isNotEmpty
         ? data[0] as Map<String, dynamic>
-        : <String, dynamic>{};
-
+        : {};
     return {
       'total_revenue': (row['total_revenue'] as num? ?? 0).toDouble(),
       'total_orders': (row['total_orders'] as num? ?? 0).toInt(),
@@ -427,59 +418,5 @@ class OrdersService {
       'completed': (row['completed'] as num? ?? 0).toInt(),
       'cancelled': (row['cancelled'] as num? ?? 0).toInt(),
     };
-  }
-
-  Future<List<Map<String, dynamic>>> fetchEmployeeAnalytics({
-    required String businessId,
-    required DateTime from,
-    required DateTime to,
-  }) async {
-    final data = await _db
-        .from('orders')
-        .select(
-          'created_by_uid, created_by_name, created_by_role, total_amount, table_id, status',
-        )
-        .eq('business_id', businessId)
-        .gte('created_at', from.toIso8601String())
-        .lt('created_at', to.toIso8601String());
-
-    // Group by employee in Dart
-    final Map<String, Map<String, dynamic>> grouped = {};
-    for (final row in (data as List)) {
-      final uid = row['created_by_uid'] as String? ?? 'unknown';
-      if (!grouped.containsKey(uid)) {
-        grouped[uid] = {
-          'uid': uid,
-          'name': row['created_by_name'] ?? 'Unknown',
-          'role': row['created_by_role'] ?? 'staff',
-          'orders': 0,
-          'revenue': 0.0,
-          'tables': <String?>{},
-        };
-      }
-      grouped[uid]!['orders'] = (grouped[uid]!['orders'] as int) + 1;
-      grouped[uid]!['revenue'] =
-          (grouped[uid]!['revenue'] as double) +
-          ((row['total_amount'] as num? ?? 0).toDouble());
-      (grouped[uid]!['tables'] as Set<String?>).add(row['table_id'] as String?);
-    }
-
-    return grouped.values
-        .map(
-          (e) => {
-            'uid': e['uid'],
-            'name': e['name'],
-            'role': e['role'],
-            'orders': e['orders'],
-            'revenue': e['revenue'],
-            'tables': (e['tables'] as Set<String?>)
-                .where((t) => t != null)
-                .length,
-          },
-        )
-        .toList()
-      ..sort(
-        (a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double),
-      );
   }
 }

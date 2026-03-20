@@ -1,10 +1,189 @@
-// lib/models/order_model.dart
+// lib/models/order_modal.dart
 // Full Order model — Supabase-backed
+// v2: Added PaymentStatus, PaymentMode, bill fields
 
 import 'package:flutter/material.dart';
 
 // ══════════════════════════════════════════════════════════════
-//  ENUMS
+//  PAYMENT STATUS
+// ══════════════════════════════════════════════════════════════
+
+enum PaymentStatus { unpaid, paid, partial, refunded }
+
+extension PaymentStatusExt on PaymentStatus {
+  String get value {
+    switch (this) {
+      case PaymentStatus.unpaid:
+        return 'unpaid';
+      case PaymentStatus.paid:
+        return 'paid';
+      case PaymentStatus.partial:
+        return 'partial';
+      case PaymentStatus.refunded:
+        return 'refunded';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PaymentStatus.unpaid:
+        return 'Unpaid';
+      case PaymentStatus.paid:
+        return 'Paid';
+      case PaymentStatus.partial:
+        return 'Partial';
+      case PaymentStatus.refunded:
+        return 'Refunded';
+    }
+  }
+
+  String get emoji {
+    switch (this) {
+      case PaymentStatus.unpaid:
+        return '💳';
+      case PaymentStatus.paid:
+        return '✅';
+      case PaymentStatus.partial:
+        return '⚡';
+      case PaymentStatus.refunded:
+        return '↩️';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case PaymentStatus.unpaid:
+        return const Color(0xFFDC2626);
+      case PaymentStatus.paid:
+        return const Color(0xFF059669);
+      case PaymentStatus.partial:
+        return const Color(0xFFD97706);
+      case PaymentStatus.refunded:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  Color get bgColor {
+    switch (this) {
+      case PaymentStatus.unpaid:
+        return const Color(0xFFFEF2F2);
+      case PaymentStatus.paid:
+        return const Color(0xFFECFDF5);
+      case PaymentStatus.partial:
+        return const Color(0xFFFEF3C7);
+      case PaymentStatus.refunded:
+        return const Color(0xFFF3F4F6);
+    }
+  }
+
+  static PaymentStatus fromString(String? s) {
+    switch (s) {
+      case 'paid':
+        return PaymentStatus.paid;
+      case 'partial':
+        return PaymentStatus.partial;
+      case 'refunded':
+        return PaymentStatus.refunded;
+      default:
+        return PaymentStatus.unpaid;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PAYMENT MODE
+// ══════════════════════════════════════════════════════════════
+
+enum OrderPaymentMode { cash, upi, card, bank, complimentary }
+
+extension OrderPaymentModeExt on OrderPaymentMode {
+  String get value {
+    switch (this) {
+      case OrderPaymentMode.cash:
+        return 'cash';
+      case OrderPaymentMode.upi:
+        return 'upi';
+      case OrderPaymentMode.card:
+        return 'card';
+      case OrderPaymentMode.bank:
+        return 'bank';
+      case OrderPaymentMode.complimentary:
+        return 'complimentary';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case OrderPaymentMode.cash:
+        return 'Cash';
+      case OrderPaymentMode.upi:
+        return 'UPI';
+      case OrderPaymentMode.card:
+        return 'Card';
+      case OrderPaymentMode.bank:
+        return 'Bank Transfer';
+      case OrderPaymentMode.complimentary:
+        return 'Complimentary';
+    }
+  }
+
+  String get emoji {
+    switch (this) {
+      case OrderPaymentMode.cash:
+        return '💵';
+      case OrderPaymentMode.upi:
+        return '📲';
+      case OrderPaymentMode.card:
+        return '💳';
+      case OrderPaymentMode.bank:
+        return '🏦';
+      case OrderPaymentMode.complimentary:
+        return '🎁';
+    }
+  }
+
+  bool get requiresRef {
+    switch (this) {
+      case OrderPaymentMode.upi:
+      case OrderPaymentMode.card:
+      case OrderPaymentMode.bank:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  String get refHint {
+    switch (this) {
+      case OrderPaymentMode.upi:
+        return 'UPI Transaction ID';
+      case OrderPaymentMode.card:
+        return 'Last 4 digits of card';
+      case OrderPaymentMode.bank:
+        return 'UTR / NEFT Reference';
+      default:
+        return 'Reference (optional)';
+    }
+  }
+
+  static OrderPaymentMode fromString(String? s) {
+    switch (s) {
+      case 'upi':
+        return OrderPaymentMode.upi;
+      case 'card':
+        return OrderPaymentMode.card;
+      case 'bank':
+        return OrderPaymentMode.bank;
+      case 'complimentary':
+        return OrderPaymentMode.complimentary;
+      default:
+        return OrderPaymentMode.cash;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ORDER STATUS
 // ══════════════════════════════════════════════════════════════
 
 enum OrderStatus { pending, preparing, ready, completed, cancelled }
@@ -85,6 +264,8 @@ extension OrderStatusExt on OrderStatus {
     }
   }
 
+  // ── v2: nextStatus is ONLY available after payment is confirmed ──
+  // The UI must check order.paymentStatus == paid before calling advance
   OrderStatus? get nextStatus {
     switch (this) {
       case OrderStatus.pending:
@@ -92,7 +273,7 @@ extension OrderStatusExt on OrderStatus {
       case OrderStatus.preparing:
         return OrderStatus.ready;
       case OrderStatus.ready:
-        return OrderStatus.completed;
+        return null; // must pay first to complete
       default:
         return null;
     }
@@ -105,7 +286,7 @@ extension OrderStatusExt on OrderStatus {
       case OrderStatus.preparing:
         return 'Mark Ready';
       case OrderStatus.ready:
-        return 'Complete Order';
+        return 'Collect Payment';
       default:
         return '';
     }
@@ -126,6 +307,10 @@ extension OrderStatusExt on OrderStatus {
     }
   }
 }
+
+// ══════════════════════════════════════════════════════════════
+//  ORDER TYPE
+// ══════════════════════════════════════════════════════════════
 
 enum OrderType { dineIn, takeaway, delivery }
 
@@ -176,8 +361,9 @@ extension OrderTypeExt on OrderType {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  ORDER ITEM  (line item in an order)
+//  ORDER ITEM
 // ══════════════════════════════════════════════════════════════
+
 class OrderItem {
   final String id;
   final String orderId;
@@ -230,8 +416,9 @@ class OrderItem {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  CART ITEM  (transient, pre-order)
+//  CART ITEM
 // ══════════════════════════════════════════════════════════════
+
 class CartItem {
   final String menuItemId;
   final String itemName;
@@ -265,12 +452,21 @@ class CartItem {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  ORDER  (Supabase-backed)
+//  ORDER  (Supabase-backed) — v2 with payment fields
 // ══════════════════════════════════════════════════════════════
+
 class Order {
   final String id;
   final int orderNumber;
+  final String? billNumber;
   final OrderStatus status;
+  final PaymentStatus paymentStatus;
+  final OrderPaymentMode? paymentMode;
+  final String? paymentRef;
+  final DateTime? paidAt;
+  final String? paidByUid;
+  final String? paidByName;
+  final DateTime? billGeneratedAt;
   final OrderType orderType;
 
   // Table
@@ -285,10 +481,12 @@ class Order {
   final double subtotal;
   final double taxAmount;
   final double discountAmount;
+  final double tipAmount;
+  final double roundOff;
   final double totalAmount;
   final double taxRate;
 
-  // Items (populated via join / vw_orders_with_items)
+  // Items
   final List<OrderItem> items;
 
   // Notes
@@ -314,7 +512,15 @@ class Order {
   const Order({
     required this.id,
     required this.orderNumber,
+    this.billNumber,
     required this.status,
+    this.paymentStatus = PaymentStatus.unpaid,
+    this.paymentMode,
+    this.paymentRef,
+    this.paidAt,
+    this.paidByUid,
+    this.paidByName,
+    this.billGeneratedAt,
     required this.orderType,
     this.tableId,
     this.tableNumber,
@@ -323,6 +529,8 @@ class Order {
     required this.subtotal,
     required this.taxAmount,
     this.discountAmount = 0,
+    this.tipAmount = 0,
+    this.roundOff = 0,
     required this.totalAmount,
     this.taxRate = 5.0,
     this.items = const [],
@@ -340,24 +548,26 @@ class Order {
     this.updatedAt,
   });
 
-  // ── Computed ────────────────────────────────────────────
+  // ── Computed ────────────────────────────────────────────────
   int get totalItems => items.fold(0, (s, i) => s + i.quantity);
-// In Order model — wherever timeLabel is defined:
-String get timeLabel {
-  // ✅ Convert UTC createdAt to IST for display
-  final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
-  final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-  final diff = now.difference(ist);
 
-  if (diff.inMinutes < 1) return 'Just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  return '${ist.day}/${ist.month}';
-}
-  String get timeLabelUST {
-    final diff = DateTime.now().difference(createdAt);
+  bool get isPaid => paymentStatus == PaymentStatus.paid;
+  bool get isUnpaid => paymentStatus == PaymentStatus.unpaid;
+
+  /// Grand total = subtotal + tax + tip - discount + roundOff
+  double get grandTotal =>
+      subtotal + taxAmount + tipAmount - discountAmount + roundOff;
+
+  String get timeLabel {
+    final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
+    final now = DateTime.now().toUtc().add(
+      const Duration(hours: 5, minutes: 30),
+    );
+    final diff = now.difference(ist);
+    if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    return '${diff.inHours}h ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${ist.day}/${ist.month}';
   }
 
   bool get isActive =>
@@ -365,9 +575,8 @@ String get timeLabel {
 
   Duration get elapsed => DateTime.now().difference(createdAt);
 
-  // ── Deserialization ─────────────────────────────────────
+  // ── Deserialization ─────────────────────────────────────────
   factory Order.fromJson(Map<String, dynamic> j) {
-    // Items can come as JSON array from the view
     List<OrderItem> items = [];
     final rawItems = j['items'];
     if (rawItems is List) {
@@ -380,7 +589,21 @@ String get timeLabel {
     return Order(
       id: j['id'] as String? ?? '',
       orderNumber: j['order_number'] as int? ?? 0,
+      billNumber: j['bill_number'] as String?,
       status: OrderStatusExt.fromString(j['status'] as String? ?? ''),
+      paymentStatus: PaymentStatusExt.fromString(
+        j['payment_status'] as String?,
+      ),
+      paymentMode: OrderPaymentModeExt.fromString(j['payment_mode'] as String?),
+      paymentRef: j['payment_ref'] as String?,
+      paidAt: j['paid_at'] != null
+          ? DateTime.parse(j['paid_at'] as String)
+          : null,
+      paidByUid: j['paid_by_uid'] as String?,
+      paidByName: j['paid_by_name'] as String?,
+      billGeneratedAt: j['bill_generated_at'] != null
+          ? DateTime.parse(j['bill_generated_at'] as String)
+          : null,
       orderType: OrderTypeExt.fromString(j['order_type'] as String? ?? ''),
       tableId: j['table_id'] as String?,
       tableNumber: j['table_number'] as int?,
@@ -389,6 +612,8 @@ String get timeLabel {
       subtotal: (j['subtotal'] as num? ?? 0).toDouble(),
       taxAmount: (j['tax_amount'] as num? ?? 0).toDouble(),
       discountAmount: (j['discount_amount'] as num? ?? 0).toDouble(),
+      tipAmount: (j['tip_amount'] as num? ?? 0).toDouble(),
+      roundOff: (j['round_off'] as num? ?? 0).toDouble(),
       totalAmount: (j['total_amount'] as num? ?? 0).toDouble(),
       taxRate: (j['tax_rate'] as num? ?? 5).toDouble(),
       items: items,
@@ -421,7 +646,16 @@ String get timeLabel {
 
   Order copyWith({
     OrderStatus? status,
+    PaymentStatus? paymentStatus,
+    OrderPaymentMode? paymentMode,
+    String? paymentRef,
+    DateTime? paidAt,
+    String? paidByUid,
+    String? paidByName,
+    DateTime? billGeneratedAt,
     List<OrderItem>? items,
+    double? tipAmount,
+    double? discountAmount,
     DateTime? startedAt,
     DateTime? readyAt,
     DateTime? completedAt,
@@ -429,7 +663,15 @@ String get timeLabel {
   }) => Order(
     id: id,
     orderNumber: orderNumber,
+    billNumber: billNumber,
     status: status ?? this.status,
+    paymentStatus: paymentStatus ?? this.paymentStatus,
+    paymentMode: paymentMode ?? this.paymentMode,
+    paymentRef: paymentRef ?? this.paymentRef,
+    paidAt: paidAt ?? this.paidAt,
+    paidByUid: paidByUid ?? this.paidByUid,
+    paidByName: paidByName ?? this.paidByName,
+    billGeneratedAt: billGeneratedAt ?? this.billGeneratedAt,
     orderType: orderType,
     tableId: tableId,
     tableNumber: tableNumber,
@@ -437,7 +679,9 @@ String get timeLabel {
     customerPhone: customerPhone,
     subtotal: subtotal,
     taxAmount: taxAmount,
-    discountAmount: discountAmount,
+    discountAmount: discountAmount ?? this.discountAmount,
+    tipAmount: tipAmount ?? this.tipAmount,
+    roundOff: roundOff,
     totalAmount: totalAmount,
     taxRate: taxRate,
     items: items ?? this.items,

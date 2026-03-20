@@ -1,10 +1,15 @@
 // lib/screens/orders/orders_screen.dart
+// v2: Payment-gated completion. 'ready' orders show "Collect Payment" button.
+// Completed orders show "View Bill" button.
 
 import 'package:flutter/material.dart';
+import 'package:pos_app/screens/orders_bill_preview_screen.dart';
+import 'package:pos_app/screens/sheet/payment_sheet.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/models/order_modal.dart';
 import '../../providers/orders_provider.dart';
 import 'new_order_screen.dart';
+
 
 // ── Color palette ──────────────────────────────────────────────────────────────
 class OC {
@@ -25,6 +30,8 @@ class OC {
   static const completedBg = Color(0xFFF3F4F6);
   static const cancelled = Color(0xFFDC2626);
   static const cancelledBg = Color(0xFFFEF2F2);
+  static const payGreen = Color(0xFF059669);
+  static const payGreenBg = Color(0xFFECFDF5);
   static const textPri = Color(0xFF1A1A2E);
   static const textSec = Color(0xFF6B6B86);
   static const textMute = Color(0xFFAAABBB);
@@ -86,10 +93,18 @@ class _OrdersScreenState extends State<OrdersScreen> {
             child: Column(
               children: [
                 _Header(prov: prov),
+                // Payment alert banner
+                if (prov.pendingPaymentCount > 0)
+                  _PaymentAlertBanner(count: prov.pendingPaymentCount),
                 _StatusFilter(prov: prov),
                 if (prov.isAdminLevel) _StatsBar(prov: prov),
                 Expanded(
-                  child: _Body(prov: prov, onCancel: _confirmCancel),
+                  child: _Body(
+                    prov: prov,
+                    onCancel: _confirmCancel,
+                    onCollectPayment: _openPaymentSheet,
+                    onViewBill: _openBillPreview,
+                  ),
                 ),
               ],
             ),
@@ -103,10 +118,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
             icon: const Icon(Icons.add, color: Colors.white),
             label: const Text(
               'New Order',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
             ),
           ),
         );
@@ -124,7 +136,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           style: TextStyle(fontWeight: FontWeight.w800, color: OC.textPri),
         ),
         content: Text(
-          'Are you sure you want to cancel Order #${order.orderNumber}?',
+          'Cancel Order #${order.orderNumber}?',
           style: const TextStyle(color: OC.textSec),
         ),
         actions: [
@@ -147,6 +159,60 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ),
     );
     if (confirm == true) await prov.cancelOrder(order.id);
+  }
+
+  Future<void> _openPaymentSheet(Order order) async {
+    await PaymentSheet.show(context, order);
+  }
+
+  void _openBillPreview(Order order) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, a, __) => BillPreviewScreen(order: order),
+        transitionsBuilder: (_, a, __, child) =>
+            FadeTransition(opacity: a, child: child),
+        transitionDuration: const Duration(milliseconds: 250),
+      ),
+    );
+  }
+}
+
+// ── Payment alert banner ────────────────────────────────────────────────────────
+class _PaymentAlertBanner extends StatelessWidget {
+  final int count;
+  const _PaymentAlertBanner({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF059669).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF059669).withOpacity(0.3),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text('💰', style: TextStyle(fontSize: 18)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$count order${count > 1 ? 's' : ''} waiting for payment collection',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF065F46),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -192,59 +258,12 @@ class _Header extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  prov.isAdminLevel
-                      ? '${prov.todayTotal} orders today (all staff)'
-                      : '${prov.todayTotal} your orders today',
+                  '${prov.todayTotal} orders today',
                   style: const TextStyle(fontSize: 11, color: OC.textSec),
                 ),
               ],
             ),
           ),
-          /*   Stack(
-            children: [
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: OC.textSec,
-                ),
-                onPressed: prov.markNotificationsRead,
-              ),
-              if (prov.unreadCount > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: OC.cancelled,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      '${prov.unreadCount}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          IconButton(
-            icon: prov.isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: OC.primary,
-                    ),
-                  )
-                : const Icon(Icons.refresh_rounded, color: OC.textSec),
-            onPressed: prov.isLoading ? null : prov.fetchOrders,
-          ),
-      */
         ],
       ),
     );
@@ -261,17 +280,9 @@ class _StatusFilter extends StatelessWidget {
     final tabs = [
       (null, 'All', prov.allOrders.length),
       (OrderStatus.pending, 'Pending', prov.countByStatus(OrderStatus.pending)),
-      (
-        OrderStatus.preparing,
-        'Preparing',
-        prov.countByStatus(OrderStatus.preparing),
-      ),
+      (OrderStatus.preparing, 'Preparing', prov.countByStatus(OrderStatus.preparing)),
       (OrderStatus.ready, 'Ready', prov.countByStatus(OrderStatus.ready)),
-      (
-        OrderStatus.completed,
-        'Done',
-        prov.countByStatus(OrderStatus.completed),
-      ),
+      (OrderStatus.completed, 'Done', prov.countByStatus(OrderStatus.completed)),
     ];
 
     return Container(
@@ -283,9 +294,8 @@ class _StatusFilter extends StatelessWidget {
         child: Row(
           children: tabs.map((tab) {
             final isSel = prov.filterStatus == tab.$1;
-            final tabColor = tab.$1 == null
-                ? OC.primary
-                : _statusColor(tab.$1!);
+            final tabColor =
+                tab.$1 == null ? OC.primary : _statusColor(tab.$1!);
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
@@ -329,8 +339,7 @@ class _StatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active =
-        prov.countByStatus(OrderStatus.pending) +
+    final active = prov.countByStatus(OrderStatus.pending) +
         prov.countByStatus(OrderStatus.preparing);
     return Container(
       color: OC.surface,
@@ -357,6 +366,15 @@ class _StatsBar extends StatelessWidget {
             color: OC.primary,
             bg: OC.primaryLight,
           ),
+          if (prov.pendingPaymentCount > 0) ...[
+            const SizedBox(width: 8),
+            _StatChip(
+              emoji: '💳',
+              label: '${prov.pendingPaymentCount} unpaid',
+              color: OC.payGreen,
+              bg: OC.payGreenBg,
+            ),
+          ],
         ],
       ),
     );
@@ -372,12 +390,21 @@ class _StatsBar extends StatelessWidget {
 class _Body extends StatelessWidget {
   final OrdersProvider prov;
   final Future<void> Function(Order, OrdersProvider) onCancel;
-  const _Body({required this.prov, required this.onCancel});
+  final Future<void> Function(Order) onCollectPayment;
+  final void Function(Order) onViewBill;
+
+  const _Body({
+    required this.prov,
+    required this.onCancel,
+    required this.onCollectPayment,
+    required this.onViewBill,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (prov.isLoading && prov.allOrders.isEmpty) {
-      return const Center(child: CircularProgressIndicator(color: OC.primary));
+      return const Center(
+          child: CircularProgressIndicator(color: OC.primary));
     }
 
     if (prov.error != null && prov.allOrders.isEmpty) {
@@ -483,6 +510,8 @@ class _Body extends StatelessWidget {
           isAdmin: prov.isAdminLevel,
           onAdvance: () => prov.advanceOrder(orders[i].id),
           onCancel: () => onCancel(orders[i], prov),
+          onCollectPayment: () => onCollectPayment(orders[i]),
+          onViewBill: () => onViewBill(orders[i]),
         ),
       ),
     );
@@ -495,28 +524,44 @@ class _OrderCard extends StatelessWidget {
   final bool isAdmin;
   final VoidCallback onAdvance;
   final VoidCallback onCancel;
+  final VoidCallback onCollectPayment;
+  final VoidCallback onViewBill;
 
   const _OrderCard({
     required this.order,
     required this.isAdmin,
     required this.onAdvance,
     required this.onCancel,
+    required this.onCollectPayment,
+    required this.onViewBill,
   });
 
   @override
   Widget build(BuildContext context) {
     final status = order.status;
+    final payStatus = order.paymentStatus;
     final sColor = _statusColor(status);
     final sBg = _statusBg(status);
-    final canAdvance = status.nextStatus != null;
-    final canCancel =
-        status == OrderStatus.pending || status == OrderStatus.preparing;
+
+    // Kitchen flow: pending and preparing can advance (not ready)
+    final canAdvanceKitchen = status == OrderStatus.pending ||
+        status == OrderStatus.preparing;
+    final canCancel = status == OrderStatus.pending ||
+        status == OrderStatus.preparing;
+    final needsPayment = status == OrderStatus.ready &&
+        payStatus == PaymentStatus.unpaid;
+    final isCompleted = status == OrderStatus.completed;
 
     return Container(
       decoration: BoxDecoration(
         color: OC.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: sColor.withOpacity(0.25), width: 1.2),
+        border: Border.all(
+          color: needsPayment
+              ? const Color(0xFF059669).withOpacity(0.4)
+              : sColor.withOpacity(0.25),
+          width: needsPayment ? 2 : 1.2,
+        ),
         boxShadow: [
           BoxShadow(
             color: sColor.withOpacity(0.06),
@@ -533,9 +578,8 @@ class _OrderCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             decoration: BoxDecoration(
               color: sBg,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(15),
-              ),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(15)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -570,6 +614,9 @@ class _OrderCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           _StatusBadge(status: status),
+                          const SizedBox(width: 6),
+                          // Payment status badge
+                          _PaymentBadge(paymentStatus: payStatus),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -591,7 +638,8 @@ class _OrderCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       order.timeLabel,
-                      style: const TextStyle(fontSize: 10, color: OC.textMute),
+                      style:
+                          const TextStyle(fontSize: 10, color: OC.textMute),
                     ),
                   ],
                 ),
@@ -610,17 +658,48 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
 
-          // ── Staff label (admin only) ──────────────────────────────────
-          if (isAdmin && order.createdByName.isNotEmpty)
+          // ── Bill number (for completed) ────────────────────────────────
+          if (isCompleted && order.billNumber != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
               child: Row(
                 children: [
                   const Icon(
-                    Icons.person_outline,
-                    size: 12,
+                    Icons.receipt_rounded,
+                    size: 11,
                     color: OC.textMute,
                   ),
+                  const SizedBox(width: 4),
+                  Text(
+                    order.billNumber!,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: OC.textMute,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (order.paidByName != null) ...[
+                    const Text(' · ',
+                        style: TextStyle(color: OC.textMute, fontSize: 10)),
+                    Text(
+                      'Billed by ${order.paidByName}',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: OC.textMute,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+          // ── Staff label ──────────────────────────────────────────────────
+          if (isAdmin && order.createdByName.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline, size: 12, color: OC.textMute),
                   const SizedBox(width: 4),
                   Text(
                     'by ${order.createdByName} (${order.createdByRole})',
@@ -630,47 +709,33 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
 
-          // ── Divider ──────────────────────────────────────────────────────
-          if (canAdvance || canCancel)
+          // ── Action Buttons ────────────────────────────────────────────────
+          if (canAdvanceKitchen || canCancel || needsPayment || isCompleted)
             const Divider(height: 1, color: OC.border),
 
-          // ── Action Buttons ────────────────────────────────────────────────
-          if (canAdvance || canCancel)
+          if (canAdvanceKitchen || canCancel || needsPayment || isCompleted)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               child: Row(
                 children: [
-                  if (canCancel)
+                  // Cancel button (only for pending/preparing)
+                  if (canCancel) ...[
                     Expanded(
                       flex: 1,
                       child: OutlinedButton(
                         onPressed: onCancel,
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                            color: OC.cancelled,
-                            width: 1.2,
-                          ),
+                          side: const BorderSide(color: OC.cancelled, width: 1.2),
                           foregroundColor: OC.cancelled,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        /* child: const Text(
-                          'Cancel',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),*/
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.close_rounded,
-                              color: OC.cancelled,
-                              size: 16,
-                            ),
+                            Icon(Icons.close_rounded, color: OC.cancelled, size: 16),
                             SizedBox(width: 6),
                             Text(
                               'Cancel',
@@ -684,8 +749,11 @@ class _OrderCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (canAdvance && canCancel) const SizedBox(width: 8),
-                  if (canAdvance)
+                    const SizedBox(width: 8),
+                  ],
+
+                  // Kitchen advance button (pending → preparing → ready)
+                  if (canAdvanceKitchen)
                     Expanded(
                       flex: 2,
                       child: ElevatedButton(
@@ -702,10 +770,7 @@ class _OrderCard extends StatelessWidget {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(
-                              status.emoji,
-                              style: const TextStyle(fontSize: 14),
-                            ),
+                            Text(status.emoji, style: const TextStyle(fontSize: 14)),
                             const SizedBox(width: 6),
                             Text(
                               status.nextLabel,
@@ -717,13 +782,69 @@ class _OrderCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        /*  child: Text(
-                          status.nextLabel,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                      ),
+                    ),
+
+                  // Collect payment button (ready + unpaid)
+                  if (needsPayment)
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: onCollectPayment,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                        ),*/
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('💰', style: TextStyle(fontSize: 16)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Collect Payment',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // View Bill button (completed)
+                  if (isCompleted)
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: onViewBill,
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: OC.primary, width: 1.5),
+                          foregroundColor: OC.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.receipt_rounded, size: 15, color: OC.primary),
+                            SizedBox(width: 6),
+                            Text(
+                              'View Bill',
+                              style: TextStyle(
+                                color: OC.primary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],
@@ -734,6 +855,34 @@ class _OrderCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ── Payment badge ──────────────────────────────────────────────────────────────
+class _PaymentBadge extends StatelessWidget {
+  final PaymentStatus paymentStatus;
+  const _PaymentBadge({required this.paymentStatus});
+
+  @override
+  Widget build(BuildContext context) {
+    if (paymentStatus == PaymentStatus.paid) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFECFDF5),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Text(
+          '✓ PAID',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF059669),
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 
@@ -808,9 +957,8 @@ class _ItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dotColor = item.isVeg
-        ? const Color(0xFF2E7D32)
-        : const Color(0xFFB71C1C);
+    final dotColor =
+        item.isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
       child: Row(

@@ -12,6 +12,7 @@ import 'package:pos_app/models/order_modal.dart';
 import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/screens/orders_bill_preview_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:pos_app/providers/qr_code_provider.dart';
 
 // ── Design tokens ─────────────────────────────────────────────
 class PC {
@@ -39,13 +40,17 @@ class PaymentSheet extends StatefulWidget {
   const PaymentSheet({Key? key, required this.order}) : super(key: key);
 
   static Future<void> show(BuildContext context, Order order) {
+    final qrProv = context.read<QrCodeProvider>();
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       enableDrag: true,
-      builder: (_) => ChangeNotifierProvider.value(
-        value: context.read<OrdersProvider>(),
+      builder: (_) => MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: context.read<OrdersProvider>()),
+          ChangeNotifierProvider.value(value: qrProv),
+        ],
         child: PaymentSheet(order: order),
       ),
     );
@@ -84,6 +89,9 @@ class _PaymentSheetState extends State<PaymentSheet>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<QrCodeProvider>().fetchQrUrl(widget.order.businessId);
+    });
   }
 
   @override
@@ -395,6 +403,75 @@ class _PaymentSheetState extends State<PaymentSheet>
                         decoration: _inputDec(_mode.refHint),
                       ),
                     ],
+
+                    // ── QR Code Section ─────────────────────────────
+                    if (_mode == OrderPaymentMode.upi)
+                      Consumer<QrCodeProvider>(
+                        builder: (context, prov, child) {
+                          if (prov.isFetching) {
+                            return const Padding(
+                              padding: EdgeInsets.only(top: 24),
+                              child: Center(
+                                child: SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                      color: PC.primary, strokeWidth: 2),
+                                ),
+                              ),
+                            );
+                          }
+
+                          if (prov.hasQrCode) {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 24),
+                              child: Center(
+                                child: Column(
+                                  children: [
+                                    const Text(
+                                      'Scan to Pay',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: PC.textPri,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                            color: PC.border, width: 2),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.04),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          prov.qrCodeUrl,
+                                          width: 140,
+                                          height: 140,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+
+                          return const SizedBox.shrink();
+                        },
+                      ),
 
                     // ── Error ───────────────────────────────────────
                     if (_error != null) ...[

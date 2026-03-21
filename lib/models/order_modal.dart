@@ -582,7 +582,7 @@ class Order {
   // ── Deserialization ─────────────────────────────────────────
   factory Order.fromJson(Map<String, dynamic> j) {
     List<OrderItem> items = [];
-    final rawItems = j['items'];
+    final rawItems = j['items'] ?? j['order_items'];
     if (rawItems is List) {
       items = rawItems
           .whereType<Map<String, dynamic>>()

@@ -586,6 +586,7 @@ class _BillSummaryCard extends StatelessWidget {
         border: Border.all(color: PC.border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Table / seat info row (if applicable)
           if (order.tableNumber != null) ...[
@@ -598,8 +599,35 @@ class _BillSummaryCard extends StatelessWidget {
               false,
               color: const Color(0xFF5A3FD6),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
           ],
+
+          // ── Ordered Items List ───────────────────────────────
+          if (order.items.isNotEmpty) ...[
+            Row(
+              children: [
+                const Text(
+                  '🍽️',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'ORDERED ITEMS (${order.totalItems})',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: PC.textSec,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...order.items.map((item) => _ItemLine(item: item)),
+            const Divider(height: 14, color: PC.divider),
+          ],
+
+          // ── Financial Summary ────────────────────────────────
           _Row(
             'Subtotal (${order.totalItems} items)',
             '₹${order.subtotal.toStringAsFixed(2)}',
@@ -636,6 +664,79 @@ class _BillSummaryCard extends StatelessWidget {
     );
   }
 }
+
+// ── Single item line in payment sheet ────────────────────────
+class _ItemLine extends StatelessWidget {
+  final OrderItem item;
+  const _ItemLine({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final vegColor =
+        item.isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Veg/Non-veg indicator dot
+          Padding(
+            padding: const EdgeInsets.only(top: 2, right: 6),
+            child: Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(
+                border: Border.all(color: vegColor, width: 1.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+              alignment: Alignment.center,
+              child: Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: vegColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              item.itemName,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: PC.textPri,
+              ),
+            ),
+          ),
+          Text(
+            '×${item.quantity}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: PC.textSec,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 65,
+            child: Text(
+              '₹${item.subtotal.toStringAsFixed(2)}',
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: PC.textPri,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _Row extends StatelessWidget {
   final String label;

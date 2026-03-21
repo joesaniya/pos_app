@@ -30,7 +30,7 @@ class OrdersService {
 
     var query = Supabase.instance.client
         .from('orders')
-        .select('*, order_items(*)')
+        .select('*, items:order_items(*)')
         .eq('business_id', businessId)
         .gte('created_at', utcStart.toIso8601String())
         .lt('created_at', utcEnd.toIso8601String());

@@ -13,6 +13,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:provider/provider.dart';
+import 'package:pos_app/providers/qr_code_provider.dart';
 
 // ── Colours ────────────────────────────────────────────────────
 class BC {
@@ -43,6 +45,14 @@ class BillPreviewScreen extends StatefulWidget {
 
 class _BillPreviewScreenState extends State<BillPreviewScreen> {
   bool _generatingPdf = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<QrCodeProvider>().fetchQrUrl(widget.order.businessId);
+    });
+  }
 
   String _fmt(double v) => NumberFormat('#,##0.00', 'en_IN').format(v);
 
@@ -970,6 +980,68 @@ class _ReceiptCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                   textAlign: TextAlign.center,
+                ),
+                
+                // ── QR Code Section ─────────────────────────────
+                Consumer<QrCodeProvider>(
+                  builder: (context, prov, child) {
+                    if (prov.isFetching) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: 24),
+                        child: SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(color: BC.primary, strokeWidth: 2),
+                        ),
+                      );
+                    }
+                    
+                    if (prov.hasQrCode) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 24),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Scan to Pay',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: BC.textPri,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: BC.border, width: 2),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  prov.qrCodeUrl,
+                                  width: 140,
+                                  height: 140,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    
+                    return const SizedBox.shrink();
+                  },
                 ),
               ],
             ),

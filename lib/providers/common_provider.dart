@@ -12,6 +12,7 @@ import 'package:pos_app/providers/profile_provider.dart';
 import 'package:pos_app/providers/report_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
+import 'package:pos_app/providers/qr_code_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
@@ -45,5 +46,6 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => EmployeeManagementProvider()),
     ChangeNotifierProvider(create: (_) => ProfileProvider()),
     ChangeNotifierProvider(create: (_) => CreateAccountProvider()),
+    ChangeNotifierProvider(create: (_) => QrCodeProvider()),
   ];
 }

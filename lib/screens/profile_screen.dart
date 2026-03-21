@@ -7,6 +7,7 @@ import 'package:pos_app/screens/change_pwd_screen.dart';
 import 'package:pos_app/screens/create_account_screen.dart';
 import 'package:pos_app/screens/edit_profile_Screen.dart';
 import 'package:pos_app/screens/login_screen.dart';
+import 'package:pos_app/screens/qr_code_upload_screen.dart';
 import 'package:pos_app/screens/tables_screen/widgets/team_member_quick_Action_card_widget.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:provider/provider.dart';
@@ -2588,8 +2589,10 @@ class _ActionsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 20),
-    child: Row(
+    child: Column(
       children: [
+        Row(
+          children: [
         Expanded(
           child: _ACard(
             icon: Icons.person_add_alt_1_rounded,
@@ -2625,7 +2628,34 @@ class _ActionsGrid extends StatelessWidget {
         ),
       ],
     ),
-  );
+    const SizedBox(height: 12),
+    Row(
+      children: [
+        Expanded(
+          child: _ACard(
+            icon: Icons.qr_code_2_rounded,
+            lbl: 'Payment\nQR Code',
+            sub: _canCreate ? 'Billing QR' : 'No permission',
+            c: _canCreate ? _C.teal : _C.muted,
+            disabled: !_canCreate,
+            onTap: _canCreate
+                ? () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => QrCodeUploadScreen(
+                          businessId: p.businessId,
+                        ),
+                      ),
+                    )
+                : null,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(child: SizedBox()), // Empty slot for grid alignment
+      ],
+    ),
+  ],
+));
 }
 
 class _ACard extends StatelessWidget {
@@ -3104,6 +3134,7 @@ import 'package:pos_app/screens/change_pwd_screen.dart';
 import 'package:pos_app/screens/create_account_screen.dart';
 import 'package:pos_app/screens/edit_profile_Screen.dart';
 import 'package:pos_app/screens/login_screen.dart';
+import 'package:pos_app/screens/qr_code_upload_screen.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:provider/provider.dart';
 

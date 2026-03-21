@@ -83,12 +83,18 @@ class MyApp extends StatelessWidget {
                 darkTheme: AppTheme.darkTheme,
                 themeMode: themeProvider.themeMode,
                 builder: (context, child) {
-                  return MediaQuery(
+                   return MediaQuery(
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(padding: MediaQuery.of(context).padding),
+                    child: child!,
+                  );
+                 /* return MediaQuery(
                     data: MediaQuery.of(
                       context,
                     ).copyWith(padding: MediaQuery.of(context).padding),
                     child: NetworkAwareWidget(child: child!),
-                  );
+                  );*/
                 },
                 home: const SplashScreen(),
               );

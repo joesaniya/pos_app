@@ -214,7 +214,14 @@ class _PaymentSheetState extends State<PaymentSheet>
                                 ),
                               ),
                               Text(
-                                'Order #${order.orderNumber} · ${order.billNumber ?? ""}',
+                                [
+                                  'Order #${order.orderNumber}',
+                                  if (order.billNumber != null && order.billNumber!.isNotEmpty)
+                                    order.billNumber!,
+                                  if (order.tableNumber != null)
+                                    'Table ${order.tableNumber}'
+                                    '${order.seatLabel != null ? " • ${order.seatLabel}" : ""}',
+                                ].join(' · '),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: PC.textSec,
@@ -580,6 +587,19 @@ class _BillSummaryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // Table / seat info row (if applicable)
+          if (order.tableNumber != null) ...[
+            _Row(
+              '${order.orderType.emoji} ${order.orderType.label}',
+              [
+                'Table ${order.tableNumber}',
+                if (order.seatLabel != null) order.seatLabel!,
+              ].join(' • '),
+              false,
+              color: const Color(0xFF5A3FD6),
+            ),
+            const SizedBox(height: 6),
+          ],
           _Row(
             'Subtotal (${order.totalItems} items)',
             '₹${order.subtotal.toStringAsFixed(2)}',

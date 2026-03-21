@@ -935,6 +935,18 @@ class _OrderMeta extends StatelessWidget {
             style: const TextStyle(fontSize: 11, color: OC.textSec),
           ),
         ],
+        // Show seat number for partial-table (seat-level) orders
+        if (order.seatLabel != null) ...[
+          const Text(' • ', style: TextStyle(color: OC.textMute, fontSize: 11)),
+          Text(
+            order.seatLabel!,
+            style: const TextStyle(
+              fontSize: 11,
+              color: OC.textSec,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
         if (order.customerName != null && order.customerName!.isNotEmpty) ...[
           const Text(' • ', style: TextStyle(color: OC.textMute, fontSize: 11)),
           Flexible(

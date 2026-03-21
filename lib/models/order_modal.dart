@@ -473,6 +473,7 @@ class Order {
   final String? tableId;
   final int? tableNumber;
   final String? tableSeatId;
+  final String? seatLabel;
 
   // Customer
   final String? customerName;
@@ -526,6 +527,7 @@ class Order {
     this.tableId,
     this.tableNumber,
     this.tableSeatId,
+    this.seatLabel,
     this.customerName,
     this.customerPhone,
     required this.subtotal,
@@ -610,6 +612,7 @@ class Order {
       tableId: j['table_id'] as String?,
       tableNumber: j['table_number'] as int?,
       tableSeatId: j['table_seat_id'] as String?,
+      seatLabel: j['seat_label'] as String?,
       customerName: j['customer_name'] as String?,
       customerPhone: j['customer_phone'] as String?,
       subtotal: (j['subtotal'] as num? ?? 0).toDouble(),
@@ -657,6 +660,7 @@ class Order {
     String? paidByName,
     DateTime? billGeneratedAt,
     String? tableSeatId,
+    String? seatLabel,
     List<OrderItem>? items,
     double? tipAmount,
     double? discountAmount,
@@ -680,6 +684,7 @@ class Order {
     tableId: tableId,
     tableNumber: tableNumber,
     tableSeatId: tableSeatId ?? this.tableSeatId,
+    seatLabel: seatLabel ?? this.seatLabel,
     customerName: customerName,
     customerPhone: customerPhone,
     subtotal: subtotal,

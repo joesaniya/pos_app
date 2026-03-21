@@ -300,8 +300,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       return;
     }
 
-    if (!mounted) return;
-    setState(() => _placing = true);
+    // Synchronous guard — must be set BEFORE any await to prevent double-fire
+    if (_placing) return;
+    _placing = true;
+    if (mounted) setState(() {});
 
     try {
       final prov = context.read<OrdersProvider>();
@@ -323,7 +325,6 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     } catch (e) {
       _snack('Failed to place order: $e');
     } finally {
-      // ── MEMORY LEAK FIX: check mounted before setState ──────────────────
       if (mounted) setState(() => _placing = false);
     }
   }

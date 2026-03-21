@@ -30,6 +30,10 @@ class OrdersProvider extends ChangeNotifier {
   RealtimeChannel? _ordersChannel;
   RealtimeChannel? _notifChannel;
 
+  /// IDs of orders that we just created optimistically.
+  /// The realtime INSERT callback should skip these to prevent duplicates.
+  final Set<String> _pendingOptimisticIds = {};
+
   // ── Getters ───────────────────────────────────────────────────────────────
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -254,7 +258,14 @@ class OrdersProvider extends ChangeNotifier {
       notes: notes,
     );
 
-    _orders.insert(0, order);
+    // Mark this ID so the realtime callback skips the INSERT event for it
+    _pendingOptimisticIds.add(order.id);
+
+    // Optimistic insert at front of list (dedup guard in realtime handler)
+    final alreadyPresent = _orders.any((o) => o.id == order.id);
+    if (!alreadyPresent) {
+      _orders.insert(0, order);
+    }
     notifyListeners();
 
     await OrderNotificationService.instance.notifyNewOrder(
@@ -375,6 +386,18 @@ class OrdersProvider extends ChangeNotifier {
       onEvent: (order, eventType) async {
         final idx = _orders.indexWhere((o) => o.id == order.id);
         final isNew = idx == -1;
+
+        // Skip INSERT events for orders we just created (avoid duplicates)
+        if (isNew && eventType == 'INSERT' &&
+            _pendingOptimisticIds.contains(order.id)) {
+          _pendingOptimisticIds.remove(order.id); // consume the token
+          // Still update the existing entry with the full server record
+          final existingIdx = _orders.indexWhere((o) => o.id == order.id);
+          if (existingIdx != -1) _orders[existingIdx] = order;
+          notifyListeners();
+          return;
+        }
+
         final oldStat = isNew ? null : _orders[idx].status;
 
         if (isNew) {

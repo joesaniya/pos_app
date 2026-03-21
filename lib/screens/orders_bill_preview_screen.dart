@@ -123,7 +123,14 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                         ),
                       ),
                       pw.Text(
-                        '${order.orderType.label} · ${order.tableNumber != null ? "Table ${order.tableNumber}" : "Takeaway"}',
+                        [
+                          order.orderType.label,
+                          if (order.tableNumber != null) ...[
+                            'Table ${order.tableNumber}',
+                            if (order.seatLabel != null) order.seatLabel!,
+                          ] else
+                            'Takeaway',
+                        ].join(' · '),
                         style: const pw.TextStyle(
                           fontSize: 10,
                           color: PdfColors.grey600,
@@ -717,7 +724,10 @@ class _ReceiptCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      'Table ${order.tableNumber}',
+                      [
+                        'Table ${order.tableNumber}',
+                        if (order.seatLabel != null) order.seatLabel!,
+                      ].join(' • '),
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,

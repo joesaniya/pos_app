@@ -163,6 +163,21 @@ class OrdersService {
       }
     }
 
+    // ── SEAT LABEL LOOKUP (for per-seat orders) ─────────────────────────────
+    String? seatLabel;
+    if (tableSeatId != null && tableSeatId.isNotEmpty) {
+      try {
+        final seatRow = await _db
+            .from('table_seats')
+            .select('seat_label')
+            .eq('id', tableSeatId)
+            .maybeSingle();
+        seatLabel = seatRow?['seat_label'] as String?;
+      } catch (_) {
+        // non-fatal: proceed without seat label
+      }
+    }
+
     final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
@@ -178,6 +193,7 @@ class OrdersService {
           'table_id': tableId,
           'table_number': tableNumber,
           'table_seat_id': tableSeatId,
+          'seat_label': seatLabel,
           'customer_name': customerName,
           'customer_phone': customerPhone,
           'subtotal': subtotal,
@@ -219,9 +235,14 @@ class OrdersService {
     // ── TABLE STATUS UPDATE — SEAT-AWARE ──────────────────────────────────
     if (tableId != null) {
       if (tableSeatId != null && tableSeatId.isNotEmpty) {
-        // PARTIAL SEAT ORDER: Only set table to 'occupied' if ALL seats are
-        // now occupied. Otherwise leave the status alone so other seats
-        // remain bookable and the table still shows as available.
+        // PARTIAL SEAT ORDER:
+        // 1. Mark this specific seat as occupied
+        await _db
+            .from('table_seats')
+            .update({'status': 'occupied'})
+            .eq('id', tableSeatId);
+
+        // 2. Check if ALL seats are now occupied
         final seatRows = await _db
             .from('table_seats')
             .select('status')
@@ -241,7 +262,8 @@ class OrdersService {
               })
               .eq('id', tableId);
         } else {
-          // Partial: just update order/total metadata, don't change status
+          // Partial: update order metadata, keep table status unchanged
+          // (leave as 'available' or 'partial' so other seats are bookable)
           await _db
               .from('restaurant_tables')
               .update({

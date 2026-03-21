@@ -126,8 +126,7 @@ class OrdersService {
     double taxRate = 5.0,
   }) async {
     // ── DUPLICATE ORDER GUARD ────────────────────────────────────────────────
-    // If ordering for a specific seat, check if there's already an active
-    // order on that seat. Prevents accidental duplicate orders.
+    // Guard A: Per-seat orders — check for an existing active order on that seat.
     if (tableSeatId != null && tableSeatId.isNotEmpty) {
       final existing = await _db
           .from('orders')
@@ -139,6 +138,27 @@ class OrdersService {
         throw Exception(
           'An active order already exists for this seat. '
           'Complete or cancel it before placing a new one.',
+        );
+      }
+    }
+
+    // Guard B: Whole-table dine-in orders — check for an existing active
+    // order on the table that has no seat ID assigned (same level of order).
+    // This prevents duplicate whole-table orders from double-taps.
+    if (tableId != null &&
+        orderType == OrderType.dineIn &&
+        (tableSeatId == null || tableSeatId.isEmpty)) {
+      final existing = await _db
+          .from('orders')
+          .select('id')
+          .eq('table_id', tableId)
+          .isFilter('table_seat_id', null)
+          .inFilter('status', ['pending', 'preparing', 'ready'])
+          .limit(1);
+      if ((existing as List).isNotEmpty) {
+        throw Exception(
+          'An active order already exists for this table. '
+          'Add items to the existing order or complete it first.',
         );
       }
     }

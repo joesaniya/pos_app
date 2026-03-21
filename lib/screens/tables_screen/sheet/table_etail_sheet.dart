@@ -620,6 +620,17 @@ class _OccupiedSectionState extends State<OccupiedSection> {
               stColor: _statusColor(order.status),
               stBg: _statusBg(order.status),
               stEmoji: _statusEmoji(order.status),
+              // Show "Checkout Seat" button only for seat-level orders.
+              // Tapping it clears just that seat via fn_checkout_v2(p_seat_id).
+              onCheckoutSeat: order.tableSeatId != null
+                  ? () {
+                      widget.prov.clearTable(
+                        widget.table.id,
+                        seatId: order.tableSeatId,
+                      );
+                      Navigator.pop(context);
+                    }
+                  : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -686,11 +697,16 @@ class _OrderCard extends StatelessWidget {
   final _OrderSummary order;
   final Color stColor, stBg;
   final String stEmoji;
+  /// Called when staff taps "Checkout Seat" on a seat-level order.
+  /// Null = no per-seat checkout button (whole-table or already checked out).
+  final VoidCallback? onCheckoutSeat;
+
   const _OrderCard({
     required this.order,
     required this.stColor,
     required this.stBg,
     required this.stEmoji,
+    this.onCheckoutSeat,
   });
 
   @override
@@ -957,6 +973,43 @@ class _OrderCard extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ],
+                // ── Per-seat Checkout button ──────────────────────────────
+                if (onCheckoutSeat != null) ...[
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: onCheckoutSeat,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF4E0),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFFE8860A).withOpacity(0.5),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('🪑', style: TextStyle(fontSize: 14)),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Checkout Seat ${order.seatLabel ?? ''}  ·  ₹${order.total.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFE8860A),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

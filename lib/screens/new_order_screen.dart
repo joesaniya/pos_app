@@ -27,6 +27,7 @@ class _C {
   static const reserved = Color(0xFF7C3AED);
   static const available = Color(0xFF059669);
   static const cleaning = Color(0xFFD97706);
+  static const partial = Color(0xFFE8860A);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1120,6 +1121,7 @@ class _CartView extends StatelessWidget {
               runSpacing: 4,
               children: const [
                 _LegendDot(color: _C.available, label: 'Available'),
+                _LegendDot(color: _C.partial, label: 'Partial (seats free)'),
                 _LegendDot(color: _C.occupied, label: 'Occupied (can order)'),
                 _LegendDot(color: _C.reserved, label: 'Reserved (can order)'),
                 _LegendDot(color: _C.cleaning, label: 'Cleaning (no order)'),
@@ -1161,7 +1163,22 @@ class _CartView extends StatelessWidget {
                 final customer = t['current_customer_name'] as String?;
                 final isSel = selectedTableId == tid;
                 final canSelect = _tableIsSelectable(status);
-                final sColor = _tableStatusColor(status);
+
+                // ── Partial occupancy detection ──────────────────────
+                final List<dynamic> tSeats =
+                    (t['table_seats'] as List?)?.cast<dynamic>() ?? [];
+                final occupiedCount = tSeats
+                    .where((s) => (s as Map)['status'] == 'occupied')
+                    .length;
+                final isPartial = tSeats.isNotEmpty &&
+                    occupiedCount > 0 &&
+                    occupiedCount < tSeats.length;
+                final availCount = tSeats.length - occupiedCount;
+
+                // Partial tables use amber; otherwise use status colour
+                final sColor = isPartial
+                    ? _C.partial
+                    : _tableStatusColor(status);
 
                 return GestureDetector(
                   onTap: canSelect ? () => onTableSelected(tid, num) : null,
@@ -1177,6 +1194,8 @@ class _CartView extends StatelessWidget {
                           ? _C.primary
                           : !canSelect
                           ? const Color(0xFFF5F5F5)
+                          : isPartial
+                          ? const Color(0xFFFFF4E0)
                           : sColor.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
@@ -1184,8 +1203,8 @@ class _CartView extends StatelessWidget {
                             ? _C.primary
                             : !canSelect
                             ? const Color(0xFFDDDDDD)
-                            : sColor.withOpacity(0.5),
-                        width: isSel ? 2 : 1,
+                            : sColor.withOpacity(isPartial ? 0.7 : 0.5),
+                        width: isSel ? 2 : (isPartial ? 1.5 : 1),
                       ),
                       boxShadow: isSel
                           ? [
@@ -1201,7 +1220,7 @@ class _CartView extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _tableStatusEmoji(status),
+                          isPartial ? '⚡' : _tableStatusEmoji(status),
                           style: const TextStyle(fontSize: 14),
                         ),
                         const SizedBox(height: 3),
@@ -1217,11 +1236,18 @@ class _CartView extends StatelessWidget {
                                 : sColor,
                           ),
                         ),
+                        // Show available/total when partial; capacity otherwise
                         Text(
-                          '$cap seats',
+                          isPartial
+                              ? '$availCount/$cap free'
+                              : '$cap seats',
                           style: TextStyle(
                             fontSize: 9,
-                            color: isSel ? Colors.white70 : _C.textMute,
+                            color: isSel
+                                ? Colors.white70
+                                : isPartial
+                                ? _C.partial
+                                : _C.textMute,
                           ),
                         ),
                         const SizedBox(height: 3),
@@ -1239,7 +1265,7 @@ class _CartView extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            _statusLabel(status),
+                            isPartial ? 'Partial' : _statusLabel(status),
                             style: TextStyle(
                               fontSize: 8,
                               fontWeight: FontWeight.w700,

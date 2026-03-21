@@ -119,11 +119,30 @@ class OrdersService {
     required OrderType orderType,
     String? tableId,
     int? tableNumber,
+    String? tableSeatId,
     String? customerName,
     String? customerPhone,
     String? notes,
     double taxRate = 5.0,
   }) async {
+    // ── DUPLICATE ORDER GUARD ────────────────────────────────────────────────
+    // If ordering for a specific seat, check if there's already an active
+    // order on that seat. Prevents accidental duplicate orders.
+    if (tableSeatId != null && tableSeatId.isNotEmpty) {
+      final existing = await _db
+          .from('orders')
+          .select('id')
+          .eq('table_seat_id', tableSeatId)
+          .inFilter('status', ['pending', 'preparing', 'ready'])
+          .limit(1);
+      if ((existing as List).isNotEmpty) {
+        throw Exception(
+          'An active order already exists for this seat. '
+          'Complete or cancel it before placing a new one.',
+        );
+      }
+    }
+
     final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
@@ -138,6 +157,7 @@ class OrdersService {
           'order_type': orderType.value,
           'table_id': tableId,
           'table_number': tableNumber,
+          'table_seat_id': tableSeatId,
           'customer_name': customerName,
           'customer_phone': customerPhone,
           'subtotal': subtotal,
@@ -176,17 +196,53 @@ class OrdersService {
           );
     }
 
+    // ── TABLE STATUS UPDATE — SEAT-AWARE ──────────────────────────────────
     if (tableId != null) {
-      await _db
-          .from('restaurant_tables')
-          .update({
-            'current_order_id': orderId,
-            'current_order_total': totalAmount,
-            'current_customer_name': customerName,
-            'status': 'occupied',
-            'occupied_since': DateTime.now().toIso8601String(),
-          })
-          .eq('id', tableId);
+      if (tableSeatId != null && tableSeatId.isNotEmpty) {
+        // PARTIAL SEAT ORDER: Only set table to 'occupied' if ALL seats are
+        // now occupied. Otherwise leave the status alone so other seats
+        // remain bookable and the table still shows as available.
+        final seatRows = await _db
+            .from('table_seats')
+            .select('status')
+            .eq('table_id', tableId);
+        final allOccupied = (seatRows as List)
+            .every((s) => (s['status'] as String?) == 'occupied');
+
+        if (allOccupied) {
+          await _db
+              .from('restaurant_tables')
+              .update({
+                'current_order_id': orderId,
+                'current_order_total': totalAmount,
+                'current_customer_name': customerName,
+                'status': 'occupied',
+                'occupied_since': DateTime.now().toIso8601String(),
+              })
+              .eq('id', tableId);
+        } else {
+          // Partial: just update order/total metadata, don't change status
+          await _db
+              .from('restaurant_tables')
+              .update({
+                'current_order_id': orderId,
+                'current_order_total': totalAmount,
+              })
+              .eq('id', tableId);
+        }
+      } else {
+        // FULL TABLE ORDER: mark entire table occupied as before
+        await _db
+            .from('restaurant_tables')
+            .update({
+              'current_order_id': orderId,
+              'current_order_total': totalAmount,
+              'current_customer_name': customerName,
+              'status': 'occupied',
+              'occupied_since': DateTime.now().toIso8601String(),
+            })
+            .eq('id', tableId);
+      }
     }
 
     final full = await _db

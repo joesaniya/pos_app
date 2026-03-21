@@ -12,6 +12,7 @@ import '../widgets/shared_widgets.dart';
 import '../widgets/seated_duration_timer.dart';
 import 'reservation_sheet.dart';
 import 'add_edit_table_sheet.dart';
+import '../widgets/seat_selection_dialog.dart';
 
 class _OrderItem {
   final String id;
@@ -43,6 +44,8 @@ class _OrderSummary {
   final double taxAmount;
   final double total;
   final String? notes;
+  final String? tableSeatId;
+  final String? seatLabel;
   final String createdByName;
   final DateTime createdAt;
   final List<_OrderItem> items;
@@ -55,6 +58,8 @@ class _OrderSummary {
     required this.taxAmount,
     required this.total,
     this.notes,
+    this.tableSeatId,
+    this.seatLabel,
     required this.createdByName,
     required this.createdAt,
     required this.items,
@@ -209,9 +214,12 @@ class TableDetailSheet extends StatelessWidget {
                     OccupiedSection(table: table, prov: prov)
                   else if (table.status == TableStatus.reserved)
                     ReservationSection(table: table, prov: prov)
-                  else if (table.status == TableStatus.available)
-                    AvailableSection(table: table, prov: prov)
-                  else
+                  else if (table.status == TableStatus.available) ...[
+                    // Show partial occupancy details if some seats are taken
+                    if (table.isPartiallyOccupied)
+                      OccupiedSection(table: table, prov: prov),
+                    AvailableSection(table: table, prov: prov),
+                  ] else
                     CleaningSection(table: table, prov: prov),
                 ],
               ),
@@ -302,7 +310,7 @@ class _OccupiedSectionState extends State<OccupiedSection> {
           .from('orders')
           .select(
             'id, order_number, status, subtotal, tax_amount, '
-            'total_amount, notes, created_at, created_by_name',
+            'total_amount, notes, created_at, created_by_name, table_seat_id',
           )
           .eq('table_id', widget.table.id)
           .inFilter('status', ['pending', 'preparing', 'ready'])
@@ -337,6 +345,18 @@ class _OccupiedSectionState extends State<OccupiedSection> {
             )
             .toList();
 
+        // Resolve seat label from the table's seats list
+        final orderSeatId = o['table_seat_id'] as String?;
+        String? seatLabel;
+        if (orderSeatId != null) {
+          try {
+            final seat = widget.table.seats.firstWhere((s) => s.id == orderSeatId);
+            seatLabel = seat.seatLabel;
+          } catch (_) {
+            seatLabel = null;
+          }
+        }
+
         summaries.add(
           _OrderSummary(
             id: oid,
@@ -346,6 +366,8 @@ class _OccupiedSectionState extends State<OccupiedSection> {
             taxAmount: (o['tax_amount'] as num? ?? 0).toDouble(),
             total: (o['total_amount'] as num? ?? 0).toDouble(),
             notes: o['notes'] as String?,
+            tableSeatId: orderSeatId,
+            seatLabel: seatLabel,
             createdByName: o['created_by_name'] as String? ?? 'Staff',
             createdAt: parseToIST(o['created_at'] as String),
             items: items,
@@ -611,8 +633,39 @@ class _OccupiedSectionState extends State<OccupiedSection> {
           const SizedBox(height: 16),
         ],
 
+        // ── Per-seat clear buttons for partial occupancy ──────────────────
+        if (widget.table.isPartiallyOccupied) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'CLEAR INDIVIDUAL SEATS',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: TC.textMute,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...widget.table.occupiedSeats.map((seat) =>
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: ActionBtn(
+                label: 'Clear Seat ${seat.seatLabel} (${seat.customerName ?? 'Guest'})',
+                emoji: '🪑',
+                color: TC.cleaning,
+                outlined: true,
+                onTap: () {
+                  widget.prov.clearTable(widget.table.id, seatId: seat.id);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+
         ActionBtn(
-          label: 'Clear Table (Needs Cleaning)',
+          label: 'Clear Entire Table (Needs Cleaning)',
           emoji: '🧹',
           color: TC.cleaning,
           onTap: () {
@@ -674,13 +727,35 @@ class _OrderCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Order #${order.orderNumber}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900,
-                          color: TC.textPri,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            'Order #${order.orderNumber}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                              color: TC.textPri,
+                            ),
+                          ),
+                          if (order.seatLabel != null) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE0F0FF),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text(
+                                '💺 Seat ${order.seatLabel}',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0A7ADB),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       Text(
                         '${order.createdByName} · ${fmtTimeIST(order.createdAt)}',
@@ -1521,6 +1596,15 @@ class AvailableSection extends StatelessWidget {
   }
 
   Future<void> _handleSeatWalkIn(BuildContext context) async {
+    List<String>? selectedSeats;
+    if (table.seats.isNotEmpty) {
+      selectedSeats = await showDialog<List<String>>(
+        context: context,
+        builder: (ctx) => SeatSelectionDialog(table: table),
+      );
+      if (selectedSeats == null) return; // cancelled
+    }
+
     final check = await prov.checkWalkInAllowed(table.id);
 
     if (!_isMounted(context)) return;
@@ -1609,6 +1693,7 @@ class AvailableSection extends StatelessWidget {
         table.id,
         'Walk-in Guest',
         isWalkIn: true,
+        seatIds: selectedSeats != null && selectedSeats.isNotEmpty ? selectedSeats : null,
       );
 
       if (result.success) {
@@ -1621,7 +1706,12 @@ class AvailableSection extends StatelessWidget {
       }
     } else {
       Navigator.pop(context);
-      await prov.seatGuests(table.id, 'Walk-in Guest', isWalkIn: true);
+      await prov.seatGuests(
+        table.id, 
+        'Walk-in Guest', 
+        isWalkIn: true,
+        seatIds: selectedSeats != null && selectedSeats.isNotEmpty ? selectedSeats : null,
+      );
     }
   }
 
@@ -2298,7 +2388,7 @@ class _OccupiedSectionState extends State<OccupiedSection> {
           .from('orders')
           .select(
             'id, order_number, status, subtotal, tax_amount, '
-            'total_amount, notes, created_at, created_by_name',
+            'total_amount, notes, table_seat_id, created_at, created_by_name',
           )
           .eq('table_id', widget.table.id)
           .inFilter('status', ['pending', 'preparing', 'ready'])
@@ -2342,6 +2432,7 @@ class _OccupiedSectionState extends State<OccupiedSection> {
             taxAmount: (o['tax_amount'] as num? ?? 0).toDouble(),
             total: (o['total_amount'] as num? ?? 0).toDouble(),
             notes: o['notes'] as String?,
+            tableSeatId: o['table_seat_id'] as String?,
             createdByName: o['created_by_name'] as String? ?? 'Staff',
             createdAt: parseToIST(o['created_at'] as String),
             items: items,
@@ -2541,35 +2632,102 @@ class _OccupiedSectionState extends State<OccupiedSection> {
           _ErrorCard(error: _error!, onRetry: _load)
         else if (_orders.isEmpty)
           _EmptyOrdersCard()
-        else ...[
-          ..._orders.map(
-            (order) => _OrderCard(
-              order: order,
-              stColor: _statusColor(order.status),
-              stBg: _statusBg(order.status),
-              stEmoji: _statusEmoji(order.status),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _GrandBillCard(
-            orders: _orders,
-            grandSub: _grandSub,
-            grandTax: _grandTax,
-            grandTotal: _grandTotal,
-            totalItems: _totalItems,
-          ),
-          const SizedBox(height: 16),
-        ],
+        else ...() {
+          final Map<String?, List<_OrderSummary>> groupedOrders = {};
+          for (final o in _orders) {
+            groupedOrders.putIfAbsent(o.tableSeatId, () => []).add(o);
+          }
 
-        ActionBtn(
-          label: 'Clear Table (Needs Cleaning)',
-          emoji: '🧹',
-          color: TC.cleaning,
-          onTap: () {
-            widget.prov.clearTable(widget.table.id);
-            Navigator.pop(context);
-          },
-        ),
+          final List<Widget> children = [];
+          
+          for (final entry in groupedOrders.entries) {
+            final seatId = entry.key;
+            final seatOrders = entry.value;
+            String seatName = 'Whole Table';
+            if (seatId != null && widget.table.seats != null) {
+              final seat = widget.table.seats!.firstWhere(
+                (s) => s.id == seatId,
+                orElse: () => TableSeat(id: seatId, tableId: widget.table.id, seatLabel: 'Unknown'),
+              );
+              seatName = 'Seat ${seat.seatLabel}';
+            }
+
+            double gSub = seatOrders.fold(0.0, (s, o) => s + o.subtotal);
+            double gTax = seatOrders.fold(0.0, (s, o) => s + o.taxAmount);
+            double gTot = seatOrders.fold(0.0, (s, o) => s + o.total);
+            int tItems = seatOrders.fold(0, (s, o) => s + o.items.fold(0, (ss, i) => ss + i.quantity));
+
+            children.add(
+              Container(
+                margin: const EdgeInsets.only(bottom: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (groupedOrders.length > 1 || seatId != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          seatName.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            color: TC.primary,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ),
+                    ...seatOrders.map(
+                      (order) => _OrderCard(
+                        order: order,
+                        stColor: _statusColor(order.status),
+                        stBg: _statusBg(order.status),
+                        stEmoji: _statusEmoji(order.status),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _GrandBillCard(
+                      orders: seatOrders,
+                      grandSub: gSub,
+                      grandTax: gTax,
+                      grandTotal: gTot,
+                      totalItems: tItems,
+                    ),
+                    const SizedBox(height: 16),
+                    ActionBtn(
+                      label: seatId == null ? 'Clear Whole Table' : 'Clear $seatName',
+                      emoji: '🧹',
+                      color: TC.cleaning,
+                      onTap: () {
+                        widget.prov.clearTable(widget.table.id, seatId: seatId);
+                        if (seatId == null || widget.table.seats?.where((s) => s.status == TableStatus.occupied).length == 1) {
+                          Navigator.pop(context);
+                        } else {
+                          // Allow natural refresh via realtime subscription
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (groupedOrders.length > 1) {
+            children.add(
+              ActionBtn(
+                label: 'Clear Entire Table',
+                emoji: '🧹',
+                color: TC.cleaning,
+                onTap: () {
+                  widget.prov.clearTable(widget.table.id);
+                  Navigator.pop(context);
+                },
+              ),
+            );
+          }
+
+          return children;
+        }(),
       ],
     );
   }

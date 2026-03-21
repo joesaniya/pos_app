@@ -67,6 +67,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   OrderType _orderType = OrderType.dineIn;
   String? _selectedTableId;
   int? _selectedTableNumber;
+  String? _selectedSeatId;
   final _customerCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
@@ -236,7 +237,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       final data = await Supabase.instance.client
           .from('restaurant_tables')
           .select(
-            'id, table_number, capacity, status, section, current_customer_name',
+            'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status)',
           )
           .eq('business_id', _businessId)
           .eq('is_active', true)
@@ -308,6 +309,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         orderType: _orderType,
         tableId: _selectedTableId,
         tableNumber: _selectedTableNumber,
+        tableSeatId: _selectedSeatId,
         customerName: _customerCtrl.text.trim().isEmpty
             ? null
             : _customerCtrl.text.trim(),
@@ -352,6 +354,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                         orderType: _orderType,
                         tables: _tables,
                         selectedTableId: _selectedTableId,
+                        selectedSeatId: _selectedSeatId,
                         customerCtrl: _customerCtrl,
                         phoneCtrl: _phoneCtrl,
                         noteCtrl: _noteCtrl,
@@ -359,10 +362,23 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                         cartTax: cartTax,
                         cartTotal: cartTotal,
                         placing: _placing,
-                        onTypeChanged: (t) => setState(() => _orderType = t),
+                        onTypeChanged: (t) => setState(() {
+                          _orderType = t;
+                          if (t != OrderType.dineIn) {
+                            _selectedTableId = null;
+                            _selectedSeatId = null;
+                            _selectedTableNumber = null;
+                          }
+                        }),
                         onTableSelected: (id, num) => setState(() {
+                          if (_selectedTableId != id) {
+                            _selectedSeatId = null;
+                          }
                           _selectedTableId = id;
                           _selectedTableNumber = num;
+                        }),
+                        onSeatSelected: (id) => setState(() {
+                          _selectedSeatId = id;
                         }),
                         onAdd: _addItem,
                         onRemove: (id) => _removeItem(id),
@@ -988,11 +1004,13 @@ class _CartView extends StatelessWidget {
   final OrderType orderType;
   final List<Map<String, dynamic>> tables;
   final String? selectedTableId;
+  final String? selectedSeatId;
   final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
   final double cartSubtotal, cartTax, cartTotal;
   final bool placing;
   final ValueChanged<OrderType> onTypeChanged;
   final Function(String id, int num) onTableSelected;
+  final Function(String? id) onSeatSelected;
   final ValueChanged<Map<String, dynamic>> onAdd;
   final ValueChanged<String> onRemove;
   final VoidCallback onPlaceOrder;
@@ -1003,6 +1021,7 @@ class _CartView extends StatelessWidget {
     required this.orderType,
     required this.tables,
     required this.selectedTableId,
+    required this.selectedSeatId,
     required this.customerCtrl,
     required this.phoneCtrl,
     required this.noteCtrl,
@@ -1012,6 +1031,7 @@ class _CartView extends StatelessWidget {
     required this.placing,
     required this.onTypeChanged,
     required this.onTableSelected,
+    required this.onSeatSelected,
     required this.onAdd,
     required this.onRemove,
     required this.onPlaceOrder,
@@ -1260,6 +1280,50 @@ class _CartView extends StatelessWidget {
               }).toList(),
             ),
           const SizedBox(height: 14),
+
+          if (selectedTableId != null) ...[
+            Builder(builder: (context) {
+              final selectedTable = tables.firstWhere(
+                (t) => t['id'] == selectedTableId,
+                orElse: () => {},
+              );
+              final List<dynamic> seats = selectedTable['table_seats'] ?? [];
+              if (seats.isEmpty) return const SizedBox.shrink();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionLabel('Select Seat (Optional)'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _SeatChip(
+                        label: 'Whole Table',
+                        isSelected: selectedSeatId == null,
+                        onTap: () => onSeatSelected(null),
+                      ),
+                      ...seats.map((s) {
+                        final sid = s['id'] as String;
+                        final sl = s['seat_label'] as String;
+                        final status = s['status'] as String? ?? 'available';
+                        final isSel = selectedSeatId == sid;
+                        
+                        return _SeatChip(
+                          label: 'Seat $sl',
+                          isSelected: isSel,
+                          status: status,
+                          onTap: () => onSeatSelected(sid),
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ],
+              );
+            }),
+          ],
         ],
 
         Row(
@@ -4582,6 +4646,74 @@ class _BillRow extends StatelessWidget {
 //     );
 //   }
 // }
+
+class _SeatChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final String? status;
+  final VoidCallback onTap;
+
+  const _SeatChip({
+    required this.label,
+    required this.isSelected,
+    this.status,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color bgColor = _C.surface;
+    Color borderColor = _C.border;
+    Color iconColor = _C.textSec;
+
+    if (status == 'occupied') {
+      bgColor = _C.occupied.withOpacity(0.08);
+      borderColor = _C.occupied.withOpacity(0.3);
+      iconColor = _C.occupied;
+    } else if (status == 'available') {
+      bgColor = _C.available.withOpacity(0.08);
+      borderColor = _C.available.withOpacity(0.3);
+      iconColor = _C.available;
+    }
+    
+    if (isSelected) {
+      bgColor = _C.primary;
+      borderColor = _C.primary;
+      iconColor = Colors.white;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (status == 'occupied')
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Icon(Icons.person, size: 14, color: isSelected ? Colors.white : iconColor),
+              ),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: isSelected ? Colors.white : (status == 'occupied' ? _C.occupied : _C.textPri),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // // ── Legend dot for table status ──────────────────────────────────
 // class _LegendDot extends StatelessWidget {

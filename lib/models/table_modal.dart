@@ -86,6 +86,76 @@ extension TableSectionExt on TableSection {
 enum TableShape { square, round, rectangle }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  TABLE SEAT
+// ─────────────────────────────────────────────────────────────────────────────
+
+class TableSeat {
+  final String id;
+  final String tableId;
+  final String seatLabel;
+  final TableStatus status;
+  final String? sessionId;
+  final String? customerName;
+  final DateTime? occupiedSince;
+
+  const TableSeat({
+    required this.id,
+    required this.tableId,
+    required this.seatLabel,
+    this.status = TableStatus.available,
+    this.sessionId,
+    this.customerName,
+    this.occupiedSince,
+  });
+
+  factory TableSeat.fromJson(Map<String, dynamic> j) {
+    return TableSeat(
+      id: j['id'] ?? '',
+      tableId: j['table_id'] ?? '',
+      seatLabel: j['seat_label'] ?? '',
+      status: j['status'] == 'occupied'
+          ? TableStatus.occupied
+          : TableStatus.available,
+      sessionId: j['session_id'],
+      customerName: j['customer_name'],
+      occupiedSince: j['occupied_since'] != null
+          ? DateTime.parse(j['occupied_since']).toLocal()
+          : null,
+    );
+  }
+
+  TableSeat copyWith({
+    TableStatus? status,
+    String? sessionId,
+    String? customerName,
+    DateTime? occupiedSince,
+    bool clearOccupied = false,
+  }) {
+    return TableSeat(
+      id: id,
+      tableId: tableId,
+      seatLabel: seatLabel,
+      status: clearOccupied ? TableStatus.available : status ?? this.status,
+      sessionId: clearOccupied ? null : sessionId ?? this.sessionId,
+      customerName: clearOccupied ? null : customerName ?? this.customerName,
+      occupiedSince: clearOccupied ? null : occupiedSince ?? this.occupiedSince,
+    );
+  }
+
+  bool get isAvailable => status == TableStatus.available;
+  bool get isOccupied => status == TableStatus.occupied;
+  
+  String get occupiedDuration {
+    if (occupiedSince == null) return '—';
+    final diff = elapsedIST(occupiedSince!);
+    final h = diff.inHours;
+    final m = diff.inMinutes.remainder(60);
+    if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+    return '${diff.inMinutes}m';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  RESERVATION
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -350,6 +420,7 @@ class RestaurantTable {
   final Reservation? reservation;
   final bool hasWindow;
   final bool isPremium;
+  final List<TableSeat> seats;
 
   const RestaurantTable({
     required this.id,
@@ -365,6 +436,7 @@ class RestaurantTable {
     this.reservation,
     this.hasWindow = false,
     this.isPremium = false,
+    this.seats = const [],
   });
 
   RestaurantTable copyWith({
@@ -374,6 +446,7 @@ class RestaurantTable {
     double? currentOrderTotal,
     DateTime? occupiedSince,
     Reservation? reservation,
+    List<TableSeat>? seats,
     bool clearReservation = false,
     bool clearOccupied = false,
   }) => RestaurantTable(
@@ -396,6 +469,7 @@ class RestaurantTable {
     reservation: clearReservation ? null : reservation ?? this.reservation,
     hasWindow: hasWindow,
     isPremium: isPremium,
+    seats: seats ?? this.seats,
   );
 
   // ── Display helpers ──────────────────────────────────
@@ -437,4 +511,33 @@ class RestaurantTable {
     if (occupiedSince == null) return 0;
     return DateTime.now().difference(occupiedSince!).inMinutes;
   }
+
+  // ── Seat-level helpers ──────────────────────────────────
+
+  /// Number of seats currently occupied
+  int get occupiedSeatCount =>
+      seats.where((s) => s.status == TableStatus.occupied).length;
+
+  /// Number of seats still available
+  int get availableSeatCount =>
+      seats.where((s) => s.status == TableStatus.available).length;
+
+  /// True when at least one seat is occupied but not ALL seats.
+  /// This indicates partial (seat-level) booking vs full table booking.
+  bool get isPartiallyOccupied =>
+      seats.isNotEmpty &&
+      occupiedSeatCount > 0 &&
+      occupiedSeatCount < seats.length;
+
+  /// True when every seat in the table is occupied (full table booking).
+  bool get isFullyOccupied =>
+      seats.isNotEmpty && occupiedSeatCount == seats.length;
+
+  /// Occupied seats list
+  List<TableSeat> get occupiedSeats =>
+      seats.where((s) => s.status == TableStatus.occupied).toList();
+
+  /// Available seats list
+  List<TableSeat> get availableSeats =>
+      seats.where((s) => s.status == TableStatus.available).toList();
 }

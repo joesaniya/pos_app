@@ -478,15 +478,35 @@ class TablesProvider extends ChangeNotifier {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
     try {
-      final rows = await _sb
+      final rowsFut = _sb
           .from(_kView)
           .select()
           .eq('business_id', bId)
           .eq('is_active', true)
           .order('table_number');
-      _tables
-        ..clear()
-        ..addAll(rows.map(_rowToTable));
+          
+      final seatsFut = _sb
+          .from('table_seats')
+          .select()
+          .eq('business_id', bId);
+
+      final results = await Future.wait([rowsFut, seatsFut]);
+      final rows = results[0] as List;
+      final seatsRows = results[1] as List;
+      
+      final allSeats = seatsRows
+          .map((s) => TableSeat.fromJson(s as Map<String, dynamic>))
+          .toList();
+
+      _tables.clear();
+      for (final row in rows) {
+        final r = row as Map<String, dynamic>;
+        final tId = r['id'] as String;
+        final tSeats = allSeats.where((s) => s.tableId == tId).toList()
+          ..sort((a, b) => a.seatLabel.compareTo(b.seatLabel));
+        _tables.add(_rowToTable(r, tSeats));
+      }
+
       notifyListeners();
       _runNotifCheck();
     } catch (e) {
@@ -511,7 +531,7 @@ class TablesProvider extends ChangeNotifier {
   //  show upcoming reservation info, but the TABLE STATUS on the floor
   //  grid only changes to 'reserved' when the slot is approaching.
   // ══════════════════════════════════════════════════════════════════════
-  RestaurantTable _rowToTable(Map<String, dynamic> row) {
+  RestaurantTable _rowToTable(Map<String, dynamic> row, List<TableSeat> seats) {
     Reservation? reservation;
 
     if (row['reservation_id'] != null) {
@@ -573,6 +593,23 @@ class TablesProvider extends ChangeNotifier {
       effectiveStatus = TableStatus.available;
     }
 
+    // ── SEAT-AWARE STATUS OVERRIDE ──────────────────────────────────────────
+    // If the DB says 'occupied' but only SOME seats are taken (partial
+    // booking), override to 'available' so remaining seats stay bookable.
+    // The UI will use RestaurantTable.isPartiallyOccupied to show the
+    // partial badge / occupied seat chips.
+    if (effectiveStatus == TableStatus.occupied && seats.isNotEmpty) {
+      final occupiedCount = seats.where((s) => s.isOccupied).length;
+      if (occupiedCount > 0 && occupiedCount < seats.length) {
+        // Partial occupancy — table still has free seats
+        effectiveStatus = TableStatus.available;
+      } else if (occupiedCount == 0) {
+        // DB is stale — no seats actually occupied
+        effectiveStatus = TableStatus.available;
+      }
+      // occupiedCount == seats.length → truly fully occupied, keep 'occupied'
+    }
+
     return RestaurantTable(
       id: row['id'] as String,
       tableNumber: row['table_number'] as int,
@@ -591,6 +628,7 @@ class TablesProvider extends ChangeNotifier {
           ? parseToIST(row['occupied_since'] as String)
           : null,
       reservation: reservation,
+      seats: seats,
     );
   }
 
@@ -705,6 +743,7 @@ class TablesProvider extends ChangeNotifier {
     String tableId,
     String customerName, {
     bool isWalkIn = false,
+    List<String>? seatIds,
   }) async {
     try {
       final t = _tables.where((t) => t.id == tableId).firstOrNull;
@@ -722,14 +761,15 @@ class TablesProvider extends ChangeNotifier {
         _notif.clearReservationKeys(t!.reservation!.id);
       }
 
-      // Use fn_seat_guest RPC — slot-aware, generates session_id
+      // Use fn_seat_guest_v2 RPC — slot-aware, seat-aware, generates session_id
       final result = await _sb.rpc(
-        'fn_seat_guest',
+        'fn_seat_guest_v2',
         params: {
           'p_table_id': tableId,
           'p_customer_name': customerName,
           'p_staff_uid': _userCtx?.uid,
           'p_staff_name': _userCtx?.name,
+          if (seatIds != null) 'p_seat_ids': seatIds,
         },
       );
 
@@ -778,28 +818,27 @@ class TablesProvider extends ChangeNotifier {
     return null;
   }
 
-  Future<void> clearTable(String tableId) async {
+  Future<void> clearTable(String tableId, {String? seatId}) async {
     try {
-      await _sb
-          .from(_kTables)
-          .update({
-            'status': 'cleaning',
-            'current_customer_name': null,
-            'current_order_id': null,
-            'current_order_total': null,
-            'occupied_since': null,
-            'session_id': null,
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', tableId);
+      await _sb.rpc(
+        'fn_checkout_v2',
+        params: {
+          'p_table_id': tableId,
+          'p_staff_uid': _userCtx?.uid,
+          'p_staff_name': _userCtx?.name,
+          'p_checkout_at': DateTime.now().toUtc().toIso8601String(),
+          if (seatId != null) 'p_seat_id': seatId,
+        },
+      );
 
       // After clearing, check if a reservation is starting soon
       // and restore 'reserved' status if within 15 min
       await _refreshAll();
 
-      // Re-check and restore reserved status if needed
-      await _restoreReservedIfNeeded(tableId);
+      // Re-check and restore reserved status if needed (mainly for full tables)
+      if (seatId == null) {
+        await _restoreReservedIfNeeded(tableId);
+      }
     } catch (e) {
       _error = 'Clear table error: $e';
       notifyListeners();

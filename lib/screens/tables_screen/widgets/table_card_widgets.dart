@@ -198,6 +198,7 @@ class TableCard extends StatelessWidget {
     final secCol = sectionColor(table.section);
 
     final isOccupied = table.status == TableStatus.occupied;
+    final isPartial = table.isPartiallyOccupied;
 
     final isSoon =
         table.status == TableStatus.reserved &&
@@ -219,11 +220,13 @@ class TableCard extends StatelessWidget {
         ? TC.occupied.withOpacity(0.5)
         : isSoon
         ? TC.nonAcAmber.withOpacity(0.5)
+        : isPartial
+        ? const Color(0xFFE8860A).withOpacity(0.5)
         : isOccupied
         ? sc.withOpacity(0.3)
         : TC.border;
 
-    final borderWidth = (isSoon || isOccupied || isEndingSoon || isLongSeated)
+    final borderWidth = (isSoon || isOccupied || isEndingSoon || isLongSeated || isPartial)
         ? 1.5
         : 1.0;
 
@@ -344,7 +347,9 @@ class TableCard extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 3),
                                 Text(
-                                  '${table.capacity} seats',
+                                  table.seats.isEmpty
+                                      ? '${table.capacity} seats'
+                                      : '${table.seats.where((s) => s.isAvailable).length}/${table.capacity} available',
                                   style: const TextStyle(
                                     fontSize: 11,
                                     color: TC.textSec,
@@ -361,15 +366,15 @@ class TableCard extends StatelessWidget {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: sb,
+                          color: isPartial ? const Color(0xFFFFF4E0) : sb,
                           borderRadius: BorderRadius.circular(7),
                         ),
                         child: Text(
-                          table.status.label,
+                          isPartial ? '⚡ Partial' : table.status.label,
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w800,
-                            color: sc,
+                            color: isPartial ? const Color(0xFFE8860A) : sc,
                           ),
                         ),
                       ),
@@ -570,6 +575,56 @@ class _StatusContent extends StatelessWidget {
 
       // ── AVAILABLE ────────────────────────────────────────
       case TableStatus.available:
+        // Show partial occupancy badge if some seats are taken
+        if (table.isPartiallyOccupied) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF4E0),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFFE8860A).withOpacity(0.4),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFE8860A),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '${table.occupiedSeatCount}/${table.seats.length} seated',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFFE8860A),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                '${table.availableSeatCount} seat${table.availableSeatCount != 1 ? 's' : ''} free',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: TC.available,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          );
+        }
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           decoration: BoxDecoration(

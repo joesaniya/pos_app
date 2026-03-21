@@ -387,15 +387,11 @@ class OrdersProvider extends ChangeNotifier {
         final idx = _orders.indexWhere((o) => o.id == order.id);
         final isNew = idx == -1;
 
-        // Skip INSERT events for orders we just created (avoid duplicates)
-        if (isNew && eventType == 'INSERT' &&
-            _pendingOptimisticIds.contains(order.id)) {
-          _pendingOptimisticIds.remove(order.id); // consume the token
-          // Still update the existing entry with the full server record
-          final existingIdx = _orders.indexWhere((o) => o.id == order.id);
-          if (existingIdx != -1) _orders[existingIdx] = order;
-          notifyListeners();
-          return;
+        // Consume the optimistic token if present — but ALWAYS apply the full
+        // server record (which carries seat_label and other view-computed fields)
+        // so the UI updates immediately without a manual refresh.
+        if (_pendingOptimisticIds.contains(order.id)) {
+          _pendingOptimisticIds.remove(order.id);
         }
 
         final oldStat = isNew ? null : _orders[idx].status;

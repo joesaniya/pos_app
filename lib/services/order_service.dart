@@ -258,7 +258,7 @@ class OrdersService {
                 'current_order_total': totalAmount,
                 'current_customer_name': customerName,
                 'status': 'occupied',
-                'occupied_since': DateTime.now().toIso8601String(),
+                'occupied_since': DateTime.now().toUtc().toIso8601String(),
               })
               .eq('id', tableId);
         } else {
@@ -281,7 +281,7 @@ class OrdersService {
               'current_order_total': totalAmount,
               'current_customer_name': customerName,
               'status': 'occupied',
-              'occupied_since': DateTime.now().toIso8601String(),
+              'occupied_since': DateTime.now().toUtc().toIso8601String(),
             })
             .eq('id', tableId);
       }
@@ -314,7 +314,7 @@ class OrdersService {
       'payment_mode': mode.value,
       'paid_by_uid': paidByUid,
       'paid_by_name': paidByName,
-      'paid_at': DateTime.now().toIso8601String(),
+      'paid_at': DateTime.now().toUtc().toIso8601String(),
     };
 
     if (paymentRef != null && paymentRef.isNotEmpty) {
@@ -358,7 +358,7 @@ class OrdersService {
       'Use confirmPayment() to complete orders',
     );
 
-    final now = DateTime.now().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
     final updateMap = <String, dynamic>{
       'status': newStatus.value,
       'updated_by_uid': updatedByUid,
@@ -457,7 +457,9 @@ class OrdersService {
                   payload.eventType.name,
                 );
               }
-            } catch (_) {}
+            } catch (e, st) {
+              debugPrint('[OrdersService] realtime callback error: $e\n$st');
+            }
           },
         )
         .subscribe();

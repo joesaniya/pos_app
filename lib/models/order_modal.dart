@@ -3,6 +3,7 @@
 // v2: Added PaymentStatus, PaymentMode, bill fields
 
 import 'package:flutter/material.dart';
+import 'package:pos_app/utils/ist_utils.dart';
 
 // ══════════════════════════════════════════════════════════════
 //  PAYMENT STATUS
@@ -563,15 +564,14 @@ class Order {
       subtotal + taxAmount + tipAmount - discountAmount + roundOff;
 
   String get timeLabel {
-    final ist = createdAt.toUtc().add(const Duration(hours: 5, minutes: 30));
-    final now = DateTime.now().toUtc().add(
-      const Duration(hours: 5, minutes: 30),
-    );
-    final diff = now.difference(ist);
-    if (diff.inMinutes < 1) return 'Just now';
+    // createdAt is already local (parsed via parseToIST in fromJson)
+    final local = createdAt.toLocal();
+    final now = DateTime.now();
+    final diff = now.difference(local);
+    if (diff.isNegative || diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${ist.day}/${ist.month}';
+    return '${local.day}/${local.month}';
   }
 
   bool get isActive =>
@@ -601,12 +601,12 @@ class Order {
       paymentMode: OrderPaymentModeExt.fromString(j['payment_mode'] as String?),
       paymentRef: j['payment_ref'] as String?,
       paidAt: j['paid_at'] != null
-          ? DateTime.parse(j['paid_at'] as String)
+          ? parseToIST(j['paid_at'] as String)
           : null,
       paidByUid: j['paid_by_uid'] as String?,
       paidByName: j['paid_by_name'] as String?,
       billGeneratedAt: j['bill_generated_at'] != null
-          ? DateTime.parse(j['bill_generated_at'] as String)
+          ? parseToIST(j['bill_generated_at'] as String)
           : null,
       orderType: OrderTypeExt.fromString(j['order_type'] as String? ?? ''),
       tableId: j['table_id'] as String?,
@@ -629,23 +629,23 @@ class Order {
       createdByUid: j['created_by_uid'] as String? ?? '',
       createdByName: j['created_by_name'] as String? ?? '',
       createdByRole: j['created_by_role'] as String? ?? 'staff',
-      createdAt: DateTime.parse(
-        j['created_at'] as String? ?? DateTime.now().toIso8601String(),
-      ),
+      createdAt: j['created_at'] != null
+          ? parseToIST(j['created_at'] as String)
+          : DateTime.now(),
       startedAt: j['started_at'] != null
-          ? DateTime.parse(j['started_at'] as String)
+          ? parseToIST(j['started_at'] as String)
           : null,
       readyAt: j['ready_at'] != null
-          ? DateTime.parse(j['ready_at'] as String)
+          ? parseToIST(j['ready_at'] as String)
           : null,
       completedAt: j['completed_at'] != null
-          ? DateTime.parse(j['completed_at'] as String)
+          ? parseToIST(j['completed_at'] as String)
           : null,
       cancelledAt: j['cancelled_at'] != null
-          ? DateTime.parse(j['cancelled_at'] as String)
+          ? parseToIST(j['cancelled_at'] as String)
           : null,
       updatedAt: j['updated_at'] != null
-          ? DateTime.parse(j['updated_at'] as String)
+          ? parseToIST(j['updated_at'] as String)
           : null,
     );
   }

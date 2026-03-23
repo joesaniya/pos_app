@@ -7,6 +7,7 @@ import 'package:pos_app/repositories/inventory_repository.dart';
 import 'package:pos_app/models/inventory_modal.dart';
 import 'package:pos_app/services/stock_notification_service.dart';
 import 'package:pos_app/services/storage_service.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 
 enum InventorySortBy { name, stockLowHigh, stockHighLow, lastUpdated, value }
 
@@ -193,6 +194,19 @@ class InventoryProvider extends ChangeNotifier {
     }
     _isLoading = false;
     notifyListeners();
+
+    // ── Double-fetch for offline-first ─────────────────────────────────────────
+    if (ConnectivityService.instance.isOnline && _businessId.isNotEmpty) {
+      try {
+        await InventoryRepository.instance.refreshFromRemote(_businessId);
+        final freshItems = await InventoryRepository.instance.fetchItems(_businessId);
+        _items.clear();
+        _items.addAll(freshItems);
+        notifyListeners();
+      } catch (e) {
+        debugPrint('[InventoryProvider] Remote refresh error: $e');
+      }
+    }
   }
 
   // ── Realtime ───────────────────────────────────────────────────────────────

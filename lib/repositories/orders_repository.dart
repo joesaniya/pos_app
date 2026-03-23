@@ -54,16 +54,11 @@ class OrdersRepository {
       return t.isAfter(startIS) && t.isBefore(endIS);
     }).toList();
 
-    // Fire remote refresh in background if online
-    if (_connectivity.isOnline) {
-      _refreshOrdersFromRemote(businessId: businessId).catchError((_) {});
-    }
-
     return orders..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   /// Pull orders from Supabase and update local cache.
-  Future<void> _refreshOrdersFromRemote({required String businessId}) async {
+  Future<void> refreshOrdersFromRemote({required String businessId}) async {
     try {
       final remoteOrders = await _remote.fetchTodayOrders(businessId: businessId);
       for (final order in remoteOrders) {

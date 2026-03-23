@@ -346,6 +346,14 @@ class LocalDatabase {
       final decoded = jsonDecode(row['data'] as String) as Map<String, dynamic>;
       decoded['_sync_status'] = row['sync_status'];
       decoded['_action'] = row['action'];
+      
+      // Inject primary IDs from table row if not present in JSON
+      if (!decoded.containsKey('id') || decoded['id'] == null) {
+        decoded['id'] = row['id'];
+      }
+      if (!decoded.containsKey('business_id') || decoded['business_id'] == null) {
+        decoded['business_id'] = row['business_id'];
+      }
       return decoded;
     }).toList();
   }

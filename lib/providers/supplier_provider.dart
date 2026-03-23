@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:pos_app/repositories/supplier_repository.dart';
 import 'package:pos_app/models/supplier_modal.dart';
 import 'package:pos_app/services/storage_service.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 
 enum SupplierSort { name, pending, rating, recentDelivery }
 
@@ -91,6 +92,19 @@ class SupplierProvider extends ChangeNotifier {
       debugPrint('[SupplierProvider] fetchAll error: $e');
     }
     notifyListeners();
+
+    // ── Double-fetch for offline-first ─────────────────────────────────────────
+    if (ConnectivityService.instance.isOnline && _businessId.isNotEmpty) {
+      try {
+        await SupplierRepository.instance.refreshFromRemote(_businessId);
+        final freshSuppliers = await SupplierRepository.instance.fetchAll(_businessId);
+        _suppliers.clear();
+        _suppliers.addAll(freshSuppliers);
+        notifyListeners();
+      } catch (e) {
+        debugPrint('[SupplierProvider] Remote refresh error: $e');
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════

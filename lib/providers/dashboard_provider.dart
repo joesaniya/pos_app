@@ -25,11 +25,15 @@
 // 5. TABLE STATS — unchanged, admin-only.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pos_app/services/connectivity_service.dart';
+import 'package:pos_app/database/local_database.dart';
+import 'package:pos_app/utils/ist_utils.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  DATA CLASSES
@@ -281,7 +285,10 @@ class DashboardProvider extends ChangeNotifier {
 
       debugPrint('📊 Fetching: $fromStr → $toStr  uid=$_uid  biz=$_businessId');
 
-      // ── 1. KPI stats — ALWAYS scoped to current user's own orders ──────────
+      if (!ConnectivityService.instance.isOnline) {
+        await _fetchOfflineData(cur.from, cur.to, prev.from, prev.to);
+      } else {
+        // ── 1. KPI stats — ALWAYS scoped to current user's own orders ──────────
       //    p_staff_uid is always _uid, never null, for every role.
       //    This guarantees revenue/orders shown are only what this user handled.
       final rpcCur =
@@ -427,13 +434,132 @@ class DashboardProvider extends ChangeNotifier {
         totalTables: totalTables,
         servedTablesToday: servedToday,
       );
-    } catch (e, st) {
-      _error = e.toString();
-      debugPrint('📊 fetchDashboardData ERROR: $e\n$st');
+      } // End of online block
     } finally {
       _isLoading = false;
       _isReady = true;
       notifyListeners();
+    }
+  }
+
+  // ── Offline Fallback Data Fetch ───────────────────────────────────────────
+  Future<void> _fetchOfflineData(DateTime curFrom, DateTime curTo, DateTime prevFrom, DateTime prevTo) async {
+    try {
+      final local = LocalDatabase.instance;
+      final rows = await local.getEntities(
+        table: LocalDatabase.tOrders,
+        businessId: _businessId,
+        whereExtra: 'action != ?',
+        whereExtraArgs: [LocalDatabase.actionDelete],
+      );
+
+      double revenue = 0, prevRev = 0, avgOrder = 0;
+      int orders = 0, prevOrders = 0, completed = 0, cancelled = 0;
+      List<Map<String, dynamic>> myRows = [];
+
+      final allCompletedForTopItems = <String>[];
+      final Map<String, _EmpAgg> empAgg = {};
+
+      for (final r in rows) {
+        final j = r;
+        final createdBy = j['created_by_uid'] as String?;
+        final status = j['status'] as String?;
+        final dtRaw = j['created_at'] as String?;
+        if (dtRaw == null || status == null) continue;
+
+        final dt = parseToIST(dtRaw).toUtc();
+        final amount = (j['total_amount'] as num? ?? 0).toDouble();
+
+        // Previous Period
+        if (dt.isAfter(prevFrom) && dt.isBefore(prevTo)) {
+          if (createdBy == _uid) {
+            prevOrders++;
+            if (status == 'completed') prevRev += amount;
+          }
+        }
+
+        // Current Period
+        if (dt.isAfter(curFrom) && dt.isBefore(curTo)) {
+          if (createdBy == _uid) {
+            orders++;
+            myRows.add(j);
+            if (status == 'completed') {
+              revenue += amount;
+              completed++;
+            } else if (status == 'cancelled') {
+              cancelled++;
+            }
+          }
+
+          // Company wide tracking
+          if (status == 'completed') {
+            allCompletedForTopItems.add(j['id'] as String);
+          }
+
+          if (isAdminLevel) {
+            final u = createdBy ?? 'unknown';
+            if (u != 'unknown' && u.isNotEmpty) {
+              empAgg.putIfAbsent(u, () => _EmpAgg(
+                uid: u,
+                name: j['created_by_name'] as String? ?? 'Unknown',
+                role: j['created_by_role'] as String? ?? 'staff'
+              ));
+              empAgg[u]!.orders++;
+              if (status == 'completed') empAgg[u]!.revenue += amount;
+              if (status == 'cancelled') empAgg[u]!.cancelled++;
+            }
+          }
+        }
+      }
+
+      avgOrder = orders > 0 ? revenue / orders : 0;
+      _buildChart(myRows, curTo.difference(curFrom));
+
+      // Offline top items
+      final Map<String, _ItemAgg> itemAgg = {};
+      for (final r in rows) {
+        if (!allCompletedForTopItems.contains(r['id'])) continue;
+        final itemsList = r['items'] as List<dynamic>? ?? r['order_items'] as List<dynamic>? ?? [];
+        for (final itemRaw in itemsList) {
+          final ir = itemRaw as Map<String, dynamic>;
+          final name = ir['item_name'] as String? ?? 'Unknown';
+          itemAgg.putIfAbsent(name, () => _ItemAgg(name: name, category: ir['category_name'] as String? ?? ''));
+          itemAgg[name]!.quantity += (ir['quantity'] as num? ?? 0).toInt();
+          itemAgg[name]!.revenue += (ir['subtotal'] as num? ?? 0).toDouble();
+        }
+      }
+      _topItems = (itemAgg.values.toList()..sort((a, b) => b.quantity.compareTo(a.quantity)))
+          .take(8).map((a) => TopItem(name: a.name, categoryName: a.category, quantity: a.quantity, revenue: a.revenue)).toList();
+
+      if (isAdminLevel) {
+        final sorted = empAgg.values.toList()..sort((a, b) => b.revenue.compareTo(a.revenue));
+        _employees = sorted.map((e) => EmployeeStat(
+          uid: e.uid, name: e.name, role: e.role, orders: e.orders, cancelledOrders: e.cancelled, revenue: e.revenue
+        )).toList();
+      } else {
+        _employees = [];
+      }
+
+      int totalTables = 0, activeTables = 0, servedToday = 0;
+      if (isAdminLevel) {
+        final tRows = await local.getEntities(table: LocalDatabase.tTables, businessId: _businessId);
+        totalTables = tRows.length;
+        activeTables = tRows.where((r) => r['status'] == 'occupied').length;
+        final todayStart = DateTime.now().toUtc().copyWith(hour: 0, minute: 0, second: 0);
+        servedToday = rows
+            .where((r) => r['status'] == 'completed' && r['table_id'] != null && parseToIST(r['created_at'] as String).toUtc().isAfter(todayStart))
+            .map((r) => r['table_id'] as String)
+            .toSet()
+            .length;
+      }
+
+      _stats = DashboardStats(
+        revenue: revenue, prevRevenue: prevRev, ordersCount: orders, prevOrdersCount: prevOrders,
+        averageOrder: avgOrder, completedOrders: completed, cancelledOrders: cancelled,
+        activeTables: activeTables, totalTables: totalTables, servedTablesToday: servedToday,
+      );
+    } catch (e) {
+      debugPrint('📊 Offline fetch error: $e');
     }
   }
 

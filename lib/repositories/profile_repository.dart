@@ -30,15 +30,20 @@ class ProfileRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>?> loadProfile(String uid) async {
-    // 1. Return from local cache first
     final cached = await _local.getProfile(uid);
 
-    // 2. Refresh from Firestore in background if online
-    if (_connectivity.isOnline) {
-      _refreshFromFirestore(uid).catchError((_) {});
+    if (cached != null) {
+      if (_connectivity.isOnline) {
+        _refreshFromFirestore(uid).catchError((_) {});
+      }
+      return cached;
     }
 
-    return cached;
+    if (_connectivity.isOnline) {
+      return await _refreshFromFirestore(uid);
+    }
+
+    return null;
   }
 
   Future<Map<String, dynamic>?> refreshProfile(String uid) async {
@@ -120,119 +125,109 @@ class ProfileRepository {
     final sb = Supabase.instance.client;
 
     try {
+      final now_dt = DateTime.now();
+      final now = now_dt.toUtc().toIso8601String();
+
       // Today's stats
-      final todayStart = DateTime.now()
+      final todayStartDt = now_dt
           .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0)
-          .toUtc()
-          .toIso8601String();
-      final now = DateTime.now().toUtc().toIso8601String();
+          .toUtc();
 
       // This week start (Monday)
-      final now_dt = DateTime.now();
-      final weekStart = now_dt
+      final weekStartDt = now_dt
           .subtract(Duration(days: now_dt.weekday - 1))
           .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0)
-          .toUtc()
-          .toIso8601String();
+          .toUtc();
 
       // This month start
-      final monthStart = DateTime(
+      final monthStartDt = DateTime(
         now_dt.year,
         now_dt.month,
         1,
-      ).toUtc().toIso8601String();
+      ).toUtc();
 
-      // Fetch orders data for all time
-      final allTimeOrders = await sb
+      final weekStart = weekStartDt.toIso8601String();
+
+      // Fetch all completed orders for this user to compute aggregates locally
+      final List<dynamic> orders = await sb
           .from('orders')
-          .select(
-            'COUNT(*) as total_count, COALESCE(SUM(total_amount), 0) as total_amount, COUNT(DISTINCT table_id) as table_count',
-          )
+          .select('id, total_amount, table_id, created_at')
           .eq('business_id', businessId)
           .eq('created_by_uid', uid)
           .eq('status', 'completed');
 
-      // Today's completed orders
-      final todayOrders = await sb
-          .from('orders')
-          .select(
-            'COUNT(*) as total_count, COALESCE(SUM(total_amount), 0) as total_amount, COUNT(DISTINCT table_id) as table_count',
-          )
-          .eq('business_id', businessId)
-          .eq('created_by_uid', uid)
-          .eq('status', 'completed')
-          .gte('created_at', todayStart)
-          .lte('created_at', now);
+      int ordersTodayCount = 0;
+      double revenueTodayAmount = 0.0;
+      final Set<String> tablesToday = {};
 
-      // Week's completed orders
-      final weekOrders = await sb
-          .from('orders')
-          .select(
-            'COUNT(*) as total_count, COALESCE(SUM(total_amount), 0) as total_amount, COUNT(DISTINCT table_id) as table_count',
-          )
-          .eq('business_id', businessId)
-          .eq('created_by_uid', uid)
-          .eq('status', 'completed')
-          .gte('created_at', weekStart)
-          .lte('created_at', now);
+      int ordersWeekCount = 0;
+      double revenueWeekAmount = 0.0;
+      final Set<String> tablesWeek = {};
 
-      // Month's completed orders
-      final monthOrders = await sb
-          .from('orders')
-          .select(
-            'COUNT(*) as total_count, COALESCE(SUM(total_amount), 0) as total_amount, COUNT(DISTINCT table_id) as table_count',
-          )
-          .eq('business_id', businessId)
-          .eq('created_by_uid', uid)
-          .eq('status', 'completed')
-          .gte('created_at', monthStart)
-          .lte('created_at', now);
+      int ordersMonthCount = 0;
+      double revenueMonthAmount = 0.0;
+      final Set<String> tablesMonth = {};
 
-      final all = allTimeOrders.isNotEmpty ? allTimeOrders[0] : {};
-      final today = todayOrders.isNotEmpty ? todayOrders[0] : {};
-      final week = weekOrders.isNotEmpty ? weekOrders[0] : {};
-      final month = monthOrders.isNotEmpty ? monthOrders[0] : {};
+      int ordersAllTimeCount = 0;
+      double revenueAllTimeAmount = 0.0;
+      final Set<String> tablesAllTime = {};
+
+      for (final order in orders) {
+        final createdAtStr = order['created_at'] as String?;
+        if (createdAtStr == null) continue;
+        final createdAt = DateTime.parse(createdAtStr).toUtc();
+        final amount = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+        final tableId = order['table_id']?.toString();
+
+        ordersAllTimeCount++;
+        revenueAllTimeAmount += amount;
+        if (tableId != null) tablesAllTime.add(tableId);
+
+        if (createdAt.isAfter(monthStartDt) || createdAt.isAtSameMomentAs(monthStartDt)) {
+          ordersMonthCount++;
+          revenueMonthAmount += amount;
+          if (tableId != null) tablesMonth.add(tableId);
+        }
+
+        if (createdAt.isAfter(weekStartDt) || createdAt.isAtSameMomentAs(weekStartDt)) {
+          ordersWeekCount++;
+          revenueWeekAmount += amount;
+          if (tableId != null) tablesWeek.add(tableId);
+        }
+
+        if (createdAt.isAfter(todayStartDt) || createdAt.isAtSameMomentAs(todayStartDt)) {
+          ordersTodayCount++;
+          revenueTodayAmount += amount;
+          if (tableId != null) tablesToday.add(tableId);
+        }
+      }
 
       // Fetch shifts this week
-      final shiftsWeek = await sb
+      final List<dynamic> shiftsWeek = await sb
           .from('shifts')
-          .select('COUNT(*) as shift_count')
+          .select('id')
           .eq('business_id', businessId)
           .eq('staff_uid', uid)
           .gte('start_time', weekStart)
           .lte('start_time', now);
 
-      final shiftCount = shiftsWeek.isNotEmpty
-          ? (shiftsWeek[0]['shift_count'] as int? ?? 0)
-          : 0;
+      final shiftCount = shiftsWeek.length;
 
       return {
-        'ordersTodayCount': (today['total_count'] as int?) ?? 0,
-        'revenueTodayAmount':
-            ((today['total_amount'] as num?)?.toDouble() ?? 0.0),
-        'tablesTodayCount': (today['table_count'] as int?) ?? 0,
-        'ordersWeekCount': (week['total_count'] as int?) ?? 0,
-        'revenueWeekAmount':
-            ((week['total_amount'] as num?)?.toDouble() ?? 0.0),
-        'tablesWeekCount': (week['table_count'] as int?) ?? 0,
-        'avgOrderValueWeek':
-            week['total_count'] != null && (week['total_count'] as int) > 0
-            ? ((week['total_amount'] as num?)?.toDouble() ?? 0.0) /
-                  (week['total_count'] as int)
-            : 0.0,
-        'ordersMonthCount': (month['total_count'] as int?) ?? 0,
-        'revenueMonthAmount':
-            ((month['total_amount'] as num?)?.toDouble() ?? 0.0),
-        'tablesMonthCount': (month['table_count'] as int?) ?? 0,
-        'avgOrderValueMonth':
-            month['total_count'] != null && (month['total_count'] as int) > 0
-            ? ((month['total_amount'] as num?)?.toDouble() ?? 0.0) /
-                  (month['total_count'] as int)
-            : 0.0,
-        'ordersAllTimeCount': (all['total_count'] as int?) ?? 0,
-        'revenueAllTimeAmount':
-            ((all['total_amount'] as num?)?.toDouble() ?? 0.0),
-        'tablesAllTimeCount': (all['table_count'] as int?) ?? 0,
+        'ordersTodayCount': ordersTodayCount,
+        'revenueTodayAmount': revenueTodayAmount,
+        'tablesTodayCount': tablesToday.length,
+        'ordersWeekCount': ordersWeekCount,
+        'revenueWeekAmount': revenueWeekAmount,
+        'tablesWeekCount': tablesWeek.length,
+        'avgOrderValueWeek': ordersWeekCount > 0 ? revenueWeekAmount / ordersWeekCount : 0.0,
+        'ordersMonthCount': ordersMonthCount,
+        'revenueMonthAmount': revenueMonthAmount,
+        'tablesMonthCount': tablesMonth.length,
+        'avgOrderValueMonth': ordersMonthCount > 0 ? revenueMonthAmount / ordersMonthCount : 0.0,
+        'ordersAllTimeCount': ordersAllTimeCount,
+        'revenueAllTimeAmount': revenueAllTimeAmount,
+        'tablesAllTimeCount': tablesAllTime.length,
         'shiftsThisWeek': shiftCount,
       };
     } catch (e) {

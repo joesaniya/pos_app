@@ -27,9 +27,6 @@ class InventoryRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<InventoryItem>> fetchItems(String businessId) async {
-    if (_connectivity.isOnline) {
-      _refreshFromRemote(businessId).catchError((_) {});
-    }
     final rows = await _local.getEntities(
       table: LocalDatabase.tInventory,
       businessId: businessId,
@@ -40,7 +37,7 @@ class InventoryRepository {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<void> _refreshFromRemote(String businessId) async {
+  Future<void> refreshFromRemote(String businessId) async {
     try {
       final rows = await _sb
           .from('inventory_items')

@@ -28,9 +28,6 @@ class SupplierRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<Supplier>> fetchAll(String businessId) async {
-    if (_connectivity.isOnline) {
-      _refreshFromRemote(businessId).catchError((_) {});
-    }
     final rows = await _local.getEntities(
       table: LocalDatabase.tSuppliers,
       businessId: businessId,
@@ -41,7 +38,7 @@ class SupplierRepository {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<void> _refreshFromRemote(String businessId) async {
+  Future<void> refreshFromRemote(String businessId) async {
     try {
       final rows = await _sb
           .from('suppliers')
@@ -200,7 +197,7 @@ class SupplierRepository {
             .update({'status': status.name})
             .eq('id', id)
             .eq('business_id', businessId);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] setSupplierStatus error: $e');
@@ -224,7 +221,7 @@ class SupplierRepository {
     if (_connectivity.isOnline) {
       try {
         await _sb.from('supplier_payments').insert(data);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online addPayment failed: $e');
@@ -265,7 +262,7 @@ class SupplierRepository {
             .update(data)
             .eq('id', paymentId)
             .eq('business_id', businessId);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online markPaymentAsPaid failed: $e');
@@ -297,7 +294,7 @@ class SupplierRepository {
     if (_connectivity.isOnline) {
       try {
         await _sb.from('supplier_deliveries').insert(data);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online addDelivery failed: $e');
@@ -329,7 +326,7 @@ class SupplierRepository {
             .update(data)
             .eq('id', delivery.id)
             .eq('business_id', businessId);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online updateDelivery failed: $e');
@@ -355,7 +352,7 @@ class SupplierRepository {
             .delete()
             .eq('id', deliveryId)
             .eq('business_id', businessId);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return;
       } catch (_) {}
     }
@@ -417,7 +414,7 @@ class SupplierRepository {
     if (_connectivity.isOnline) {
       try {
         await _sb.from('supplier_documents').insert(data);
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online addDocument failed: $e');
@@ -455,7 +452,7 @@ class SupplierRepository {
           .delete()
           .eq('id', docId)
           .eq('business_id', businessId);
-      await _refreshFromRemote(businessId);
+      await refreshFromRemote(businessId);
     } catch (e) {
       debugPrint('[SupplierRepo] deleteDocument error: $e');
     }

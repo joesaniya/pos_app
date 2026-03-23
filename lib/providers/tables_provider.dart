@@ -9,6 +9,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/repositories/tables_repository.dart';
 import 'package:pos_app/services/reservation_notification_service.dart';
+import 'package:pos_app/services/connectivity_service.dart';
+import 'package:pos_app/database/local_database.dart';
 
 const _kTables = 'restaurant_tables';
 const _kReservations = 'table_reservations';
@@ -81,9 +83,12 @@ class TablesProvider extends ChangeNotifier {
 
   List<RestaurantTable> get filteredTables {
     return _tables.where((t) {
-      if (_selectedSection != null && t.section != _selectedSection)
+      if (_selectedSection != null && t.section != _selectedSection) {
         return false;
-      if (_selectedStatus != null && t.status != _selectedStatus) return false;
+      }
+      if (_selectedStatus != null && t.status != _selectedStatus) {
+        return false;
+      }
       return true;
     }).toList()..sort((a, b) {
       const p = {
@@ -187,21 +192,18 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> _loadUserCtx() async {
     final user = _auth.currentUser;
-    if (user == null) return;
-
     final storedData = await StorageService.instance.getUserData();
-    final String canonicalUid = storedData['uid'] as String? ?? user.uid;
-
-    final doc = await _fs.collection('users').doc(canonicalUid).get();
-    if (!doc.exists) return;
-    final d = doc.data()!;
+    final String canonicalUid = storedData['uid'] as String? ?? user?.uid ?? '';
+    
+    if (canonicalUid.isEmpty) return;
+    
     _userCtx = _UserCtx(
       uid: canonicalUid,
-      name: d['name'] ?? 'Staff',
-      email: user.email,
-      role: d['role'] ?? 'staff',
-      businessId: d['businessId'] ?? '',
-      businessName: d['businessName'] ?? '',
+      name: storedData['name'] as String? ?? 'Staff',
+      email: user?.email,
+      role: storedData['role'] as String? ?? 'staff',
+      businessId: storedData['businessId'] as String? ?? '',
+      businessName: storedData['businessName'] as String? ?? '',
     );
   }
 
@@ -210,9 +212,7 @@ class TablesProvider extends ChangeNotifier {
     if (bId == null || bId.isEmpty) return;
     _calendarLoading = true;
     try {
-      final res = await TablesRepository.instance.fetchUpcomingReservations(
-        bId,
-      );
+      final res = await TablesRepository.instance.fetchUpcomingReservations(bId);
       _calendarReservations
         ..clear()
         ..addAll(res);
@@ -220,6 +220,20 @@ class TablesProvider extends ChangeNotifier {
       debugPrint('Calendar reservations fetch error: $e');
     } finally {
       _calendarLoading = false;
+    }
+
+    // ── Double-fetch for offline-first ─────────────────────────────────────────
+    if (ConnectivityService.instance.isOnline) {
+      try {
+        await TablesRepository.instance.refreshReservationsFromRemote(bId);
+        final freshRes = await TablesRepository.instance.fetchUpcomingReservations(bId);
+        _calendarReservations
+          ..clear()
+          ..addAll(freshRes);
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Remote refresh reservations error: $e');
+      }
     }
   }
 
@@ -389,7 +403,7 @@ class TablesProvider extends ChangeNotifier {
 
       if ((rows as List).isNotEmpty) {
         final row = rows.first as Map<String, dynamic>;
-        final tableData = row['restaurant_tables'];
+        final tableData = row['restaurant_tables'] as Map<String, dynamic>?;
         await _notif.sendExpiryNotification(
           tableNumber: (tableData?['table_number'] as int?) ?? 0,
           customerName: row['customer_name'] as String? ?? 'Guest',
@@ -469,137 +483,22 @@ class TablesProvider extends ChangeNotifier {
       _error = 'Fetch error: $e';
       notifyListeners();
     }
+
+    // ── Double-fetch for offline-first ─────────────────────────────────────────
+    if (ConnectivityService.instance.isOnline && bId.isNotEmpty) {
+      try {
+        await TablesRepository.instance.refreshFromRemote(bId);
+        final freshTables = await TablesRepository.instance.fetchTables(bId);
+        _tables.clear();
+        _tables.addAll(freshTables);
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Remote refresh tables error: $e');
+      }
+    }
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  //  _rowToTable — SLOT-AWARE
-  //
-  //  KEY CHANGE: A reservation only affects the table UI display when it is
-  //  "active right now", meaning the current time is within the reserved
-  //  slot (within a 15-min buffer before the start time).
-  //
-  //  - If reservation starts in > 15 min  → table appears AVAILABLE
-  //    (walk-ins can be seated until 15 min before the reservation)
-  //  - If reservation starts in ≤ 15 min  → table appears RESERVED
-  //  - If reservation is seated/ongoing   → table appears RESERVED/OCCUPIED
-  //
-  //  The `reservation` field is still populated so the detail sheet can
-  //  show upcoming reservation info, but the TABLE STATUS on the floor
-  //  grid only changes to 'reserved' when the slot is approaching.
-  // ══════════════════════════════════════════════════════════════════════
-  RestaurantTable _rowToTable(Map<String, dynamic> row, List<TableSeat> seats) {
-    Reservation? reservation;
 
-    if (row['reservation_id'] != null) {
-      final reservedFor = parseToIST(row['res_reserved_for'] as String);
-      final resStatus = (row['res_status'] ?? 'active') as String;
-
-      final todayIST = nowIST();
-      final isToday =
-          reservedFor.year == todayIST.year &&
-          reservedFor.month == todayIST.month &&
-          reservedFor.day == todayIST.day;
-
-      // Show the reservation in the detail sheet if it's today
-      if (isToday && (resStatus == 'active' || resStatus == 'seated')) {
-        reservation = Reservation(
-          id: row['reservation_id'] as String,
-          customerName: row['res_customer_name'] as String? ?? '',
-          phone: row['res_phone'] as String?,
-          guestCount: row['res_guest_count'] as int? ?? 2,
-          reservedFor: reservedFor,
-          checkIn: row['res_check_in'] != null
-              ? parseToIST(row['res_check_in'] as String)
-              : null,
-          checkOut: row['res_check_out'] != null
-              ? parseToIST(row['res_check_out'] as String)
-              : null,
-          notes: row['res_notes'] as String?,
-          warningSent: row['res_warning_sent'] as bool? ?? false,
-          createdAt: parseToIST(row['res_created_at'] as String),
-          createdByName: row['res_created_by_name'] as String?,
-          createdByRole: row['res_created_by_role'] as String?,
-        );
-      }
-    }
-
-    // ── SLOT-AWARE STATUS OVERRIDE ────────────────────────────────────────
-    // The DB status may say 'reserved' because a reservation exists, but we
-    // only want to DISPLAY it as reserved when the slot is actually active
-    // (i.e. within 15 min of the reservation start time).
-    // Before that window, the table should appear AVAILABLE so walk-ins work.
-    String rawStatus = row['status'] as String;
-    TableStatus effectiveStatus = _parseStatus(rawStatus);
-
-    if (effectiveStatus == TableStatus.reserved && reservation != null) {
-      final now = nowIST();
-      final minsUntilReservation = reservation.reservedFor
-          .difference(now)
-          .inMinutes;
-
-      // Table only shows as RESERVED when within 15 min of reservation start
-      // or if the guest has already been seated (resStatus == 'seated')
-      final resStatus = (row['res_status'] ?? 'active') as String;
-      if (minsUntilReservation > 15 && resStatus != 'seated') {
-        // Slot is not yet active — show as available for walk-ins
-        effectiveStatus = TableStatus.available;
-      }
-    } else if (effectiveStatus == TableStatus.reserved && reservation == null) {
-      // Reserved for a different day — show as available for walk-ins today
-      effectiveStatus = TableStatus.available;
-    }
-
-    // ── SEAT-AWARE STATUS OVERRIDE ──────────────────────────────────────────
-    // If the DB says 'occupied' but only SOME seats are taken (partial
-    // booking), override to 'available' so remaining seats stay bookable.
-    // The UI will use RestaurantTable.isPartiallyOccupied to show the
-    // partial badge / occupied seat chips.
-    if (effectiveStatus == TableStatus.occupied && seats.isNotEmpty) {
-      final occupiedCount = seats.where((s) => s.isOccupied).length;
-      if (occupiedCount > 0 && occupiedCount < seats.length) {
-        // Partial occupancy — table still has free seats
-        effectiveStatus = TableStatus.available;
-      } else if (occupiedCount == 0) {
-        // DB is stale — no seats actually occupied
-        effectiveStatus = TableStatus.available;
-      }
-      // occupiedCount == seats.length → truly fully occupied, keep 'occupied'
-    }
-
-    return RestaurantTable(
-      id: row['id'] as String,
-      tableNumber: row['table_number'] as int,
-      capacity: row['capacity'] as int,
-      status: effectiveStatus,
-      section: _parseSection(row['section'] as String),
-      shape: _parseShape((row['shape'] ?? 'square') as String),
-      hasWindow: row['has_window'] as bool? ?? false,
-      isPremium: row['is_premium'] as bool? ?? false,
-      currentCustomerName: row['current_customer_name'] as String?,
-      currentOrderId: row['current_order_id'] as String?,
-      currentOrderTotal: row['current_order_total'] != null
-          ? (row['current_order_total'] as num).toDouble()
-          : null,
-      occupiedSince: row['occupied_since'] != null
-          ? parseToIST(row['occupied_since'] as String)
-          : null,
-      reservation: reservation,
-      seats: seats,
-    );
-  }
-
-  TableStatus _parseStatus(String s) => TableStatus.values.firstWhere(
-    (e) => e.name == s,
-    orElse: () => TableStatus.available,
-  );
-  TableSection _parseSection(String s) => TableSection.values.firstWhere(
-    (e) => e.name == s,
-    orElse: () => TableSection.ac,
-  );
-  TableShape _parseShape(String s) => TableShape.values.firstWhere(
-    (e) => e.name == s,
-    orElse: () => TableShape.square,
-  );
 
   Map<String, dynamic> _tableToRow(RestaurantTable t, {bool isCreate = false}) {
     final ctx = _userCtx!;
@@ -1067,45 +966,7 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-  // ══════════════════════════════════════════════════════
-  //  UPCOMING RESERVATION STATUS UPDATER
-  //  Called every minute by the notif timer.
-  //  Marks tables as 'reserved' when their slot window opens (≤15 min).
-  //  This is the mechanism that auto-updates the floor grid.
-  // ══════════════════════════════════════════════════════
-  Future<void> _checkAndUpdateUpcomingSlots() async {
-    final bId = _userCtx?.businessId;
-    if (bId == null || bId.isEmpty) return;
-    try {
-      final now = DateTime.now().toUtc();
-      final in15 = now.add(const Duration(minutes: 15)).toIso8601String();
-      final nowStr = now.toIso8601String();
 
-      // Find all active reservations starting in ≤15 min
-      final rows = await _sb
-          .from(_kReservations)
-          .select('table_id')
-          .eq('business_id', bId)
-          .eq('status', 'active')
-          .gte('reserved_for', nowStr)
-          .lte('reserved_for', in15);
-
-      for (final row in (rows as List)) {
-        final tId = row['table_id'] as String;
-        // Only update tables that are currently 'available' or 'cleaning'
-        // Don't override 'occupied' — an active walk-in takes priority
-        await _sb
-            .from(_kTables)
-            .update({
-              'status': 'reserved',
-              'updated_by_uid': _userCtx?.uid,
-              'updated_by_name': _userCtx?.name,
-            })
-            .eq('id', tId)
-            .inFilter('status', ['available', 'cleaning']);
-      }
-    } catch (_) {}
-  }
 
   // ══════════════════════════════════════════════════════
   //  HISTORY
@@ -1139,22 +1000,62 @@ class TablesProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fromDate =
-          _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
+      final fromDate = _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
       final toDate = _historyTo ?? DateTime.now().add(const Duration(days: 60));
 
-      final rows = await _sb
-          .from(_kReservations)
-          .select('*, restaurant_tables(table_number, section)')
-          .eq('business_id', bId)
-          .gte('reserved_for', fromDate.toUtc().toIso8601String())
-          .lte('reserved_for', toDate.toUtc().toIso8601String())
-          .order('reserved_for', ascending: false)
-          .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
+      List<ReservationHistoryItem> items = [];
 
-      final items = (rows as List)
-          .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
-          .toList();
+      if (ConnectivityService.instance.isOnline) {
+        final rows = await _sb
+            .from(_kReservations)
+            .select('*, restaurant_tables(table_number, section)')
+            .eq('business_id', bId)
+            .gte('reserved_for', fromDate.toUtc().toIso8601String())
+            .lte('reserved_for', toDate.toUtc().toIso8601String())
+            .order('reserved_for', ascending: false)
+            .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
+
+        items = (rows as List)
+            .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
+            .toList();
+      } else {
+        final local = LocalDatabase.instance;
+        final rows = await local.getEntities(
+          table: LocalDatabase.tReservations,
+          businessId: bId,
+          whereExtra: 'action != ?',
+          whereExtraArgs: [LocalDatabase.actionDelete],
+        );
+
+        items = rows.where((r) {
+          try {
+            final dtStr = r['reserved_for'] as String?;
+            if (dtStr == null) return false;
+            final dt = parseToIST(dtStr).toUtc();
+            return dt.isAfter(fromDate) && dt.isBefore(toDate);
+          } catch (_) {
+            return false;
+          }
+        }).map((r) {
+          try {
+            return ReservationHistoryItem.fromMap(r);
+          } catch (_) {
+            return null;
+          }
+        }).whereType<ReservationHistoryItem>().toList();
+        
+        items.sort((a, b) => b.reservedFor.compareTo(a.reservedFor));
+        
+        // Manual pagination
+        final start = _historyPage * _pageSize;
+        if (start < items.length) {
+          final end = (start + _pageSize < items.length) ? start + _pageSize : items.length;
+          items = items.sublist(start, end);
+        } else {
+          items = [];
+        }
+      }
+
       _history.addAll(items);
       _historyPage++;
       _historyHasMore = items.length == _pageSize;
@@ -1223,7 +1124,7 @@ class TablesProvider extends ChangeNotifier {
         'occupied': st.where((t) => t.status == TableStatus.occupied).length,
         'reserved': st.where((t) => t.status == TableStatus.reserved).length,
         'cleaning': st.where((t) => t.status == TableStatus.cleaning).length,
-        'capacity': st.fold(0, (sum, t) => sum + t.capacity),
+        'capacity': st.fold(0, (acc, t) => acc + t.capacity),
       };
     }
     return result;

@@ -377,7 +377,9 @@ class ReservationHistoryItem {
       notes: row['notes'],
       status: row['status'] ?? 'active',
       createdByName: row['created_by_name'] ?? 'Staff',
-      createdAt: DateTime.parse(row['created_at']).toLocal(),
+      createdAt: row['created_at'] != null 
+          ? DateTime.parse(row['created_at']).toLocal() 
+          : DateTime.now(),
       // audit
       updatedByName: row['updated_by_name'] as String?,
       cancelledByName: row['updated_by_name'] as String?, // same column for now

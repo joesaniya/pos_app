@@ -18,13 +18,11 @@ import 'theme/app_theme.dart';
 
 import 'package:pos_app/services/reservation_notification_service.dart';
 import 'package:pos_app/services/background_task_service.dart';
-import 'package:pos_app/widgets/network_aware_widget.dart';
 
-// ✅ Offline-first services
+// ✅ Offline-first core services (initialized in main)
 import 'package:pos_app/database/local_database.dart';
 import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/services/offline_sync_service.dart';
-import 'package:pos_app/widgets/sync_status_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -92,17 +90,13 @@ class MyApp extends StatelessWidget {
                 theme: AppTheme.lightTheme,
                 darkTheme: AppTheme.darkTheme,
                 themeMode: themeProvider.themeMode,
-                  builder: (context, child) {
-                   return MediaQuery(
-                    data: MediaQuery.of(
-                      context,
-                    ).copyWith(padding: MediaQuery.of(context).padding),
-                    child: Column(
-                      children: [
-                        const SyncStatusBanner(),
-                        Expanded(child: child!),
-                      ],
+                builder: (context, child) {
+                  // Keep MediaQuery wrapper for correct safe area padding.
+                  return MediaQuery(
+                    data: MediaQuery.of(context).copyWith(
+                      padding: MediaQuery.of(context).padding,
                     ),
+                    child: child!,
                   );
                 },
                 home: const SplashScreen(),

@@ -9,6 +9,7 @@ import 'package:pos_app/repositories/orders_repository.dart';
 import 'package:pos_app/services/order_notification_service.dart';
 import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 
 class OrdersProvider extends ChangeNotifier {
   // ── User context ──────────────────────────────────────────────────────────
@@ -124,38 +125,13 @@ class OrdersProvider extends ChangeNotifier {
   Future<void> _loadUserFromFirestore() async {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser == null) return;
-
       final storedData = await StorageService.instance.getUserData();
-      final String canonicalUid =
-          storedData['uid'] as String? ?? firebaseUser.uid;
-      _uid = canonicalUid;
-
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_uid)
-          .get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      _name = data['name'] as String? ?? '';
-      _role = data['role'] as String? ?? 'staff';
-      _businessId = data['businessId'] as String? ?? '';
-      _businessName = data['businessName'] as String? ?? '';
-
-      final token = await firebaseUser.getIdToken() ?? '';
-      await StorageService.instance.saveUserData(
-        uid: _uid,
-        token: token,
-        name: _name,
-        email: data['email'] as String? ?? '',
-        phone: data['phone'] as String? ?? '',
-        role: _role,
-        businessId: _businessId,
-        businessName: _businessName,
-        profilePhoto: data['profilePhoto'] as String? ?? '',
-        isActive: data['isActive'] as bool? ?? true,
-      );
+      
+      _uid = storedData['uid'] as String? ?? firebaseUser?.uid ?? '';
+      _name = storedData['name'] as String? ?? '';
+      _role = storedData['role'] as String? ?? 'staff';
+      _businessId = storedData['businessId'] as String? ?? '';
+      _businessName = storedData['businessName'] as String? ?? '';
     } catch (e) {
       debugPrint('📦 _loadUserFromFirestore ERROR: $e');
     }
@@ -193,6 +169,20 @@ class OrdersProvider extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+
+    // ── Double-fetch for offline-first ─────────────────────────────────────────
+    if (ConnectivityService.instance.isOnline && _businessId.isNotEmpty) {
+      try {
+        await OrdersRepository.instance.refreshOrdersFromRemote(businessId: _businessId);
+        _orders = await OrdersRepository.instance.fetchTodayOrders(
+          businessId: _businessId,
+          staffUid: null,
+        );
+        notifyListeners();
+      } catch (e) {
+        debugPrint('📦 Remote refresh error: $e');
+      }
     }
   }
 

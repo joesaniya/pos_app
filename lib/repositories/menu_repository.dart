@@ -24,14 +24,10 @@ class MenuRepository {
 
     for (final row in localData) {
       hasLocalRecords = true;
-      final jsonStr = row['data'] as String?;
-      if (jsonStr != null) {
-        try {
-          final Map<String, dynamic> dataMap = json.decode(jsonStr);
-          items.add(MenuItem.fromJson(dataMap));
-        } catch (e) {
-          // parsing error
-        }
+      try {
+        items.add(MenuItem.fromJson(row));
+      } catch (e) {
+        // parsing error
       }
     }
 

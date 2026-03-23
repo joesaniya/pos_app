@@ -32,9 +32,6 @@ class TablesRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<RestaurantTable>> fetchTables(String businessId) async {
-    if (_connectivity.isOnline) {
-      _refreshFromRemote(businessId).catchError((_) {});
-    }
     final rows = await _local.getEntities(
       table: LocalDatabase.tTables,
       businessId: businessId,
@@ -45,7 +42,7 @@ class TablesRepository {
       ..sort((a, b) => a.tableNumber.compareTo(b.tableNumber));
   }
 
-  Future<void> _refreshFromRemote(String businessId) async {
+  Future<void> refreshFromRemote(String businessId) async {
     try {
       final rowsFut  = _sb.from(_kView).select().eq('business_id', businessId).eq('is_active', true).order('table_number');
       final seatsFut = _sb.from('table_seats').select().eq('business_id', businessId);
@@ -69,9 +66,6 @@ class TablesRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<ReservationHistoryItem>> fetchUpcomingReservations(String businessId) async {
-    if (_connectivity.isOnline) {
-      _refreshReservationsFromRemote(businessId).catchError((_) {});
-    }
     final rows = await _local.getEntities(
       table: LocalDatabase.tReservations,
       businessId: businessId,
@@ -81,7 +75,7 @@ class TablesRepository {
     return rows.map(_rowToReservation).whereType<ReservationHistoryItem>().toList();
   }
 
-  Future<void> _refreshReservationsFromRemote(String businessId) async {
+  Future<void> refreshReservationsFromRemote(String businessId) async {
     try {
       final from = DateTime.now().subtract(const Duration(days: 1)).toUtc().toIso8601String();
       final to   = DateTime.now().add(const Duration(days: 60)).toUtc().toIso8601String();
@@ -209,7 +203,7 @@ class TablesRepository {
             if (seatIds != null) 'p_seat_ids': seatIds,
           },
         );
-        await _refreshFromRemote(businessId);
+        await refreshFromRemote(businessId);
         return SeatResult(
           success: result?['success'] == true,
           sessionId: result?['session_id'] as String?,

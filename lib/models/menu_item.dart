@@ -1,7 +1,5 @@
 // lib/models/supabase_menu_item.dart
 
-
-
 class SupabaseMenuItem {
   final String id;
   final String categoryId;
@@ -88,7 +86,7 @@ class SupabaseMenuItem {
   });
 
   factory SupabaseMenuItem.fromJson(Map<String, dynamic> json) {
-    List<String> _list(dynamic v) =>
+    List<String> list(dynamic v) =>
         v == null ? [] : List<String>.from(v as List);
 
     return SupabaseMenuItem(
@@ -109,13 +107,15 @@ class SupabaseMenuItem {
       isSpicy: json['is_spicy'] as bool? ?? false,
       preparationTime: json['preparation_time'] as int? ?? 15,
       calories: json['calories'] as int?,
-      protein: json['protein'] != null ? (json['protein'] as num).toDouble() : null,
+      protein: json['protein'] != null
+          ? (json['protein'] as num).toDouble()
+          : null,
       carbs: json['carbs'] != null ? (json['carbs'] as num).toDouble() : null,
       fat: json['fat'] != null ? (json['fat'] as num).toDouble() : null,
       servingSize: json['serving_size'] as String?,
-      allergens: _list(json['allergens']),
-      tags: _list(json['tags']),
-      ingredients: _list(json['ingredients']),
+      allergens: list(json['allergens']),
+      tags: list(json['tags']),
+      ingredients: list(json['ingredients']),
       rating: json['rating'] != null ? (json['rating'] as num).toDouble() : 4.0,
       sortOrder: json['sort_order'] as int? ?? 0,
       businessId: json['business_id'] as String,
@@ -162,29 +162,30 @@ class SupabaseMenuItem {
   }
 
   Map<String, dynamic> toUpdateMap() => {
-        'name': name,
-        'description': description,
-        'price': price,
-        'discount_price': discountPrice,
-        'is_available': isAvailable,
-        'is_veg': isVeg,
-        'is_featured': isFeatured,
-        'is_best_seller': isBestSeller,
-        'is_new_arrival': isNewArrival,
-        'is_spicy': isSpicy,
-        'preparation_time': preparationTime,
-        'calories': calories,
-        'protein': protein,
-        'carbs': carbs,
-        'fat': fat,
-        'serving_size': servingSize,
-        'allergens': allergens,
-        'tags': tags,
-        'ingredients': ingredients,
-        'rating': rating,
-        'sort_order': sortOrder,
-      };
+    'name': name,
+    'description': description,
+    'price': price,
+    'discount_price': discountPrice,
+    'is_available': isAvailable,
+    'is_veg': isVeg,
+    'is_featured': isFeatured,
+    'is_best_seller': isBestSeller,
+    'is_new_arrival': isNewArrival,
+    'is_spicy': isSpicy,
+    'preparation_time': preparationTime,
+    'calories': calories,
+    'protein': protein,
+    'carbs': carbs,
+    'fat': fat,
+    'serving_size': servingSize,
+    'allergens': allergens,
+    'tags': tags,
+    'ingredients': ingredients,
+    'rating': rating,
+    'sort_order': sortOrder,
+  };
 }
+
 class NutritionalInfo {
   final int calories;
   final double protein;
@@ -197,6 +198,24 @@ class NutritionalInfo {
     required this.carbs,
     required this.fat,
   });
+
+  factory NutritionalInfo.fromJson(Map<String, dynamic> json) {
+    return NutritionalInfo(
+      calories: json['calories'] as int? ?? 0,
+      protein: (json['protein'] as num?)?.toDouble() ?? 0.0,
+      carbs: (json['carbs'] as num?)?.toDouble() ?? 0.0,
+      fat: (json['fat'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'calories': calories,
+      'protein': protein,
+      'carbs': carbs,
+      'fat': fat,
+    };
+  }
 }
 
 class MenuItem {
@@ -234,6 +253,48 @@ class MenuItem {
     this.nutrition,
   });
 
+  factory MenuItem.fromJson(Map<String, dynamic> json) {
+    return MenuItem(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
+      category: json['category'] ?? '',
+      subcategory: json['subcategory'] ?? '',
+      available: json['available'] as bool? ?? true,
+      description: json['description'] as String? ?? '',
+      ingredients: List<String>.from(json['ingredients'] as List? ?? []),
+      allergens: List<String>.from(json['allergens'] as List? ?? []),
+      imageUrl: json['imageUrl'] as String?,
+      rating: (json['rating'] as num?)?.toDouble() ?? 4.0,
+      prepTimeMinutes: json['prepTimeMinutes'] as int? ?? 15,
+      isVeg: json['isVeg'] as bool? ?? true,
+      isBestseller: json['isBestseller'] as bool? ?? false,
+      nutrition: json['nutrition'] != null
+          ? NutritionalInfo.fromJson(json['nutrition'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'price': price,
+      'category': category,
+      'subcategory': subcategory,
+      'available': available,
+      'description': description,
+      'ingredients': ingredients,
+      'allergens': allergens,
+      'imageUrl': imageUrl,
+      'rating': rating,
+      'prepTimeMinutes': prepTimeMinutes,
+      'isVeg': isVeg,
+      'isBestseller': isBestseller,
+      'nutrition': nutrition?.toJson(),
+    };
+  }
+
   MenuItem copyWith({bool? available}) {
     return MenuItem(
       id: id,
@@ -254,4 +315,3 @@ class MenuItem {
     );
   }
 }
-

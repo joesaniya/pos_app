@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
-import 'package:pos_app/services/order_service.dart';
+import 'package:pos_app/repositories/orders_repository.dart';
 import 'package:pos_app/services/order_notification_service.dart';
 import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -183,7 +183,7 @@ class OrdersProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _orders = await OrdersService.instance.fetchTodayOrders(
+      _orders = await OrdersRepository.instance.fetchTodayOrders(
         businessId: _businessId,
         staffUid: null,
       );
@@ -198,7 +198,7 @@ class OrdersProvider extends ChangeNotifier {
 
   Future<List<Order>> fetchTableOrders(String tableId) async {
     if (_businessId.isEmpty) return [];
-    return OrdersService.instance.fetchTableOrders(
+    return OrdersRepository.instance.fetchTableOrders(
       tableId: tableId,
       businessId: _businessId,
     );
@@ -242,7 +242,7 @@ class OrdersProvider extends ChangeNotifier {
       throw Exception('Cannot create order: business profile not loaded');
     }
 
-    final order = await OrdersService.instance.createOrder(
+    final order = await OrdersRepository.instance.createOrder(
       cartItems: cartItems,
       businessId: _businessId,
       businessName: _businessName,
@@ -305,7 +305,7 @@ class OrdersProvider extends ChangeNotifier {
       final idx = _orders.indexWhere((o) => o.id == orderId);
       final oldStatus = idx != -1 ? _orders[idx].status : null;
 
-      final updated = await OrdersService.instance.updateOrderStatus(
+      final updated = await OrdersRepository.instance.updateOrderStatus(
         orderId: orderId,
         newStatus: newStatus,
         updatedByUid: _uid,
@@ -348,7 +348,7 @@ class OrdersProvider extends ChangeNotifier {
     double? discountAmount,
   }) async {
     try {
-      final updated = await OrdersService.instance.confirmPayment(
+      final updated = await OrdersRepository.instance.confirmPayment(
         orderId: orderId,
         mode: mode,
         paidByUid: _uid,
@@ -381,7 +381,7 @@ class OrdersProvider extends ChangeNotifier {
     if (_businessId.isEmpty) return;
 
     _ordersChannel?.unsubscribe();
-    _ordersChannel = OrdersService.instance.subscribeToOrders(
+    _ordersChannel = OrdersRepository.instance.subscribeToOrders(
       businessId: _businessId,
       onEvent: (order, eventType) async {
         final idx = _orders.indexWhere((o) => o.id == order.id);
@@ -430,7 +430,7 @@ class OrdersProvider extends ChangeNotifier {
     );
 
     _notifChannel?.unsubscribe();
-    _notifChannel = OrdersService.instance.subscribeToNotifications(
+    _notifChannel = OrdersRepository.instance.subscribeToNotifications(
       businessId: _businessId,
       onNotification: (notif) async {
         _notifications.insert(0, notif);
@@ -447,7 +447,7 @@ class OrdersProvider extends ChangeNotifier {
   Future<void> _fetchNotifications() async {
     if (_businessId.isEmpty) return;
     try {
-      _notifications = await OrdersService.instance.fetchUnreadNotifications(
+      _notifications = await OrdersRepository.instance.fetchUnreadNotifications(
         businessId: _businessId,
         targetUid: _uid,
       );
@@ -457,7 +457,7 @@ class OrdersProvider extends ChangeNotifier {
   }
 
   Future<void> markNotificationsRead() async {
-    await OrdersService.instance.markNotificationsRead(businessId: _businessId);
+    await OrdersRepository.instance.markNotificationsRead(businessId: _businessId);
     _unreadCount = 0;
     notifyListeners();
   }

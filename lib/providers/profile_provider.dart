@@ -1,10 +1,9 @@
 import 'dart:developer';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:pos_app/repositories/profile_repository.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:pos_app/services/storage_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USER PERFORMANCE STATS MODEL
@@ -57,8 +56,6 @@ class UserPerformanceStats {
 // ─────────────────────────────────────────────────────────────────────────────
 class ProfileProvider extends ChangeNotifier {
   final StorageService _storage = StorageService.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final _supabase = Supabase.instance.client;
 
   UserProfile? _profile;
   bool _isLoading = true;
@@ -107,41 +104,48 @@ class ProfileProvider extends ChangeNotifier {
         return;
       }
 
-      // 2. Fetch user document from Firestore
-      final doc = await _db.collection('users').doc(uid).get();
+      // 2. Fetch user profile from Repository
+      final userProfile = await ProfileRepository.instance.loadProfile(uid);
 
-      if (!doc.exists || doc.data() == null) {
+      if (userProfile == null) {
         _error = 'User document not found.';
         _isLoading = false;
         notifyListeners();
         return;
       }
 
-      final data = doc.data()!;
-      log('Profile loaded for uid=$uid ==> $data');
+      log(
+        'Profile loaded for uid=$uid ==> ${userProfile['name'] ?? 'Unknown'}',
+      );
 
       // ── Basic fields ───────────────────────────────────────────────────────
-      final String name         = data['name'] ?? 'User';
-      final String email        = data['email'] ?? '';
-      final String phone        = data['phone'] ?? '';
-      final String role         = data['role'] ?? '';
-      final String businessId   = data['businessId'] ?? '';
-      final String businessName = data['businessName'] ?? '';
-      final String profilePhoto = data['profilePhoto'] ?? '';
-      final bool isActive =
-          data['isActive'] == true || data['isActive'] == 'true';
+      final String name = userProfile['name'] as String? ?? '';
+      final String email = userProfile['email'] as String? ?? '';
+      final String phone = userProfile['phone'] as String? ?? '';
+      final String role = userProfile['role'] as String? ?? 'staff';
+      final String businessId = userProfile['businessId'] as String? ?? '';
+      final String businessName = userProfile['businessName'] as String? ?? '';
+      final String profilePhoto = userProfile['profilePhoto'] as String? ?? '';
+      final bool isActive = userProfile['isActive'] as bool? ?? true;
 
       // ── Creator fields ─────────────────────────────────────────────────────
-      final String createdBy     = data['createdBy'] ?? '';
-      final String createdByName = data['createdByName'] ?? '';
-      final String createdByRole = data['createdByRole'] ?? '';
+      final String createdBy = userProfile['createdBy'] as String? ?? '';
+      final String createdByName =
+          userProfile['createdByName'] as String? ?? '';
+      final String createdByRole =
+          userProfile['createdByRole'] as String? ?? '';
 
       // ── Timestamps ─────────────────────────────────────────────────────────
-      final DateTime createdAt =
-          _tsToDate(data['createdAt']) ?? DateTime.now();
+      final DateTime createdAt = userProfile['joinedDate'] != null
+          ? DateTime.parse(userProfile['joinedDate'] as String)
+          : DateTime.now();
       final DateTime? passwordLastChanged =
-          _tsToDate(data['passwordLastChanged']);
-      final DateTime? updatedAt = _tsToDate(data['updatedAt']);
+          userProfile['passwordLastChanged'] != null
+          ? DateTime.parse(userProfile['passwordLastChanged'] as String)
+          : null;
+      final DateTime? updatedAt = userProfile['updatedAt'] != null
+          ? DateTime.parse(userProfile['updatedAt'] as String)
+          : null;
 
       // 3. Build UserProfile
       _profile = UserProfile(
@@ -177,8 +181,9 @@ class ProfileProvider extends ChangeNotifier {
       _creatorName = createdByName.isNotEmpty
           ? createdByName
           : (createdBy == uid ? name : '');
-      _creatorRole =
-          createdByRole.isNotEmpty ? _parseRole(createdByRole).label : '';
+      _creatorRole = createdByRole.isNotEmpty
+          ? _parseRole(createdByRole).label
+          : '';
 
       log('creatorName="$_creatorName" creatorRole="$_creatorRole"');
 
@@ -189,11 +194,6 @@ class ProfileProvider extends ChangeNotifier {
       if (businessId.isNotEmpty) {
         await fetchUserStats(uid: uid, businessId: businessId);
       }
-    } on FirebaseException catch (e) {
-      _error = 'Firestore error: ${e.message}';
-      debugPrint('ProfileProvider Firestore error: $e');
-      _isLoading = false;
-      notifyListeners();
     } catch (e) {
       _error = 'Unexpected error: $e';
       debugPrint('ProfileProvider error: $e');
@@ -217,155 +217,31 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ── IST-aware date boundaries ──────────────────────────────────────────
-      final now    = DateTime.now().toUtc();
-      final nowIst = now.add(const Duration(hours: 5, minutes: 30));
-
-      final todayIst      = DateTime(nowIst.year, nowIst.month, nowIst.day);
-      final todayUtcStart = todayIst.subtract(const Duration(hours: 5, minutes: 30));
-      final todayUtcEnd   = todayUtcStart.add(const Duration(days: 1));
-
-      final weekIst      = todayIst.subtract(Duration(days: todayIst.weekday - 1));
-      final weekUtcStart = weekIst.subtract(const Duration(hours: 5, minutes: 30));
-      final weekUtcEnd   = weekUtcStart.add(const Duration(days: 7));
-
-      final monthUtcStart = DateTime(nowIst.year, nowIst.month, 1)
-          .subtract(const Duration(hours: 5, minutes: 30));
-      final monthUtcEnd = DateTime(nowIst.year, nowIst.month + 1, 1)
-          .subtract(const Duration(hours: 5, minutes: 30));
-
-      // ── Query helpers ──────────────────────────────────────────────────────
-      // All orders in range (for count + table tracking)
-      Future<List<dynamic>> queryAllOrders(DateTime from, DateTime to) =>
-          _supabase
-              .from('orders')
-              .select('id, table_id, status')
-              .eq('business_id', businessId)
-              .eq('created_by_uid', uid)
-              .gte('created_at', from.toIso8601String())
-              .lt('created_at', to.toIso8601String())
-              .then((v) => v as List);
-
-      // Completed orders only (for revenue)
-      Future<List<dynamic>> queryCompleted(DateTime from, DateTime to) =>
-          _supabase
-              .from('orders')
-              .select('total_amount, table_id')
-              .eq('business_id', businessId)
-              .eq('created_by_uid', uid)
-              .eq('status', 'completed')
-              .gte('created_at', from.toIso8601String())
-              .lt('created_at', to.toIso8601String())
-              .then((v) => v as List);
-
-      // All-time: no date filter
-      Future<List<dynamic>> queryAllTime() =>
-          _supabase
-              .from('orders')
-              .select('total_amount, table_id, status')
-              .eq('business_id', businessId)
-              .eq('created_by_uid', uid)
-              .then((v) => v as List);
-
-      // ── Run all queries in parallel ────────────────────────────────────────
-      final results = await Future.wait([
-        queryAllOrders(todayUtcStart, todayUtcEnd),  // 0 — today all
-        queryCompleted(todayUtcStart, todayUtcEnd),  // 1 — today completed
-        queryAllOrders(weekUtcStart, weekUtcEnd),    // 2 — week all
-        queryCompleted(weekUtcStart, weekUtcEnd),    // 3 — week completed
-        queryAllOrders(monthUtcStart, monthUtcEnd),  // 4 — month all
-        queryCompleted(monthUtcStart, monthUtcEnd),  // 5 — month completed
-        queryAllTime(),                              // 6 — all time
-      ]);
-
-      // ── TODAY ──────────────────────────────────────────────────────────────
-      final todayAll       = results[0] as List;
-      final todayCompleted = results[1] as List;
-
-      final ordersTodayCount   = todayAll.length;
-      final revenueTodayAmount = todayCompleted.fold<double>(
-        0, (s, r) => s + ((r['total_amount'] as num?) ?? 0).toDouble());
-      final tablesTodayCount   = todayAll
-          .map((r) => r['table_id'])
-          .where((t) => t != null)
-          .toSet()
-          .length;
-
-      // ── THIS WEEK ──────────────────────────────────────────────────────────
-      final weekAll       = results[2] as List;
-      final weekCompleted = results[3] as List;
-
-      final ordersWeekCount   = weekAll.length;
-      final revenueWeekAmount = weekCompleted.fold<double>(
-        0, (s, r) => s + ((r['total_amount'] as num?) ?? 0).toDouble());
-      final tablesWeekCount   = weekAll
-          .map((r) => r['table_id'])
-          .where((t) => t != null)
-          .toSet()
-          .length;
-      final avgOrderValueWeek = weekCompleted.isNotEmpty
-          ? revenueWeekAmount / weekCompleted.length
-          : 0.0;
-
-      // Shifts this week = unique IST days that had at least 1 order
-      final shiftsThisWeek = weekAll.map((r) {
-        try {
-          // We don't have created_at here, use order count as proxy
-          return 1;
-        } catch (_) { return 0; }
-      }).fold<int>(0, (a, b) => a + (b as int)).clamp(0, 6);
-
-      // ── THIS MONTH ────────────────────────────────────────────────────────
-      final monthAll       = results[4] as List;
-      final monthCompleted = results[5] as List;
-
-      final ordersMonthCount   = monthAll.length;
-      final revenueMonthAmount = monthCompleted.fold<double>(
-        0, (s, r) => s + ((r['total_amount'] as num?) ?? 0).toDouble());
-      final tablesMonthCount   = monthAll
-          .map((r) => r['table_id'])
-          .where((t) => t != null)
-          .toSet()
-          .length;
-      final avgOrderValueMonth = monthCompleted.isNotEmpty
-          ? revenueMonthAmount / monthCompleted.length
-          : 0.0;
-
-      // ── ALL TIME ──────────────────────────────────────────────────────────
-      final allTime          = results[6] as List;
-      final allTimeCompleted = allTime
-          .where((r) => r['status'] == 'completed')
-          .toList();
-
-      final ordersAllTimeCount   = allTime.length;
-      final revenueAllTimeAmount = allTimeCompleted.fold<double>(
-        0, (s, r) => s + ((r['total_amount'] as num?) ?? 0).toDouble());
-      final tablesAllTimeCount   = allTime
-          .map((r) => r['table_id'])
-          .where((t) => t != null)
-          .toSet()
-          .length;
-
-      _perfStats = UserPerformanceStats(
-        ordersTodayCount:     ordersTodayCount,
-        revenueTodayAmount:   revenueTodayAmount,
-        tablesTodayCount:     tablesTodayCount,
-        ordersWeekCount:      ordersWeekCount,
-        revenueWeekAmount:    revenueWeekAmount,
-        tablesWeekCount:      tablesWeekCount,
-        avgOrderValueWeek:    avgOrderValueWeek,
-        ordersMonthCount:     ordersMonthCount,
-        revenueMonthAmount:   revenueMonthAmount,
-        tablesMonthCount:     tablesMonthCount,
-        avgOrderValueMonth:   avgOrderValueMonth,
-        ordersAllTimeCount:   ordersAllTimeCount,
-        revenueAllTimeAmount: revenueAllTimeAmount,
-        tablesAllTimeCount:   tablesAllTimeCount,
-        shiftsThisWeek:       shiftsThisWeek,
+      // Delegate stats fetching to ProfileRepository
+      final stats = await ProfileRepository.instance.fetchUserPerformanceStats(
+        uid: uid,
+        businessId: businessId,
       );
 
-      log('perfStats → today=${ordersTodayCount} orders ₹${revenueTodayAmount.toStringAsFixed(0)}'
-          ' | week=$ordersWeekCount | month=$ordersMonthCount | allTime=$ordersAllTimeCount');
+      _perfStats = UserPerformanceStats(
+        ordersTodayCount: stats['ordersTodayCount'] as int,
+        revenueTodayAmount: stats['revenueTodayAmount'] as double,
+        tablesTodayCount: stats['tablesTodayCount'] as int,
+        ordersWeekCount: stats['ordersWeekCount'] as int,
+        revenueWeekAmount: stats['revenueWeekAmount'] as double,
+        tablesWeekCount: stats['tablesWeekCount'] as int,
+        avgOrderValueWeek: stats['avgOrderValueWeek'] as double,
+        ordersMonthCount: stats['ordersMonthCount'] as int,
+        revenueMonthAmount: stats['revenueMonthAmount'] as double,
+        tablesMonthCount: stats['tablesMonthCount'] as int,
+        avgOrderValueMonth: stats['avgOrderValueMonth'] as double,
+        ordersAllTimeCount: stats['ordersAllTimeCount'] as int,
+        revenueAllTimeAmount: stats['revenueAllTimeAmount'] as double,
+        tablesAllTimeCount: stats['tablesAllTimeCount'] as int,
+        shiftsThisWeek: stats['shiftsThisWeek'] as int,
+      );
+
+      log('perfStats → fetched');
     } catch (e) {
       debugPrint('fetchUserStats error: $e');
     } finally {
@@ -387,14 +263,13 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final Map<String, dynamic> updates = {
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
+      final Map<String, dynamic> updates = {};
+
       if (name != null && name.isNotEmpty) updates['name'] = name;
       if (email != null && email.isNotEmpty) updates['email'] = email;
       if (phone != null) updates['phone'] = phone;
 
-      await _db.collection('users').doc(_profile!.id).update(updates);
+      await ProfileRepository.instance.updateProfile(_profile!.id, updates);
       await loadProfile();
     } catch (e) {
       debugPrint('updateProfile error: $e');
@@ -425,34 +300,24 @@ class ProfileProvider extends ChangeNotifier {
   // ─────────────────────────────────────────────────────────────────────────
   //  HELPERS
   // ─────────────────────────────────────────────────────────────────────────
-  DateTime? _tsToDate(dynamic value) {
-    if (value == null) return null;
-    if (value is Timestamp) return value.toDate();
-    if (value is String && value.startsWith('Timestamp(')) {
-      try {
-        final secStr = RegExp(r'seconds=(\d+)').firstMatch(value)?.group(1);
-        if (secStr != null) {
-          return DateTime.fromMillisecondsSinceEpoch(int.parse(secStr) * 1000);
-        }
-      } catch (_) {}
-    }
-    try { return DateTime.parse(value.toString()); } catch (_) {}
-    try {
-      return DateTime.fromMillisecondsSinceEpoch(int.parse(value.toString()));
-    } catch (_) {}
-    return null;
-  }
+  // _tsToDate removed as it is handled in Repository
 
   StaffRole _parseRole(String role) {
     switch (role.toLowerCase()) {
-      case 'owner':   return StaffRole.owner;
-      case 'manager': return StaffRole.manager;
-      case 'cashier': return StaffRole.cashier;
+      case 'owner':
+        return StaffRole.owner;
+      case 'manager':
+        return StaffRole.manager;
+      case 'cashier':
+        return StaffRole.cashier;
       case 'waiter':
-      case 'server':  return StaffRole.waiter;
-      case 'chef':    return StaffRole.chef;
+      case 'server':
+        return StaffRole.waiter;
+      case 'chef':
+        return StaffRole.chef;
       case 'admin':
-      default:        return StaffRole.owner;
+      default:
+        return StaffRole.owner;
     }
   }
 

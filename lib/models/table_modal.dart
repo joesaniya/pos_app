@@ -144,7 +144,7 @@ class TableSeat {
 
   bool get isAvailable => status == TableStatus.available;
   bool get isOccupied => status == TableStatus.occupied;
-  
+
   String get occupiedDuration {
     if (occupiedSince == null) return '—';
     final diff = elapsedIST(occupiedSince!);
@@ -203,7 +203,7 @@ class Reservation {
     String? status,
     bool? warningSent,
     String? createdByName,
-    String? createdByRole,
+    String? createdByRole, required String id,
   }) => Reservation(
     id: id,
     customerName: customerName ?? this.customerName,
@@ -403,8 +403,47 @@ class ReservationHistoryItem {
         return status;
     }
   }
-}
 
+  ReservationHistoryItem copyWith({
+    String? id,
+    String? tableId,
+    int? tableNumber,
+    String? section,
+    String? customerName,
+    String? phone,
+    int? guestCount,
+    DateTime? reservedFor,
+    DateTime? checkIn,
+    DateTime? checkOut,
+    String? notes,
+    String? status,
+    String? createdByName,
+    DateTime? createdAt,
+    String? updatedByName,
+    String? cancelledByName,
+    DateTime? cancelledAt,
+    String? cancellationReason,
+  }) => ReservationHistoryItem(
+    id: id ?? this.id,
+    tableId: tableId ?? this.tableId,
+    tableNumber: tableNumber ?? this.tableNumber,
+    section: section ?? this.section,
+    customerName: customerName ?? this.customerName,
+    phone: phone ?? this.phone,
+    guestCount: guestCount ?? this.guestCount,
+    reservedFor: reservedFor ?? this.reservedFor,
+    checkIn: checkIn ?? this.checkIn,
+    checkOut: checkOut ?? this.checkOut,
+    notes: notes ?? this.notes,
+    status: status ?? this.status,
+    createdByName: createdByName ?? this.createdByName,
+    createdAt: createdAt ?? this.createdAt,
+    updatedByName: updatedByName ?? this.updatedByName,
+    cancelledByName: cancelledByName ?? this.cancelledByName,
+    cancelledAt: cancelledAt ?? this.cancelledAt,
+    cancellationReason: cancellationReason ?? this.cancellationReason,
+  );
+}
 
 class RestaurantTable {
   final String id;

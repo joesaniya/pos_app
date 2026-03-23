@@ -1,9 +1,7 @@
-
-import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pos_app/repositories/supplier_repository.dart';
 import 'package:pos_app/models/supplier_modal.dart';
 import 'package:pos_app/services/storage_service.dart';
 
@@ -18,8 +16,6 @@ class SupplierProvider extends ChangeNotifier {
 
   String _businessId = '';
   String _userRole = '';
-  String _userUid = '';
-  String _userName = '';
 
   // ── Filters / sort ─────────────────────────────────────────────────────────
   String _search = '';
@@ -28,10 +24,7 @@ class SupplierProvider extends ChangeNotifier {
   SupplierSort _sort = SupplierSort.name;
 
   // ── DB shortcut ────────────────────────────────────────────────────────────
-  SupabaseClient get _db => Supabase.instance.client;
-
-  // ── Storage bucket for supplier documents ──────────────────────────────────
-  static const _docBucket = 'supplier-documents';
+  // Removed direct SupabaseClient getter
 
   // ── Public getters ─────────────────────────────────────────────────────────
   bool get isLoading => _isLoading;
@@ -54,8 +47,6 @@ class SupplierProvider extends ChangeNotifier {
     try {
       final userData = await StorageService.instance.getUserData();
       _businessId = userData['businessId'] as String? ?? '';
-      _userUid = userData['uid'] as String? ?? '';
-      _userName = userData['name'] as String? ?? 'Unknown';
       _userRole = userData['role'] as String? ?? '';
 
       debugPrint(
@@ -79,31 +70,10 @@ class SupplierProvider extends ChangeNotifier {
   // ══════════════════════════════════════════════════════════════════════════
 
   void _subscribeRealtime() {
-    _db
-        .channel('suppliers_rt_$_businessId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'suppliers',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'business_id',
-            value: _businessId,
-          ),
-          callback: (_) => fetchAll(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'supplier_payments',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'business_id',
-            value: _businessId,
-          ),
-          callback: (_) => fetchAll(),
-        )
-        .subscribe();
+    SupplierRepository.instance.subscribeRealtime(
+      _businessId,
+      () => fetchAll(),
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -112,27 +82,9 @@ class SupplierProvider extends ChangeNotifier {
 
   Future<void> fetchAll() async {
     try {
-      final rows = await _db
-          .from('suppliers')
-          .select('''
-            *,
-            supplier_contacts (*),
-            supplier_payments (*),
-            supplier_documents (*),
-            supplier_deliveries (*)
-          ''')
-          .eq('business_id', _businessId)
-          .eq('is_active', true)
-          .order('name');
-
+      final suppliers = await SupplierRepository.instance.fetchAll(_businessId);
       _suppliers.clear();
-      for (final row in (rows as List)) {
-        try {
-          _suppliers.add(Supplier.fromJson(row as Map<String, dynamic>));
-        } catch (e) {
-          debugPrint('[SupplierProvider] Row parse error: $e');
-        }
-      }
+      _suppliers.addAll(suppliers);
       debugPrint('[SupplierProvider] Fetched ${_suppliers.length} suppliers');
     } catch (e) {
       _errorMessage = 'Failed to load suppliers: $e';
@@ -232,7 +184,7 @@ class SupplierProvider extends ChangeNotifier {
   Future<bool> addSupplier(Supplier s) async {
     _setLoading(true);
     try {
-      await _db.from('suppliers').insert(s.toJson(_businessId));
+      await SupplierRepository.instance.addSupplier(s, _businessId);
       _setLoading(false);
       return true;
     } catch (e) {
@@ -244,11 +196,7 @@ class SupplierProvider extends ChangeNotifier {
   Future<bool> updateSupplier(Supplier s) async {
     _setLoading(true);
     try {
-      await _db
-          .from('suppliers')
-          .update(s.toJson(_businessId))
-          .eq('id', s.id)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.updateSupplier(s, _businessId);
       final idx = _suppliers.indexWhere((x) => x.id == s.id);
       if (idx != -1) _suppliers[idx] = s;
       _setLoading(false);
@@ -262,11 +210,7 @@ class SupplierProvider extends ChangeNotifier {
   Future<void> deleteSupplier(String id) async {
     _setLoading(true);
     try {
-      await _db
-          .from('suppliers')
-          .update({'is_active': false})
-          .eq('id', id)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.deleteSupplier(id, _businessId);
       _suppliers.removeWhere((s) => s.id == id);
     } catch (e) {
       _handleError('deleteSupplier', e);
@@ -280,11 +224,11 @@ class SupplierProvider extends ChangeNotifier {
   Future<bool> setSupplierStatus(String id, SupplierStatus status) async {
     _setLoading(true);
     try {
-      await _db
-          .from('suppliers')
-          .update({'status': status.dbValue})
-          .eq('id', id)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.setSupplierStatus(
+        id,
+        status,
+        _businessId,
+      );
       final idx = _suppliers.indexWhere((s) => s.id == id);
       if (idx != -1) {
         _suppliers[idx] = _suppliers[idx].copyWith(status: status);
@@ -330,9 +274,11 @@ class SupplierProvider extends ChangeNotifier {
     _setLoading(true);
     try {
       final resolved = _resolveStatus(payment);
-      await _db
-          .from('supplier_payments')
-          .insert(resolved.toJson(supplierId, _businessId));
+      await SupplierRepository.instance.addPayment(
+        supplierId,
+        resolved,
+        _businessId,
+      );
       await fetchAll();
       _setLoading(false);
       return true;
@@ -358,17 +304,12 @@ class SupplierProvider extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      await _db
-          .from('supplier_payments')
-          .update({
-            'payment_status': PaymentStatus.paid.dbValue,
-            'payment_mode': mode.dbValue,
-            'transaction_ref': transactionRef.trim().isEmpty
-                ? null
-                : transactionRef.trim(),
-          })
-          .eq('id', paymentId)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.markPaymentAsPaid(
+        paymentId: paymentId,
+        mode: mode,
+        transactionRef: transactionRef,
+        businessId: _businessId,
+      );
 
       await fetchAll();
       _setLoading(false);
@@ -428,18 +369,14 @@ class SupplierProvider extends ChangeNotifier {
       final storagePath =
           '$_businessId/$supplierId/${DateTime.now().millisecondsSinceEpoch}.$ext';
 
-      await _db.storage
-          .from(_docBucket)
-          .upload(
-            storagePath,
-            file,
-            fileOptions: const FileOptions(upsert: false),
-          );
+      await SupplierRepository.instance.uploadDocumentFile(
+        storagePath: storagePath,
+        file: file,
+      );
 
-      // 1-year signed URL stored alongside metadata for quick in-app access.
-      final signedUrl = await _db.storage
-          .from(_docBucket)
-          .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+      final signedUrl = await SupplierRepository.instance.getSignedViewUrl(
+        storagePath,
+      );
 
       final docWithRef = SupplierDocument(
         id: doc.id,
@@ -448,19 +385,19 @@ class SupplierProvider extends ChangeNotifier {
         uploadedOn: doc.uploadedOn,
         expiryDate: doc.expiryDate,
         fileRef: storagePath,
-        fileUrl: signedUrl,
+        fileUrl: signedUrl ?? '',
       );
 
-      final inserted = await _db
-          .from('supplier_documents')
-          .insert(docWithRef.toJson(supplierId, _businessId))
-          .select()
-          .single();
+      await SupplierRepository.instance.addDocument(
+        supplierId,
+        docWithRef,
+        _businessId,
+      );
 
       await fetchAll();
       _setLoading(false);
       return SupplierDocument.fromJson({
-        ...(inserted as Map<String, dynamic>),
+        ...(docWithRef.toJson(supplierId, _businessId)),
         'file_url': signedUrl,
       });
     } catch (e) {
@@ -473,9 +410,11 @@ class SupplierProvider extends ChangeNotifier {
   Future<bool> addDocument(String supplierId, SupplierDocument doc) async {
     _setLoading(true);
     try {
-      await _db
-          .from('supplier_documents')
-          .insert(doc.toJson(supplierId, _businessId));
+      await SupplierRepository.instance.addDocument(
+        supplierId,
+        doc,
+        _businessId,
+      );
       await fetchAll();
       _setLoading(false);
       return true;
@@ -490,9 +429,10 @@ class SupplierProvider extends ChangeNotifier {
   Future<String?> getDocumentViewUrl(SupplierDocument doc) async {
     if (doc.fileRef == null || doc.fileRef!.isEmpty) return doc.fileUrl;
     try {
-      return await _db.storage
-          .from(_docBucket)
-          .createSignedUrl(doc.fileRef!, 3600);
+      return await SupplierRepository.instance.getSignedViewUrl(
+        doc.fileRef!,
+        expiresIn: 3600,
+      );
     } catch (e) {
       debugPrint('[SupplierProvider] getDocumentViewUrl error: $e');
       return null;
@@ -506,14 +446,12 @@ class SupplierProvider extends ChangeNotifier {
   ) async {
     _setLoading(true);
     try {
-      if (fileRef != null && fileRef.isNotEmpty) {
-        await _db.storage.from(_docBucket).remove([fileRef]);
-      }
-      await _db
-          .from('supplier_documents')
-          .delete()
-          .eq('id', docId)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.deleteDocument(
+        supplierId,
+        docId,
+        fileRef,
+        _businessId,
+      );
       await fetchAll();
     } catch (e) {
       _handleError('deleteDocument', e);
@@ -528,9 +466,11 @@ class SupplierProvider extends ChangeNotifier {
   Future<bool> addDelivery(String supplierId, SupplierDelivery delivery) async {
     _setLoading(true);
     try {
-      await _db
-          .from('supplier_deliveries')
-          .insert(delivery.toJson(supplierId, _businessId));
+      await SupplierRepository.instance.addDelivery(
+        supplierId,
+        delivery,
+        _businessId,
+      );
       await fetchAll();
       _setLoading(false);
       return true;
@@ -546,11 +486,11 @@ class SupplierProvider extends ChangeNotifier {
   ) async {
     _setLoading(true);
     try {
-      await _db
-          .from('supplier_deliveries')
-          .update(delivery.toJson(supplierId, _businessId))
-          .eq('id', delivery.id)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.updateDelivery(
+        supplierId,
+        delivery,
+        _businessId,
+      );
       await fetchAll();
       _setLoading(false);
       return true;
@@ -563,11 +503,7 @@ class SupplierProvider extends ChangeNotifier {
   Future<void> deleteDelivery(String deliveryId) async {
     _setLoading(true);
     try {
-      await _db
-          .from('supplier_deliveries')
-          .delete()
-          .eq('id', deliveryId)
-          .eq('business_id', _businessId);
+      await SupplierRepository.instance.deleteDelivery(deliveryId, _businessId);
       await fetchAll();
     } catch (e) {
       _handleError('deleteDelivery', e);

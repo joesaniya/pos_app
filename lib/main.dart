@@ -16,10 +16,15 @@ import 'package:pos_app/screens/splash_screen.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'theme/app_theme.dart';
 
-// ✅ ADD THESE IMPORTS
 import 'package:pos_app/services/reservation_notification_service.dart';
 import 'package:pos_app/services/background_task_service.dart';
 import 'package:pos_app/widgets/network_aware_widget.dart';
+
+// ✅ Offline-first services
+import 'package:pos_app/database/local_database.dart';
+import 'package:pos_app/services/connectivity_service.dart';
+import 'package:pos_app/services/offline_sync_service.dart';
+import 'package:pos_app/widgets/sync_status_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,6 +47,11 @@ Future<void> main() async {
   await ReservationNotificationService().initialize();
 
   await BackgroundTaskService.initialize();
+
+  // ✅ Initialize Offline-First Core Services
+  await LocalDatabase.instance.init();
+  await ConnectivityService.instance.init();
+  OfflineSyncService.instance.start();
 
   // await FcmService.initialize();
 
@@ -82,19 +92,18 @@ class MyApp extends StatelessWidget {
                 theme: AppTheme.lightTheme,
                 darkTheme: AppTheme.darkTheme,
                 themeMode: themeProvider.themeMode,
-                builder: (context, child) {
+                  builder: (context, child) {
                    return MediaQuery(
                     data: MediaQuery.of(
                       context,
                     ).copyWith(padding: MediaQuery.of(context).padding),
-                    child: child!,
+                    child: Column(
+                      children: [
+                        const SyncStatusBanner(),
+                        Expanded(child: child!),
+                      ],
+                    ),
                   );
-                 /* return MediaQuery(
-                    data: MediaQuery.of(
-                      context,
-                    ).copyWith(padding: MediaQuery.of(context).padding),
-                    child: NetworkAwareWidget(child: child!),
-                  );*/
                 },
                 home: const SplashScreen(),
               );

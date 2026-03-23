@@ -7,11 +7,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pos_app/models/table_modal.dart';
+import 'package:pos_app/repositories/tables_repository.dart';
 import 'package:pos_app/services/reservation_notification_service.dart';
 
 const _kTables = 'restaurant_tables';
 const _kReservations = 'table_reservations';
-const _kView = 'vw_tables_with_reservation';
 
 class _UserCtx {
   final String uid, name, role, businessId, businessName;
@@ -188,7 +188,7 @@ class TablesProvider extends ChangeNotifier {
   Future<void> _loadUserCtx() async {
     final user = _auth.currentUser;
     if (user == null) return;
-    
+
     final storedData = await StorageService.instance.getUserData();
     final String canonicalUid = storedData['uid'] as String? ?? user.uid;
 
@@ -210,31 +210,12 @@ class TablesProvider extends ChangeNotifier {
     if (bId == null || bId.isEmpty) return;
     _calendarLoading = true;
     try {
-      final from = DateTime.now()
-          .subtract(const Duration(days: 1))
-          .toUtc()
-          .toIso8601String();
-      final to = DateTime.now()
-          .add(const Duration(days: 60))
-          .toUtc()
-          .toIso8601String();
-
-      final rows = await _sb
-          .from(_kReservations)
-          .select('*, restaurant_tables(table_number, section)')
-          .eq('business_id', bId)
-          .inFilter('status', ['active', 'seated'])
-          .gte('reserved_for', from)
-          .lte('reserved_for', to)
-          .order('reserved_for', ascending: true);
-
+      final res = await TablesRepository.instance.fetchUpcomingReservations(
+        bId,
+      );
       _calendarReservations
         ..clear()
-        ..addAll(
-          (rows as List).map(
-            (r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>),
-          ),
-        );
+        ..addAll(res);
     } catch (e) {
       debugPrint('Calendar reservations fetch error: $e');
     } finally {
@@ -478,34 +459,9 @@ class TablesProvider extends ChangeNotifier {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
     try {
-      final rowsFut = _sb
-          .from(_kView)
-          .select()
-          .eq('business_id', bId)
-          .eq('is_active', true)
-          .order('table_number');
-          
-      final seatsFut = _sb
-          .from('table_seats')
-          .select()
-          .eq('business_id', bId);
-
-      final results = await Future.wait([rowsFut, seatsFut]);
-      final rows = results[0] as List;
-      final seatsRows = results[1] as List;
-      
-      final allSeats = seatsRows
-          .map((s) => TableSeat.fromJson(s as Map<String, dynamic>))
-          .toList();
-
+      final tables = await TablesRepository.instance.fetchTables(bId);
       _tables.clear();
-      for (final row in rows) {
-        final r = row as Map<String, dynamic>;
-        final tId = r['id'] as String;
-        final tSeats = allSeats.where((s) => s.tableId == tId).toList()
-          ..sort((a, b) => a.seatLabel.compareTo(b.seatLabel));
-        _tables.add(_rowToTable(r, tSeats));
-      }
+      _tables.addAll(tables);
 
       notifyListeners();
       _runNotifCheck();
@@ -677,7 +633,7 @@ class TablesProvider extends ChangeNotifier {
     _setLoading(true);
     try {
       final row = _tableToRow(t, isCreate: true)..remove('id');
-      await _sb.from(_kTables).insert(row);
+      await TablesRepository.instance.addTable(t, _userCtx!.businessId, row);
       await _refreshAll();
     } catch (e) {
       _error = 'Add table error: $e';
@@ -689,10 +645,12 @@ class TablesProvider extends ChangeNotifier {
   Future<void> updateTable(RestaurantTable updated) async {
     _setLoading(true);
     try {
-      await _sb
-          .from(_kTables)
-          .update(_tableToRow(updated))
-          .eq('id', updated.id);
+      final row = _tableToRow(updated);
+      await TablesRepository.instance.updateTable(
+        updated,
+        _userCtx!.businessId,
+        row,
+      );
       await _refreshAll();
     } catch (e) {
       _error = 'Update table error: $e';
@@ -704,14 +662,12 @@ class TablesProvider extends ChangeNotifier {
   Future<void> deleteTable(String id) async {
     _setLoading(true);
     try {
-      await _sb
-          .from(_kTables)
-          .update({
-            'is_active': false,
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', id);
+      await TablesRepository.instance.deleteTable(
+        id,
+        _userCtx!.businessId,
+        _userCtx?.uid,
+        _userCtx?.name,
+      );
       await _refreshAll();
     } catch (e) {
       _error = 'Delete table error: $e';
@@ -761,24 +717,23 @@ class TablesProvider extends ChangeNotifier {
         _notif.clearReservationKeys(t!.reservation!.id);
       }
 
-      // Use fn_seat_guest_v2 RPC — slot-aware, seat-aware, generates session_id
-      final result = await _sb.rpc(
-        'fn_seat_guest_v2',
-        params: {
-          'p_table_id': tableId,
-          'p_customer_name': customerName,
-          'p_staff_uid': _userCtx?.uid,
-          'p_staff_name': _userCtx?.name,
-          if (seatIds != null) 'p_seat_ids': seatIds,
-        },
+      // Use TablesRepository for seatGuests (which handles RPC online and local offline)
+      final result = await TablesRepository.instance.seatGuests(
+        tableId,
+        customerName,
+        businessId: _userCtx!.businessId,
+        isWalkIn: isWalkIn,
+        seatIds: seatIds,
+        staffUid: _userCtx?.uid,
+        staffName: _userCtx?.name,
       );
 
       await _refreshAll();
 
       return SeatResult(
-        success: result?['success'] == true,
-        sessionId: result?['session_id'] as String?,
-        reservationId: result?['reservation_id'] as String?,
+        success: result.success,
+        sessionId: result.sessionId,
+        reservationId: result.reservationId,
         nextReservationTime: nextReservationTime,
       );
     } catch (e) {
@@ -878,14 +833,16 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> markAvailable(String tableId) async {
     try {
-      await _sb
-          .from(_kTables)
-          .update({
-            'status': 'available',
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', tableId);
+      final t = _tables.where((t) => t.id == tableId).firstOrNull;
+      if (t != null) {
+        final row = _tableToRow(t);
+        row['status'] = 'available';
+        await TablesRepository.instance.updateTable(
+          t,
+          _userCtx!.businessId,
+          row,
+        );
+      }
       await _fetchTables();
     } catch (e) {
       _error = 'Mark available error: $e';
@@ -939,7 +896,7 @@ class TablesProvider extends ChangeNotifier {
   Future<void> addReservation(String tableId, Reservation res) async {
     try {
       final ctx = _userCtx!;
-      await _sb.from(_kReservations).insert({
+      final data = {
         'table_id': tableId,
         'customer_name': res.customerName,
         'phone': res.phone,
@@ -954,27 +911,25 @@ class TablesProvider extends ChangeNotifier {
         'created_by_name': ctx.name,
         'created_by_email': ctx.email,
         'created_by_role': ctx.role,
-      });
+      };
+
+      final id = await TablesRepository.instance.createReservation(
+        data,
+        ctx.businessId,
+      );
+      final newRes = res.copyWith(id: id);
 
       // ── SLOT-AWARE TABLE STATUS UPDATE ────────────────────────────────────
-      // Only mark the table as 'reserved' if the reservation starts within
-      // 15 minutes. If it's a future reservation, leave the table as-is
-      // (available/occupied) so walk-ins can still use it.
       final now = nowIST();
-      final minsUntil = res.reservedFor.difference(now).inMinutes;
+      final minsUntil = newRes.reservedFor.difference(now).inMinutes;
       if (minsUntil <= 15) {
-        await _sb
-            .from(_kTables)
-            .update({
-              'status': 'reserved',
-              'updated_by_uid': ctx.uid,
-              'updated_by_name': ctx.name,
-            })
-            .eq('id', tableId);
+        final t = _tables.where((t) => t.id == tableId).firstOrNull;
+        if (t != null) {
+          final row = _tableToRow(t);
+          row['status'] = 'reserved';
+          await TablesRepository.instance.updateTable(t, ctx.businessId, row);
+        }
       }
-      // If minsUntil > 15, don't change the table status — it stays
-      // available for walk-ins. The 1-min timer will update status
-      // automatically when the 15-min window approaches.
 
       await _refreshAll();
 
@@ -982,7 +937,7 @@ class TablesProvider extends ChangeNotifier {
       if (table != null) {
         await _notif.scheduleReservationReminders(
           table: table,
-          reservation: res,
+          reservation: newRes,
           businessName: ctx.businessName,
         );
       }
@@ -996,19 +951,18 @@ class TablesProvider extends ChangeNotifier {
     log('Updating reservation ${updated.id} for table $tableId');
 
     try {
-      await _sb
-          .from(_kReservations)
-          .update({
-            'customer_name': updated.customerName,
-            'phone': updated.phone,
-            'guest_count': updated.guestCount,
-            'reserved_for': updated.reservedFor.toUtc().toIso8601String(),
-            'check_out': updated.checkOut?.toUtc().toIso8601String(),
-            'notes': updated.notes,
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', updated.id);
+      await TablesRepository.instance.updateReservation(updated.id, {
+        'id': updated.id,
+        'customer_name': updated.customerName,
+        'phone': updated.phone,
+        'guest_count': updated.guestCount,
+        'reserved_for': updated.reservedFor.toUtc().toIso8601String(),
+        'check_out': updated.checkOut?.toUtc().toIso8601String(),
+        'notes': updated.notes,
+        'updated_by_uid': _userCtx?.uid,
+        'updated_by_name': _userCtx?.name,
+        'business_id': _userCtx!.businessId,
+      }, _userCtx!.businessId);
       await _refreshAll();
 
       final table = _tables.where((t) => t.id == tableId).firstOrNull;
@@ -1045,23 +999,24 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> _noShowAsync(String tableId, {RestaurantTable? table}) async {
     try {
-      await _sb
-          .from(_kReservations)
-          .update({
+      await TablesRepository.instance
+          .updateReservation(table?.reservation?.id ?? '', {
+            'id': table?.reservation?.id ?? '',
             'status': 'no_show',
             'updated_by_uid': _userCtx?.uid,
             'updated_by_name': _userCtx?.name,
-          })
-          .eq('table_id', tableId)
-          .eq('status', 'active');
-      await _sb
-          .from(_kTables)
-          .update({
-            'status': 'available',
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', tableId);
+            'business_id': _userCtx!.businessId,
+          }, _userCtx!.businessId);
+
+      if (table != null) {
+        final row = _tableToRow(table);
+        row['status'] = 'available';
+        await TablesRepository.instance.updateTable(
+          table,
+          _userCtx!.businessId,
+          row,
+        );
+      }
       await _refreshAll();
 
       // Send no-show cancellation notification
@@ -1081,23 +1036,20 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> _cancelAsync(String tableId, {RestaurantTable? table}) async {
     try {
-      await _sb
-          .from(_kReservations)
-          .update({
-            'status': 'cancelled',
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('table_id', tableId)
-          .eq('status', 'active');
-      await _sb
-          .from(_kTables)
-          .update({
-            'status': 'available',
-            'updated_by_uid': _userCtx?.uid,
-            'updated_by_name': _userCtx?.name,
-          })
-          .eq('id', tableId);
+      await TablesRepository.instance.cancelReservation(
+        table?.reservation?.id ?? '',
+        _userCtx!.businessId,
+      );
+
+      if (table != null) {
+        final row = _tableToRow(table);
+        row['status'] = 'available';
+        await TablesRepository.instance.updateTable(
+          table,
+          _userCtx!.businessId,
+          row,
+        );
+      }
       await _refreshAll();
 
       // Send cancellation notification

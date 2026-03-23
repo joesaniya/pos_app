@@ -2,11 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:pos_app/models/menu_category.dart';
 import '../models/menu_item.dart';
 
+import 'package:pos_app/repositories/menu_repository.dart';
+import 'package:pos_app/services/storage_service.dart';
 
 class MenuProvider extends ChangeNotifier {
   String _selectedCategory = 'All';
   String _selectedSubcategory = 'All';
   String _searchQuery = '';
+  
+  bool _isLoading = false;
+  String? _error;
+  String _businessId = '';
+
+  MenuProvider() {
+    _init();
+  }
+
+  Future<void> _init() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final userData = await StorageService.instance.getUserData();
+      _businessId = userData['businessId'] ?? '';
+      if (_businessId.isNotEmpty) {
+        await fetchMenuItems();
+        MenuRepository.instance.subscribeRealtime(_businessId, () => fetchMenuItems());
+      }
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchMenuItems() async {
+    if (_businessId.isEmpty) return;
+    try {
+      final items = await MenuRepository.instance.fetchMenuItems(_businessId);
+      if (items.isNotEmpty) {
+        _menuItems.clear();
+        _menuItems.addAll(items);
+        notifyListeners();
+      }
+    } catch (e) {
+      _error = 'Failed to fetch menu: $e';
+    }
+  }
+
+  bool get isLoading => _isLoading;
+  String? get error => _error;
 
   final List<MenuCategory> categories = [
     MenuCategory(
@@ -519,11 +564,58 @@ class MenuProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleItemAvailability(String itemId) {
+  Future<void> addMenuItem(MenuItem item) async {
+    if (_businessId.isEmpty) return;
+    try {
+      await MenuRepository.instance.saveMenuItem(item, _businessId, isCreate: true);
+      _menuItems.add(item);
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to add item: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateMenuItem(MenuItem item) async {
+    if (_businessId.isEmpty) return;
+    try {
+      await MenuRepository.instance.saveMenuItem(item, _businessId, isCreate: false);
+      final index = _menuItems.indexWhere((i) => i.id == item.id);
+      if (index != -1) {
+        _menuItems[index] = item;
+        notifyListeners();
+      }
+    } catch (e) {
+      _error = 'Failed to update item: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteMenuItem(String itemId) async {
+    if (_businessId.isEmpty) return;
+    try {
+      await MenuRepository.instance.deleteMenuItem(itemId, _businessId);
+      _menuItems.removeWhere((i) => i.id == itemId);
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to delete item: $e';
+      notifyListeners();
+    }
+  }
+
+  void toggleItemAvailability(String itemId) async {
     final index = _menuItems.indexWhere((item) => item.id == itemId);
     if (index != -1) {
-      _menuItems[index] = _menuItems[index].copyWith(available: !_menuItems[index].available);
-      notifyListeners();
+      final updatedItem = _menuItems[index].copyWith(available: !_menuItems[index].available);
+      
+      try {
+        await MenuRepository.instance.saveMenuItem(updatedItem, _businessId, isCreate: false);
+        _menuItems[index] = updatedItem;
+        notifyListeners();
+      } catch (e) {
+        _error = 'Failed to toggle availability: $e';
+        notifyListeners();
+      }
     }
   }
 }

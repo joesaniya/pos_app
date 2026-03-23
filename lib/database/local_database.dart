@@ -16,7 +16,8 @@ class LocalDatabase {
 
   Database? _db;
   Database get db {
-    if (_db == null) throw StateError('LocalDatabase not initialized. Call init() first.');
+    if (_db == null)
+      throw StateError('LocalDatabase not initialized. Call init() first.');
     return _db!;
   }
 
@@ -26,20 +27,20 @@ class LocalDatabase {
   static const _dbVersion = 1;
 
   // ── Table names ────────────────────────────────────────────────────────────
-  static const tQueue       = 'offline_queue';
-  static const tOrders      = 'local_orders';
-  static const tTables      = 'local_tables';
+  static const tQueue = 'offline_queue';
+  static const tOrders = 'local_orders';
+  static const tTables = 'local_tables';
   static const tReservations = 'local_reservations';
-  static const tMenuItems   = 'local_menu_items';
-  static const tInventory   = 'local_inventory';
-  static const tSuppliers   = 'local_suppliers';
-  static const tProfile     = 'local_profile';
-  static const tSyncMeta    = 'sync_meta';
+  static const tMenuItems = 'local_menu_items';
+  static const tInventory = 'local_inventory';
+  static const tSuppliers = 'local_suppliers';
+  static const tProfile = 'local_profile';
+  static const tSyncMeta = 'sync_meta';
 
   // ── Sync status values ─────────────────────────────────────────────────────
   static const syncPending = 'pending';
-  static const syncSynced  = 'synced';
-  static const syncFailed  = 'failed';
+  static const syncSynced = 'synced';
+  static const syncFailed = 'failed';
 
   // ── Action types ───────────────────────────────────────────────────────────
   static const actionCreate = 'create';
@@ -93,7 +94,8 @@ class LocalDatabase {
   //  TABLE DDL
   // ══════════════════════════════════════════════════════════════════════════
 
-  static const _createQueueTable = '''
+  static const _createQueueTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tQueue (
       id           TEXT PRIMARY KEY,
       entity_type  TEXT NOT NULL,
@@ -109,7 +111,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createOrdersTable = '''
+  static const _createOrdersTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tOrders (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -121,7 +124,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createTablesTable = '''
+  static const _createTablesTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tTables (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -133,7 +137,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createReservationsTable = '''
+  static const _createReservationsTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tReservations (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -146,7 +151,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createMenuItemsTable = '''
+  static const _createMenuItemsTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tMenuItems (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -159,7 +165,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createInventoryTable = '''
+  static const _createInventoryTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tInventory (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -171,7 +178,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createSuppliersTable = '''
+  static const _createSuppliersTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tSuppliers (
       id           TEXT PRIMARY KEY,
       business_id  TEXT NOT NULL,
@@ -183,7 +191,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createProfileTable = '''
+  static const _createProfileTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tProfile (
       id           TEXT PRIMARY KEY,
       data         TEXT NOT NULL,
@@ -192,7 +201,8 @@ class LocalDatabase {
     )
   ''';
 
-  static const _createSyncMetaTable = '''
+  static const _createSyncMetaTable =
+      '''
     CREATE TABLE IF NOT EXISTS $tSyncMeta (
       key          TEXT PRIMARY KEY,
       value        TEXT NOT NULL
@@ -203,7 +213,6 @@ class LocalDatabase {
   //  OFFLINE QUEUE OPERATIONS
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Enqueue a sync action. Returns the queue row ID.
   Future<void> enqueue({
     required String id,
     required String entityType,
@@ -213,26 +222,21 @@ class LocalDatabase {
     String? businessId,
   }) async {
     final now = DateTime.now().toUtc().toIso8601String();
-    await db.insert(
-      tQueue,
-      {
-        'id':          id,
-        'entity_type': entityType,
-        'entity_id':   entityId,
-        'action':      action,
-        'payload':     jsonEncode(payload),
-        'sync_status': syncPending,
-        'attempts':    0,
-        'created_at':  now,
-        'updated_at':  now,
-        'business_id': businessId,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert(tQueue, {
+      'id': id,
+      'entity_type': entityType,
+      'entity_id': entityId,
+      'action': action,
+      'payload': jsonEncode(payload),
+      'sync_status': syncPending,
+      'attempts': 0,
+      'created_at': now,
+      'updated_at': now,
+      'business_id': businessId,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     log('[LocalDB] 📤 Enqueued $action on $entityType/$entityId');
   }
 
-  /// Fetch all pending or failed items (up to maxAttempts) ordered by created_at.
   Future<List<Map<String, dynamic>>> getPendingQueue() async {
     return db.query(
       tQueue,
@@ -242,21 +246,19 @@ class LocalDatabase {
     );
   }
 
-  /// Mark a queue item as successfully synced.
   Future<void> markSynced(String queueId) async {
     await db.update(
       tQueue,
       {
         'sync_status': syncSynced,
-        'updated_at':  DateTime.now().toUtc().toIso8601String(),
-        'last_error':  null,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'last_error': null,
       },
       where: 'id = ?',
       whereArgs: [queueId],
     );
   }
 
-  /// Mark a queue item as failed and increment attempt count.
   Future<void> markFailed(String queueId, String error) async {
     final rows = await db.query(tQueue, where: 'id = ?', whereArgs: [queueId]);
     if (rows.isEmpty) return;
@@ -265,16 +267,15 @@ class LocalDatabase {
       tQueue,
       {
         'sync_status': attempts >= maxAttempts ? syncFailed : syncPending,
-        'attempts':    attempts,
-        'last_error':  error,
-        'updated_at':  DateTime.now().toUtc().toIso8601String(),
+        'attempts': attempts,
+        'last_error': error,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
       where: 'id = ?',
       whereArgs: [queueId],
     );
   }
 
-  /// Count of items not yet synced.
   Future<int> pendingCount() async {
     final result = await db.rawQuery(
       'SELECT COUNT(*) as cnt FROM $tQueue WHERE sync_status = ? OR (sync_status = ? AND attempts < ?)',
@@ -283,7 +284,6 @@ class LocalDatabase {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  /// Remove successfully synced items older than 7 days.
   Future<void> pruneOldSynced() async {
     final cutoff = DateTime.now()
         .subtract(const Duration(days: 7))
@@ -300,7 +300,6 @@ class LocalDatabase {
   //  GENERIC ENTITY CACHE OPERATIONS
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Upsert a cached entity row.
   Future<void> upsertEntity({
     required String table,
     required String id,
@@ -312,23 +311,18 @@ class LocalDatabase {
   }) async {
     final now = DateTime.now().toUtc().toIso8601String();
     final row = <String, dynamic>{
-      'id':         id,
+      'id': id,
       'business_id': businessId,
-      'data':       jsonEncode(data),
+      'data': jsonEncode(data),
       'sync_status': syncStatus,
-      'action':     action,
+      'action': action,
       'created_at': now,
       'updated_at': now,
     };
     if (extraColumns != null) row.addAll(extraColumns);
-    await db.insert(
-      table,
-      row,
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert(table, row, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  /// Fetch all cached entities for a business.
   Future<List<Map<String, dynamic>>> getEntities({
     required String table,
     required String businessId,
@@ -341,53 +335,116 @@ class LocalDatabase {
     final args = whereExtra != null
         ? [businessId, ...?whereExtraArgs]
         : [businessId];
-    final rows = await db.query(table, where: where, whereArgs: args, orderBy: 'updated_at DESC');
+    final rows = await db.query(
+      table,
+      where: where,
+      whereArgs: args,
+      orderBy: 'updated_at DESC',
+    );
     return rows.map((row) {
       final decoded = jsonDecode(row['data'] as String) as Map<String, dynamic>;
       decoded['_sync_status'] = row['sync_status'];
       decoded['_action'] = row['action'];
-      
-      // Inject primary IDs from table row if not present in JSON
+
       if (!decoded.containsKey('id') || decoded['id'] == null) {
         decoded['id'] = row['id'];
       }
-      if (!decoded.containsKey('business_id') || decoded['business_id'] == null) {
+      if (!decoded.containsKey('business_id') ||
+          decoded['business_id'] == null) {
         decoded['business_id'] = row['business_id'];
       }
       return decoded;
     }).toList();
   }
 
-  /// Overwrite all cached entities for a business (used after remote sync).
+  // ══════════════════════════════════════════════════════════════════════════
+  //  FIX: replaceAll — preserves unsynced (pending/failed) rows
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  //  THE BUG: The original replaceAll did DELETE WHERE business_id = ? then
+  //  re-inserted only rows that came from the remote. Any locally-created
+  //  entity that hadn't synced yet (sync_status = 'pending', action = 'create')
+  //  was permanently wiped — even though it existed in the offline queue.
+  //
+  //  THE FIX: We only delete rows that are already fully synced. Rows still
+  //  pending or failed are left untouched. Remote rows are then merged in via
+  //  INSERT OR IGNORE (so pending-local rows win on conflict). Finally, for
+  //  rows that exist both locally (synced) and remotely, we overwrite the
+  //  local data with the fresh remote payload.
+  //
   Future<void> replaceAll({
     required String table,
     required String businessId,
     required List<Map<String, dynamic>> entities,
     String? idField,
   }) async {
-    final txn = db.batch();
-    txn.delete(table, where: 'business_id = ?', whereArgs: [businessId]);
     final now = DateTime.now().toUtc().toIso8601String();
-    for (final entity in entities) {
-      final id = entity[idField ?? 'id'] as String? ?? '';
-      txn.insert(
-        table,
-        {
-          'id':         id,
+    final remoteIds = entities
+        .map((e) => e[idField ?? 'id'] as String? ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    await db.transaction((txn) async {
+      // 1. Delete synced rows whose IDs did NOT come back from remote
+      //    (they were deleted server-side). Leave pending/failed rows alone.
+      if (remoteIds.isNotEmpty) {
+        final placeholders = List.filled(remoteIds.length, '?').join(',');
+        await txn.rawDelete(
+          '''DELETE FROM $table
+             WHERE business_id = ?
+               AND sync_status = ?
+               AND id NOT IN ($placeholders)''',
+          [businessId, syncSynced, ...remoteIds],
+        );
+      } else {
+        // Remote returned nothing — only wipe synced rows, keep pending
+        await txn.delete(
+          table,
+          where: 'business_id = ? AND sync_status = ?',
+          whereArgs: [businessId, syncSynced],
+        );
+      }
+
+      // 2. Upsert each remote row:
+      //    • If a pending-local row exists for this id → skip (local wins until synced)
+      //    • If a synced row exists → overwrite with fresh remote data
+      //    • If no row exists → insert as synced
+      for (final entity in entities) {
+        final id = entity[idField ?? 'id'] as String? ?? '';
+        if (id.isEmpty) continue;
+
+        // Check if a pending/failed local row already exists for this id
+        final existing = await txn.query(
+          table,
+          columns: ['sync_status'],
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+
+        if (existing.isNotEmpty) {
+          final status = existing.first['sync_status'] as String?;
+          if (status == syncPending || status == syncFailed) {
+            // Local unsynced data is authoritative — do not overwrite
+            log('[LocalDB] Skipping remote overwrite for pending row: $id');
+            continue;
+          }
+        }
+
+        // Safe to write the remote row
+        await txn.insert(table, {
+          'id': id,
           'business_id': businessId,
-          'data':       jsonEncode(entity),
+          'data': jsonEncode(entity),
           'sync_status': syncSynced,
-          'action':     actionUpdate,
+          'action': actionUpdate,
           'created_at': now,
           'updated_at': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await txn.commit(noResult: true);
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
   }
 
-  /// Delete a single cached entity.
   Future<void> deleteEntity(String table, String id) async {
     await db.delete(table, where: 'id = ?', whereArgs: [id]);
   }
@@ -397,16 +454,12 @@ class LocalDatabase {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> saveProfile(String uid, Map<String, dynamic> data) async {
-    await db.insert(
-      tProfile,
-      {
-        'id':         uid,
-        'data':       jsonEncode(data),
-        'sync_status': syncSynced,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert(tProfile, {
+      'id': uid,
+      'data': jsonEncode(data),
+      'sync_status': syncSynced,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, dynamic>?> getProfile(String uid) async {
@@ -415,14 +468,17 @@ class LocalDatabase {
     return jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
   }
 
-  Future<void> updateProfileField(String uid, Map<String, dynamic> fields) async {
+  Future<void> updateProfileField(
+    String uid,
+    Map<String, dynamic> fields,
+  ) async {
     final existing = await getProfile(uid);
     if (existing == null) return;
     existing.addAll(fields);
     await db.update(
       tProfile,
       {
-        'data':       jsonEncode(existing),
+        'data': jsonEncode(existing),
         'sync_status': syncPending,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
@@ -436,11 +492,10 @@ class LocalDatabase {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> setSyncMeta(String key, String value) async {
-    await db.insert(
-      tSyncMeta,
-      {'key': key, 'value': value},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert(tSyncMeta, {
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<String?> getSyncMeta(String key) async {
@@ -459,7 +514,16 @@ class LocalDatabase {
 
   @visibleForTesting
   Future<void> deleteAll() async {
-    final tables = [tQueue, tOrders, tTables, tReservations, tMenuItems, tInventory, tSuppliers, tProfile];
+    final tables = [
+      tQueue,
+      tOrders,
+      tTables,
+      tReservations,
+      tMenuItems,
+      tInventory,
+      tSuppliers,
+      tProfile,
+    ];
     for (final t in tables) {
       await db.delete(t);
     }

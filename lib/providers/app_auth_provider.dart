@@ -57,7 +57,11 @@ class AppAuthenticationProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final StorageService _storage = StorageService.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  // final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId:
+        '229109371607-rc6ni047aee8g0r9f7pt9pfrvpo4h0mi.apps.googleusercontent.com',
+  );
 
   StreamSubscription<DocumentSnapshot>? _sessionWatcher;
   StreamSubscription<DocumentSnapshot>? _subscriptionWatcher;
@@ -157,7 +161,6 @@ class AppAuthenticationProvider with ChangeNotifier {
     }
   }
 
- 
   Future<QueryDocumentSnapshot?> _findUserByPhone(String phone) async {
     final normalised = phone.startsWith('+') ? phone : '+91$phone';
     final raw = phone.startsWith('+') ? phone.replaceFirst('+91', '') : phone;

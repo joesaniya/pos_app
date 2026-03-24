@@ -1,8 +1,11 @@
+// lib/models/table_modal.dart
+// v2: Added sessionId to RestaurantTable for session-scoped order filtering
+
+import 'package:pos_app/utils/ist_utils.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ENUMS
 // ─────────────────────────────────────────────────────────────────────────────
-
-import 'package:pos_app/utils/ist_utils.dart';
 
 enum TableStatus { available, occupied, reserved, cleaning }
 
@@ -164,17 +167,15 @@ class Reservation {
   final String customerName;
   final String? phone;
   final int guestCount;
-  final DateTime reservedFor; // check-in / start time
-  final DateTime? checkIn; // actual arrival (seated)
-  final DateTime? checkOut; // planned / actual departure
+  final DateTime reservedFor;
+  final DateTime? checkIn;
+  final DateTime? checkOut;
   final String? notes;
-  final String status; // active | seated | cancelled | no_show
+  final String status;
   final bool warningSent;
   final DateTime createdAt;
-
-  // ── Who created this reservation ─────────────────────
-  final String? createdByName; // staff member's name
-  final String? createdByRole; // staff member's role (admin/manager/staff)
+  final String? createdByName;
+  final String? createdByRole;
 
   const Reservation({
     required this.id,
@@ -203,24 +204,24 @@ class Reservation {
     String? status,
     bool? warningSent,
     String? createdByName,
-    String? createdByRole, required String id,
-  }) => Reservation(
-    id: id,
-    customerName: customerName ?? this.customerName,
-    phone: phone ?? this.phone,
-    guestCount: guestCount ?? this.guestCount,
-    reservedFor: reservedFor ?? this.reservedFor,
-    checkIn: checkIn ?? this.checkIn,
-    checkOut: checkOut ?? this.checkOut,
-    notes: notes ?? this.notes,
-    status: status ?? this.status,
-    warningSent: warningSent ?? this.warningSent,
-    createdAt: createdAt,
-    createdByName: createdByName ?? this.createdByName,
-    createdByRole: createdByRole ?? this.createdByRole,
-  );
-
-  // ── Display helpers ──────────────────────────────────
+    String? createdByRole,
+    required String id,
+  }) =>
+      Reservation(
+        id: id,
+        customerName: customerName ?? this.customerName,
+        phone: phone ?? this.phone,
+        guestCount: guestCount ?? this.guestCount,
+        reservedFor: reservedFor ?? this.reservedFor,
+        checkIn: checkIn ?? this.checkIn,
+        checkOut: checkOut ?? this.checkOut,
+        notes: notes ?? this.notes,
+        status: status ?? this.status,
+        warningSent: warningSent ?? this.warningSent,
+        createdAt: createdAt,
+        createdByName: createdByName ?? this.createdByName,
+        createdByRole: createdByRole ?? this.createdByRole,
+      );
 
   String get timeLabel {
     final h = reservedFor.hour;
@@ -250,24 +251,13 @@ class Reservation {
     if (rDate == today) return 'Today';
     if (rDate == today.add(const Duration(days: 1))) return 'Tomorrow';
     const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${months[reservedFor.month - 1]} ${reservedFor.day}';
   }
 
   String get countdownLabel {
-    // final diff = reservedFor.difference(DateTime.now());
     final diff = reservedFor.difference(nowIST());
     if (diff.isNegative) return 'Overdue';
     if (diff.inMinutes < 60) return 'in ${diff.inMinutes}m';
@@ -275,7 +265,6 @@ class Reservation {
     return 'in ${diff.inDays}d';
   }
 
-  /// Minutes remaining until check-out (null if no check-out time set)
   int? get minutesUntilCheckOut {
     if (checkOut == null) return null;
     return checkOut!.difference(DateTime.now()).inMinutes;
@@ -287,7 +276,6 @@ class Reservation {
     return mins >= 0 && mins <= 15;
   }
 
-  /// Who created the reservation — shows name if available, falls back to role
   String get createdByLabel => createdByName ?? createdByRole ?? 'Staff';
 }
 
@@ -306,20 +294,9 @@ class ReservationHistoryItem {
   final String status;
   final String createdByName;
   final DateTime createdAt;
-
-  // ── Audit / cancellation fields ───────────────────────
-  /// Who last updated this reservation (name from updated_by_name column)
   final String? updatedByName;
-
-  /// Name of the staff member who cancelled / marked no-show.
-  /// Falls back to updatedByName when not explicitly recorded.
   final String? cancelledByName;
-
-  /// Timestamp when the reservation was cancelled / no-showed.
-  /// Populated from a `cancelled_at` column or derived from `updated_at`.
   final DateTime? cancelledAt;
-
-  /// Optional free-text reason for cancellation (e.g. "guest request").
   final String? cancellationReason;
 
   const ReservationHistoryItem({
@@ -337,7 +314,6 @@ class ReservationHistoryItem {
     required this.status,
     required this.createdByName,
     required this.createdAt,
-    // audit
     this.updatedByName,
     this.cancelledByName,
     this.cancelledAt,
@@ -347,8 +323,6 @@ class ReservationHistoryItem {
   factory ReservationHistoryItem.fromMap(Map<String, dynamic> row) {
     final tableData = row['restaurant_tables'];
 
-    // Determine cancelled_at: use explicit column if present,
-    // otherwise fall back to updated_at (which Supabase updates on every write).
     DateTime? cancelledAt;
     if (row['cancelled_at'] != null) {
       cancelledAt = DateTime.parse(row['cancelled_at'] as String).toLocal();
@@ -377,18 +351,16 @@ class ReservationHistoryItem {
       notes: row['notes'],
       status: row['status'] ?? 'active',
       createdByName: row['created_by_name'] ?? 'Staff',
-      createdAt: row['created_at'] != null 
-          ? DateTime.parse(row['created_at']).toLocal() 
+      createdAt: row['created_at'] != null
+          ? DateTime.parse(row['created_at']).toLocal()
           : DateTime.now(),
-      // audit
       updatedByName: row['updated_by_name'] as String?,
-      cancelledByName: row['updated_by_name'] as String?, // same column for now
+      cancelledByName: row['updated_by_name'] as String?,
       cancelledAt: cancelledAt,
       cancellationReason: row['cancellation_reason'] as String?,
     );
   }
 
-  /// Human-readable status label with emoji
   String get statusLabel {
     switch (status) {
       case 'active':
@@ -425,27 +397,32 @@ class ReservationHistoryItem {
     String? cancelledByName,
     DateTime? cancelledAt,
     String? cancellationReason,
-  }) => ReservationHistoryItem(
-    id: id ?? this.id,
-    tableId: tableId ?? this.tableId,
-    tableNumber: tableNumber ?? this.tableNumber,
-    section: section ?? this.section,
-    customerName: customerName ?? this.customerName,
-    phone: phone ?? this.phone,
-    guestCount: guestCount ?? this.guestCount,
-    reservedFor: reservedFor ?? this.reservedFor,
-    checkIn: checkIn ?? this.checkIn,
-    checkOut: checkOut ?? this.checkOut,
-    notes: notes ?? this.notes,
-    status: status ?? this.status,
-    createdByName: createdByName ?? this.createdByName,
-    createdAt: createdAt ?? this.createdAt,
-    updatedByName: updatedByName ?? this.updatedByName,
-    cancelledByName: cancelledByName ?? this.cancelledByName,
-    cancelledAt: cancelledAt ?? this.cancelledAt,
-    cancellationReason: cancellationReason ?? this.cancellationReason,
-  );
+  }) =>
+      ReservationHistoryItem(
+        id: id ?? this.id,
+        tableId: tableId ?? this.tableId,
+        tableNumber: tableNumber ?? this.tableNumber,
+        section: section ?? this.section,
+        customerName: customerName ?? this.customerName,
+        phone: phone ?? this.phone,
+        guestCount: guestCount ?? this.guestCount,
+        reservedFor: reservedFor ?? this.reservedFor,
+        checkIn: checkIn ?? this.checkIn,
+        checkOut: checkOut ?? this.checkOut,
+        notes: notes ?? this.notes,
+        status: status ?? this.status,
+        createdByName: createdByName ?? this.createdByName,
+        createdAt: createdAt ?? this.createdAt,
+        updatedByName: updatedByName ?? this.updatedByName,
+        cancelledByName: cancelledByName ?? this.cancelledByName,
+        cancelledAt: cancelledAt ?? this.cancelledAt,
+        cancellationReason: cancellationReason ?? this.cancellationReason,
+      );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RESTAURANT TABLE
+// ─────────────────────────────────────────────────────────────────────────────
 
 class RestaurantTable {
   final String id;
@@ -463,6 +440,9 @@ class RestaurantTable {
   final bool isPremium;
   final List<TableSeat> seats;
 
+  // FIX: expose session_id for order-repository session filtering
+  final String? sessionId;
+
   const RestaurantTable({
     required this.id,
     required this.tableNumber,
@@ -478,6 +458,7 @@ class RestaurantTable {
     this.hasWindow = false,
     this.isPremium = false,
     this.seats = const [],
+    this.sessionId, // FIX: new field
   });
 
   RestaurantTable copyWith({
@@ -488,55 +469,50 @@ class RestaurantTable {
     DateTime? occupiedSince,
     Reservation? reservation,
     List<TableSeat>? seats,
+    String? sessionId,
     bool clearReservation = false,
     bool clearOccupied = false,
-  }) => RestaurantTable(
-    id: id,
-    tableNumber: tableNumber,
-    capacity: capacity,
-    status: status ?? this.status,
-    section: section,
-    shape: shape,
-    currentCustomerName: clearOccupied
-        ? null
-        : currentCustomerName ?? this.currentCustomerName,
-    currentOrderId: clearOccupied
-        ? null
-        : currentOrderId ?? this.currentOrderId,
-    currentOrderTotal: clearOccupied
-        ? null
-        : currentOrderTotal ?? this.currentOrderTotal,
-    occupiedSince: clearOccupied ? null : occupiedSince ?? this.occupiedSince,
-    reservation: clearReservation ? null : reservation ?? this.reservation,
-    hasWindow: hasWindow,
-    isPremium: isPremium,
-    seats: seats ?? this.seats,
-  );
+  }) =>
+      RestaurantTable(
+        id: id,
+        tableNumber: tableNumber,
+        capacity: capacity,
+        status: status ?? this.status,
+        section: section,
+        shape: shape,
+        currentCustomerName: clearOccupied
+            ? null
+            : currentCustomerName ?? this.currentCustomerName,
+        currentOrderId:
+            clearOccupied ? null : currentOrderId ?? this.currentOrderId,
+        currentOrderTotal:
+            clearOccupied ? null : currentOrderTotal ?? this.currentOrderTotal,
+        occupiedSince: clearOccupied ? null : occupiedSince ?? this.occupiedSince,
+        reservation: clearReservation ? null : reservation ?? this.reservation,
+        hasWindow: hasWindow,
+        isPremium: isPremium,
+        seats: seats ?? this.seats,
+        sessionId: clearOccupied ? null : sessionId ?? this.sessionId,
+      );
 
   // ── Display helpers ──────────────────────────────────
 
   String get occupiedDuration {
     if (occupiedSince == null) return '—';
-    final diff = elapsedIST(
-      occupiedSince!,
-    ); // ← uses nowIST() internally, never negative
+    final diff = elapsedIST(occupiedSince!);
     final h = diff.inHours;
     final m = diff.inMinutes.remainder(60);
     if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
     return '${diff.inMinutes}m';
   }
 
-  // occupiedDuration1 can be deleted — it's now a duplicate
-  // String get occupiedDuration1 { ... }   ← remove this
-
   int get occupiedMinutes {
     if (occupiedSince == null) return 0;
-    return elapsedIST(
-      occupiedSince!,
-    ).inMinutes; // ← was DateTime.now(), now IST-safe
+    return elapsedIST(occupiedSince!).inMinutes;
   }
 
   String get tableName => 'T${tableNumber.toString().padLeft(2, '0')}';
+
   String get occupiedDuration1 {
     if (occupiedSince == null) return '—';
     final diff = nowIST().difference(occupiedSince!);
@@ -547,7 +523,6 @@ class RestaurantTable {
     return '${m}m';
   }
 
-  /// Minutes the table has been occupied (0 if not occupied)
   int get occupiedMinutes1 {
     if (occupiedSince == null) return 0;
     return DateTime.now().difference(occupiedSince!).inMinutes;
@@ -555,30 +530,23 @@ class RestaurantTable {
 
   // ── Seat-level helpers ──────────────────────────────────
 
-  /// Number of seats currently occupied
   int get occupiedSeatCount =>
       seats.where((s) => s.status == TableStatus.occupied).length;
 
-  /// Number of seats still available
   int get availableSeatCount =>
       seats.where((s) => s.status == TableStatus.available).length;
 
-  /// True when at least one seat is occupied but not ALL seats.
-  /// This indicates partial (seat-level) booking vs full table booking.
   bool get isPartiallyOccupied =>
       seats.isNotEmpty &&
       occupiedSeatCount > 0 &&
       occupiedSeatCount < seats.length;
 
-  /// True when every seat in the table is occupied (full table booking).
   bool get isFullyOccupied =>
       seats.isNotEmpty && occupiedSeatCount == seats.length;
 
-  /// Occupied seats list
   List<TableSeat> get occupiedSeats =>
       seats.where((s) => s.status == TableStatus.occupied).toList();
 
-  /// Available seats list
   List<TableSeat> get availableSeats =>
       seats.where((s) => s.status == TableStatus.available).toList();
 }

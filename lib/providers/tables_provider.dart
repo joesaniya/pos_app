@@ -71,6 +71,8 @@ class TablesProvider extends ChangeNotifier {
   bool get historyLoading => _historyLoading;
   bool get historyHasMore => _historyHasMore;
 
+  String get businessId => _userCtx?.businessId ?? '';
+
   /// Total active reservations across all upcoming dates (from calendar cache).
   /// Use this for the summary bar — it reflects real bookings, not just
   /// tables currently showing 'reserved' status (which is slot-windowed).
@@ -194,9 +196,9 @@ class TablesProvider extends ChangeNotifier {
     final user = _auth.currentUser;
     final storedData = await StorageService.instance.getUserData();
     final String canonicalUid = storedData['uid'] as String? ?? user?.uid ?? '';
-    
+
     if (canonicalUid.isEmpty) return;
-    
+
     _userCtx = _UserCtx(
       uid: canonicalUid,
       name: storedData['name'] as String? ?? 'Staff',
@@ -212,7 +214,9 @@ class TablesProvider extends ChangeNotifier {
     if (bId == null || bId.isEmpty) return;
     _calendarLoading = true;
     try {
-      final res = await TablesRepository.instance.fetchUpcomingReservations(bId);
+      final res = await TablesRepository.instance.fetchUpcomingReservations(
+        bId,
+      );
       _calendarReservations
         ..clear()
         ..addAll(res);
@@ -226,7 +230,8 @@ class TablesProvider extends ChangeNotifier {
     if (ConnectivityService.instance.isOnline) {
       try {
         await TablesRepository.instance.refreshReservationsFromRemote(bId);
-        final freshRes = await TablesRepository.instance.fetchUpcomingReservations(bId);
+        final freshRes = await TablesRepository.instance
+            .fetchUpcomingReservations(bId);
         _calendarReservations
           ..clear()
           ..addAll(freshRes);
@@ -498,8 +503,6 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-
-
   Map<String, dynamic> _tableToRow(RestaurantTable t, {bool isCreate = false}) {
     final ctx = _userCtx!;
     final base = <String, dynamic>{
@@ -674,19 +677,15 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> clearTable(String tableId, {String? seatId}) async {
     try {
-      await _sb.rpc(
-        'fn_checkout_v2',
-        params: {
-          'p_table_id': tableId,
-          'p_staff_uid': _userCtx?.uid,
-          'p_staff_name': _userCtx?.name,
-          'p_checkout_at': DateTime.now().toUtc().toIso8601String(),
-          if (seatId != null) 'p_seat_id': seatId,
-        },
+      await TablesRepository.instance.clearTable(
+        tableId,
+        _userCtx!.businessId,
+        seatId: seatId,
+        staffUid: _userCtx?.uid,
+        staffName: _userCtx?.name,
       );
 
-      // After clearing, check if a reservation is starting soon
-      // and restore 'reserved' status if within 15 min
+      // After clearing, refresh local table + reservation view
       await _refreshAll();
 
       // Re-check and restore reserved status if needed (mainly for full tables)
@@ -966,8 +965,6 @@ class TablesProvider extends ChangeNotifier {
     }
   }
 
-
-
   // ══════════════════════════════════════════════════════
   //  HISTORY
   // ══════════════════════════════════════════════════════
@@ -1000,7 +997,8 @@ class TablesProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fromDate = _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
+      final fromDate =
+          _historyFrom ?? DateTime.now().subtract(const Duration(days: 30));
       final toDate = _historyTo ?? DateTime.now().add(const Duration(days: 60));
 
       List<ReservationHistoryItem> items = [];
@@ -1013,10 +1011,15 @@ class TablesProvider extends ChangeNotifier {
             .gte('reserved_for', fromDate.toUtc().toIso8601String())
             .lte('reserved_for', toDate.toUtc().toIso8601String())
             .order('reserved_for', ascending: false)
-            .range(_historyPage * _pageSize, (_historyPage + 1) * _pageSize - 1);
+            .range(
+              _historyPage * _pageSize,
+              (_historyPage + 1) * _pageSize - 1,
+            );
 
         items = (rows as List)
-            .map((r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>))
+            .map(
+              (r) => ReservationHistoryItem.fromMap(r as Map<String, dynamic>),
+            )
             .toList();
       } else {
         final local = LocalDatabase.instance;
@@ -1027,29 +1030,35 @@ class TablesProvider extends ChangeNotifier {
           whereExtraArgs: [LocalDatabase.actionDelete],
         );
 
-        items = rows.where((r) {
-          try {
-            final dtStr = r['reserved_for'] as String?;
-            if (dtStr == null) return false;
-            final dt = parseToIST(dtStr).toUtc();
-            return dt.isAfter(fromDate) && dt.isBefore(toDate);
-          } catch (_) {
-            return false;
-          }
-        }).map((r) {
-          try {
-            return ReservationHistoryItem.fromMap(r);
-          } catch (_) {
-            return null;
-          }
-        }).whereType<ReservationHistoryItem>().toList();
-        
+        items = rows
+            .where((r) {
+              try {
+                final dtStr = r['reserved_for'] as String?;
+                if (dtStr == null) return false;
+                final dt = parseToIST(dtStr).toUtc();
+                return dt.isAfter(fromDate) && dt.isBefore(toDate);
+              } catch (_) {
+                return false;
+              }
+            })
+            .map((r) {
+              try {
+                return ReservationHistoryItem.fromMap(r);
+              } catch (_) {
+                return null;
+              }
+            })
+            .whereType<ReservationHistoryItem>()
+            .toList();
+
         items.sort((a, b) => b.reservedFor.compareTo(a.reservedFor));
-        
+
         // Manual pagination
         final start = _historyPage * _pageSize;
         if (start < items.length) {
-          final end = (start + _pageSize < items.length) ? start + _pageSize : items.length;
+          final end = (start + _pageSize < items.length)
+              ? start + _pageSize
+              : items.length;
           items = items.sublist(start, end);
         } else {
           items = [];

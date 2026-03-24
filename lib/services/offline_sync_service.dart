@@ -56,11 +56,14 @@ class EntityType {
 }
 
 // ── Fields that must never be sent to Supabase ────────────────────────────
+// These are local-only fields or computed joins that don't exist in schema
 const _kInternalFields = {
   '_sync_status',
   '_action',
   'seats', // joined list, not a column
   'restaurant_tables', // joined object from Supabase queries
+  'reservation_data', // computed field from vw_tables_with_reservation
+  'items', // computed JSON array from vw_orders_with_items
 };
 
 class OfflineSyncService {
@@ -103,13 +106,19 @@ class OfflineSyncService {
 
   Map<String, dynamic> _cleanPayload(Map<String, dynamic> raw) {
     final clean = Map<String, dynamic>.from(raw);
+
+    // Remove internal/computed fields that don't exist in schema
     for (final k in _kInternalFields) {
-      clean.remove(k);
+      if (clean.containsKey(k)) {
+        clean.remove(k);
+      }
     }
+
     // Also remove null-value keys that Supabase might reject for NOT NULL cols
     clean.removeWhere(
       (key, value) => value == null && _isOptionalNullable(clean, key),
     );
+
     return clean;
   }
 
@@ -160,8 +169,56 @@ class OfflineSyncService {
           '[SyncService] ✅ Synced $action on $entityType (${rawPayload['id']})',
         );
       } catch (e) {
-        final backoffSeconds = _backoff(attempts);
         final error = e.toString();
+
+        final isSeatConflict =
+            (e is PostgrestException && e.code == '23505') ||
+            error.contains('uq_active_seat_order') ||
+            error.toLowerCase().contains('duplicate key value');
+
+        if (isSeatConflict && entityType == EntityType.order) {
+          log(
+            '[SyncService] ⚠ Gave up on conflicting order sync (unique seat constraint): $error',
+          );
+
+          // Treat the queue item as resolved to avoid retry loops.
+          await _db.markSynced(queueId);
+
+          // If we have a local order row, update it so UI doesn't keep showing
+          // an active order that failed to persist remotely.
+          try {
+            final localId = rawPayload['id'] as String?;
+            if (localId != null) {
+              final cachedOrders = await _db.getEntities(
+                table: LocalDatabase.tOrders,
+                businessId: rawPayload['business_id'] as String,
+              );
+              final localOrder = cachedOrders.firstWhere(
+                (o) => o['id'] == localId,
+                orElse: () => {},
+              );
+              if (localOrder.isNotEmpty) {
+                localOrder['status'] = 'cancelled';
+                localOrder['notes'] =
+                    'Auto-cancelled due to duplicate active seat order conflict';
+                await _db.upsertEntity(
+                  table: LocalDatabase.tOrders,
+                  id: localId,
+                  businessId: rawPayload['business_id'] as String,
+                  data: localOrder,
+                  syncStatus: LocalDatabase.syncSynced,
+                  action: LocalDatabase.actionUpdate,
+                );
+              }
+            }
+          } catch (_) {
+            // If local cleanup fails, do not block processing.
+          }
+
+          continue;
+        }
+
+        final backoffSeconds = _backoff(attempts);
         await _db.markFailed(queueId, error);
         log(
           '[SyncService] ❌ Failed ($attempts attempts, retry in ${backoffSeconds}s): $entityType → $e',

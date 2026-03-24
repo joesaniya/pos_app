@@ -24,7 +24,7 @@ class LocalDatabase {
   bool get isInitialized => _db != null;
 
   static const _dbName = 'pos_app_offline.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
 
   // ── Table names ────────────────────────────────────────────────────────────
   static const tQueue = 'offline_queue';
@@ -36,6 +36,7 @@ class LocalDatabase {
   static const tSuppliers = 'local_suppliers';
   static const tProfile = 'local_profile';
   static const tSyncMeta = 'sync_meta';
+  static const tSeatHistory = 'local_seat_history';
 
   // ── Sync status values ─────────────────────────────────────────────────────
   static const syncPending = 'pending';
@@ -82,11 +83,23 @@ class LocalDatabase {
     await db.execute(_createSuppliersTable);
     await db.execute(_createProfileTable);
     await db.execute(_createSyncMetaTable);
+    await db.execute(_createSeatHistoryTable);
     log('[LocalDB] ✅ All tables created (v$version)');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     log('[LocalDB] Upgrading v$oldVersion → v$newVersion');
+
+    // v1 → v2: Add local_seat_history table
+    if (oldVersion < 2) {
+      try {
+        await db.execute(_createSeatHistoryTable);
+        log('[LocalDB] ✅ Created local_seat_history table during upgrade');
+      } catch (e) {
+        log('[LocalDB] Note: local_seat_history may already exist: $e');
+      }
+    }
+
     // Future migrations go here
   }
 
@@ -206,6 +219,29 @@ class LocalDatabase {
     CREATE TABLE IF NOT EXISTS $tSyncMeta (
       key          TEXT PRIMARY KEY,
       value        TEXT NOT NULL
+    )
+  ''';
+
+  static const _createSeatHistoryTable =
+      '''
+    CREATE TABLE IF NOT EXISTS $tSeatHistory (
+      id                TEXT PRIMARY KEY,
+      session_id        TEXT UNIQUE NOT NULL,
+      business_id       TEXT NOT NULL,
+      table_id          TEXT NOT NULL,
+      table_number      INTEGER NOT NULL,
+      section           TEXT NOT NULL,
+      seat_label        TEXT NOT NULL,
+      customer_name     TEXT,
+      guest_count       INTEGER NOT NULL DEFAULT 1,
+      check_in_time     TEXT NOT NULL,
+      check_out_time    TEXT,
+      duration_seconds  INTEGER,
+      status            TEXT NOT NULL DEFAULT 'active',
+      notes             TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT,
+      sync_status       TEXT NOT NULL DEFAULT 'pending'
     )
   ''';
 
@@ -504,6 +540,155 @@ class LocalDatabase {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  SEAT HISTORY OPERATIONS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> insertSeatHistory(Map<String, dynamic> data) async {
+    await db.insert(
+      tSeatHistory,
+      data,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    log('[LocalDB] Inserted seat history: ${data['session_id']}');
+  }
+
+  Future<void> updateSeatHistory(
+    String sessionId,
+    Map<String, dynamic> data,
+  ) async {
+    await db.update(
+      tSeatHistory,
+      data,
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+    );
+    log('[LocalDB] Updated seat history: $sessionId');
+  }
+
+  Future<Map<String, dynamic>?> getSeatHistoryBySessionId(
+    String sessionId,
+  ) async {
+    final results = await db.query(
+      tSeatHistory,
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    return results.isEmpty ? null : results.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getSeatHistoryByTableAndSeat({
+    required String tableId,
+    required String seatLabel,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    return db.query(
+      tSeatHistory,
+      where: 'table_id = ? AND seat_label = ?',
+      whereArgs: [tableId, seatLabel],
+      orderBy: 'check_in_time DESC',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getSeatHistoryByTable({
+    required String tableId,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    return db.query(
+      tSeatHistory,
+      where: 'table_id = ?',
+      whereArgs: [tableId],
+      orderBy: 'check_in_time DESC',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getSeatHistoryByCustomer({
+    required String businessId,
+    required String customerName,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    return db.query(
+      tSeatHistory,
+      where: 'business_id = ? AND customer_name = ?',
+      whereArgs: [businessId, customerName],
+      orderBy: 'check_in_time DESC',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getSeatHistoryByDate({
+    required String businessId,
+    required DateTime date,
+  }) async {
+    final dayStart = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    ).toUtc().toIso8601String();
+    final dayEnd = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      23,
+      59,
+      59,
+    ).toUtc().toIso8601String();
+
+    return db.query(
+      tSeatHistory,
+      where: 'business_id = ? AND check_in_time >= ? AND check_in_time <= ?',
+      whereArgs: [businessId, dayStart, dayEnd],
+      orderBy: 'check_in_time DESC',
+    );
+  }
+
+  Future<void> clearOldSeatHistory({
+    required String businessId,
+    required String beforeDate,
+  }) async {
+    await db.delete(
+      tSeatHistory,
+      where: 'business_id = ? AND check_in_time < ?',
+      whereArgs: [businessId, beforeDate],
+    );
+    log('[LocalDB] Cleared old seat history before $beforeDate');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  PENDING QUEUE FOR SYNC
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> addToPendingQueue({
+    required String entityType,
+    required String action,
+    required Map<String, dynamic> payload,
+  }) async {
+    final id =
+        'q_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.insert(tQueue, {
+      'id': id,
+      'entity_type': entityType,
+      'entity_id': payload['id'] ?? payload['session_id'] ?? 'unknown',
+      'action': action,
+      'payload': jsonEncode(payload),
+      'sync_status': syncPending,
+      'attempts': 0,
+      'created_at': now,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  CLOSE
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -523,6 +708,7 @@ class LocalDatabase {
       tInventory,
       tSuppliers,
       tProfile,
+      tSeatHistory,
     ];
     for (final t in tables) {
       await db.delete(t);

@@ -1,6 +1,6 @@
 // lib/models/order_modal.dart
 // Full Order model — Supabase-backed
-// v2: Added PaymentStatus, PaymentMode, bill fields
+// v3: Added sessionId field for session-scoped order isolation
 
 import 'package:flutter/material.dart';
 import 'package:pos_app/utils/ist_utils.dart';
@@ -265,8 +265,6 @@ extension OrderStatusExt on OrderStatus {
     }
   }
 
-  // ── v2: nextStatus is ONLY available after payment is confirmed ──
-  // The UI must check order.paymentStatus == paid before calling advance
   OrderStatus? get nextStatus {
     switch (this) {
       case OrderStatus.pending:
@@ -274,7 +272,7 @@ extension OrderStatusExt on OrderStatus {
       case OrderStatus.preparing:
         return OrderStatus.ready;
       case OrderStatus.ready:
-        return null; // must pay first to complete
+        return null;
       default:
         return null;
     }
@@ -453,7 +451,7 @@ class CartItem {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  ORDER  (Supabase-backed) — v2 with payment fields
+//  ORDER  (Supabase-backed) — v3 with sessionId
 // ══════════════════════════════════════════════════════════════
 
 class Order {
@@ -475,6 +473,9 @@ class Order {
   final int? tableNumber;
   final String? tableSeatId;
   final String? seatLabel;
+
+  // FIX: session_id for isolating orders per guest session
+  final String? sessionId;
 
   // Customer
   final String? customerName;
@@ -529,6 +530,7 @@ class Order {
     this.tableNumber,
     this.tableSeatId,
     this.seatLabel,
+    this.sessionId, // FIX: new field
     this.customerName,
     this.customerPhone,
     required this.subtotal,
@@ -559,12 +561,10 @@ class Order {
   bool get isPaid => paymentStatus == PaymentStatus.paid;
   bool get isUnpaid => paymentStatus == PaymentStatus.unpaid;
 
-  /// Grand total = subtotal + tax + tip - discount + roundOff
   double get grandTotal =>
       subtotal + taxAmount + tipAmount - discountAmount + roundOff;
 
   String get timeLabel {
-    // createdAt is already local (parsed via parseToIST in fromJson)
     final local = createdAt.toLocal();
     final now = DateTime.now();
     final diff = now.difference(local);
@@ -600,9 +600,7 @@ class Order {
       ),
       paymentMode: OrderPaymentModeExt.fromString(j['payment_mode'] as String?),
       paymentRef: j['payment_ref'] as String?,
-      paidAt: j['paid_at'] != null
-          ? parseToIST(j['paid_at'] as String)
-          : null,
+      paidAt: j['paid_at'] != null ? parseToIST(j['paid_at'] as String) : null,
       paidByUid: j['paid_by_uid'] as String?,
       paidByName: j['paid_by_name'] as String?,
       billGeneratedAt: j['bill_generated_at'] != null
@@ -613,6 +611,7 @@ class Order {
       tableNumber: j['table_number'] as int?,
       tableSeatId: j['table_seat_id'] as String?,
       seatLabel: j['seat_label'] as String?,
+      sessionId: j['session_id'] as String?, // FIX: parse session_id
       customerName: j['customer_name'] as String?,
       customerPhone: j['customer_phone'] as String?,
       subtotal: (j['subtotal'] as num? ?? 0).toDouble(),
@@ -661,6 +660,7 @@ class Order {
     DateTime? billGeneratedAt,
     String? tableSeatId,
     String? seatLabel,
+    String? sessionId,
     List<OrderItem>? items,
     double? tipAmount,
     double? discountAmount,
@@ -685,6 +685,7 @@ class Order {
     tableNumber: tableNumber,
     tableSeatId: tableSeatId ?? this.tableSeatId,
     seatLabel: seatLabel ?? this.seatLabel,
+    sessionId: sessionId ?? this.sessionId,
     customerName: customerName,
     customerPhone: customerPhone,
     subtotal: subtotal,

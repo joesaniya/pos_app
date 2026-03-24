@@ -303,7 +303,7 @@ BEGIN
     -- Complete this seat's orders
     IF v_old_session IS NOT NULL THEN
       UPDATE orders SET status = 'completed', completed_at = NOW(), updated_at = NOW()
-      WHERE table_id = p_table_id AND (session_id = v_old_session OR table_seat_id = p_seat_id)
+      WHERE table_seat_id = p_seat_id
         AND status IN ('pending', 'preparing', 'ready');
       GET DIAGNOSTICS v_orders_closed = ROW_COUNT;
     END IF;

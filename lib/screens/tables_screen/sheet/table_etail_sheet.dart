@@ -1,8 +1,10 @@
 import 'dart:developer';
 
 import 'package:flutter/material.dart';
+import 'package:pos_app/models/order_modal.dart';
 import 'package:pos_app/models/table_modal.dart';
 import 'package:pos_app/providers/tables_provider.dart';
+import 'package:pos_app/repositories/orders_repository.dart';
 import 'package:pos_app/screens/tables_screen/table_theme.dart';
 import 'package:pos_app/services/reservation_notification_service.dart';
 import 'package:pos_app/utils/ist_utils.dart';
@@ -306,74 +308,41 @@ class _OccupiedSectionState extends State<OccupiedSection> {
     });
 
     try {
-      final orderRows = await _db
-          .from('orders')
-          .select(
-            'id, order_number, status, subtotal, tax_amount, '
-            'total_amount, notes, created_at, created_by_name, table_seat_id',
-          )
-          .eq('table_id', widget.table.id)
-          .inFilter('status', ['pending', 'preparing', 'ready'])
-          .order('created_at', ascending: true);
+      final businessId = widget.prov.businessId;
+      final orders = await OrdersRepository.instance.fetchTableOrders(
+        tableId: widget.table.id,
+        businessId: businessId,
+      );
 
-      final List<_OrderSummary> summaries = [];
-
-      for (final o in (orderRows as List)) {
-        final oid = o['id'] as String;
-
-        final itemRows = await _db
-            .from('order_items')
-            .select(
-              'id, item_name, quantity, item_price, subtotal, '
-              'is_veg, category_name, notes',
-            )
-            .eq('order_id', oid)
-            .order('created_at', ascending: true);
-
-        final items = (itemRows as List)
-            .map(
-              (i) => _OrderItem(
-                id: i['id'] as String? ?? '',
-                name: i['item_name'] as String? ?? '—',
-                quantity: (i['quantity'] as int? ?? 1),
-                unitPrice: (i['item_price'] as num? ?? 0).toDouble(),
-                subtotal: (i['subtotal'] as num? ?? 0).toDouble(),
-                isVeg: i['is_veg'] as bool? ?? true,
-                category: i['category_name'] as String?,
-                notes: i['notes'] as String?,
-              ),
-            )
-            .toList();
-
-        // Resolve seat label from the table's seats list
-        final orderSeatId = o['table_seat_id'] as String?;
-        String? seatLabel;
-        if (orderSeatId != null) {
-          try {
-            final seat = widget.table.seats.firstWhere((s) => s.id == orderSeatId);
-            seatLabel = seat.seatLabel;
-          } catch (_) {
-            seatLabel = null;
-          }
-        }
-
-        summaries.add(
-          _OrderSummary(
-            id: oid,
-            orderNumber: (o['order_number'] as int? ?? 0),
-            status: o['status'] as String? ?? 'pending',
-            subtotal: (o['subtotal'] as num? ?? 0).toDouble(),
-            taxAmount: (o['tax_amount'] as num? ?? 0).toDouble(),
-            total: (o['total_amount'] as num? ?? 0).toDouble(),
-            notes: o['notes'] as String?,
-            tableSeatId: orderSeatId,
-            seatLabel: seatLabel,
-            createdByName: o['created_by_name'] as String? ?? 'Staff',
-            createdAt: parseToIST(o['created_at'] as String),
-            items: items,
-          ),
+      final List<_OrderSummary> summaries = orders.map((o) {
+        return _OrderSummary(
+          id: o.id,
+          orderNumber: o.orderNumber,
+          status: o.status.value,
+          subtotal: o.subtotal,
+          taxAmount: o.taxAmount,
+          total: o.totalAmount,
+          notes: o.notes,
+          tableSeatId: o.tableSeatId,
+          seatLabel: o.seatLabel,
+          createdByName: o.createdByName,
+          createdAt: o.createdAt,
+          items: o.items
+              .map(
+                (i) => _OrderItem(
+                  id: i.id,
+                  name: i.itemName,
+                  quantity: i.quantity,
+                  unitPrice: i.itemPrice,
+                  subtotal: i.subtotal,
+                  isVeg: i.isVeg,
+                  category: i.categoryName,
+                  notes: i.notes,
+                ),
+              )
+              .toList(),
         );
-      }
+      }).toList();
 
       _recalc(summaries);
 
@@ -657,11 +626,12 @@ class _OccupiedSectionState extends State<OccupiedSection> {
             ),
           ),
           const SizedBox(height: 8),
-          ...widget.table.occupiedSeats.map((seat) =>
-            Padding(
+          ...widget.table.occupiedSeats.map(
+            (seat) => Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: ActionBtn(
-                label: 'Clear Seat ${seat.seatLabel} (${seat.customerName ?? 'Guest'})',
+                label:
+                    'Clear Seat ${seat.seatLabel} (${seat.customerName ?? 'Guest'})',
                 emoji: '🪑',
                 color: TC.cleaning,
                 outlined: true,
@@ -697,6 +667,7 @@ class _OrderCard extends StatelessWidget {
   final _OrderSummary order;
   final Color stColor, stBg;
   final String stEmoji;
+
   /// Called when staff taps "Checkout Seat" on a seat-level order.
   /// Null = no per-seat checkout button (whole-table or already checked out).
   final VoidCallback? onCheckoutSeat;
@@ -756,7 +727,10 @@ class _OrderCard extends StatelessWidget {
                           if (order.seatLabel != null) ...[
                             const SizedBox(width: 6),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFE0F0FF),
                                 borderRadius: BorderRadius.circular(5),
@@ -1746,7 +1720,9 @@ class AvailableSection extends StatelessWidget {
         table.id,
         'Walk-in Guest',
         isWalkIn: true,
-        seatIds: selectedSeats != null && selectedSeats.isNotEmpty ? selectedSeats : null,
+        seatIds: selectedSeats != null && selectedSeats.isNotEmpty
+            ? selectedSeats
+            : null,
       );
 
       if (result.success) {
@@ -1760,10 +1736,12 @@ class AvailableSection extends StatelessWidget {
     } else {
       Navigator.pop(context);
       await prov.seatGuests(
-        table.id, 
-        'Walk-in Guest', 
+        table.id,
+        'Walk-in Guest',
         isWalkIn: true,
-        seatIds: selectedSeats != null && selectedSeats.isNotEmpty ? selectedSeats : null,
+        seatIds: selectedSeats != null && selectedSeats.isNotEmpty
+            ? selectedSeats
+            : null,
       );
     }
   }

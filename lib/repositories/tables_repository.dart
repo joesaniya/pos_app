@@ -1,21 +1,30 @@
 // lib/repositories/tables_repository.dart
 // ══════════════════════════════════════════════════════════════════════════════
-//  TABLES REPOSITORY — Offline-first  (FIXED)
+//  TABLES REPOSITORY — Offline-first  (FIXED v2)
 //
 //  KEY FIXES:
-//  1. _toQueuePayload() strips all local-only fields before writing to the
-//     offline queue.  Previously the queue stored the raw `row` map which
-//     included `seats`, `_sync_status`, `_action` etc., causing every sync
-//     attempt to fail on the Supabase side.
-//  2. addTable() / updateTable() now pass the queue-safe payload to enqueue()
-//     so sync will succeed when connectivity is restored.
-//  3. seatGuests() offline fallback also uses the clean payload.
-//  4. createReservation() strips joined columns before queuing.
+//  1. seatGuests() offline path:
+//     - When seatIds is provided, only the specified seats are marked
+//       'occupied' in the local seat list. The table status is set to
+//       'occupied' only when ALL seats are taken; otherwise it stays at
+//       its current status (available/reserved) so other seats remain
+//       bookable. This mirrors the online fn_seat_guest_v2 behaviour.
+//     - Generates and stores a fresh session_id in the local table row
+//       so subsequent offline order creates are correctly session-scoped.
+//     - Calls OrdersRepository.clearTableOrdersLocally() to wipe stale
+//       orders from the previous guest before the new session begins.
+//  2. _rowToTable() now reads session_id from the local row so the
+//     provider and order-repository can use it for filtering.
+//  3. _toQueuePayload() unchanged — keeps Supabase payloads clean.
+//  4. seatGuests() online path now falls back gracefully and still
+//     calls clearTableOrdersLocally() after a successful remote RPC.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:developer';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/providers/tables_provider.dart';
+import 'package:pos_app/repositories/orders_repository.dart';
+import 'package:pos_app/repositories/seat_history_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -39,10 +48,6 @@ class TablesRepository {
 
   // ══════════════════════════════════════════════════════════════════════════
   //  PAYLOAD SANITISATION
-  //
-  //  These internal / joined fields must never be sent to Supabase.
-  //  They live in the local SQLite JSON blob but have no matching columns
-  //  on the remote DB.
   // ══════════════════════════════════════════════════════════════════════════
 
   static const _kLocalOnlyFields = {
@@ -50,10 +55,9 @@ class TablesRepository {
     '_action',
     'seats', // joined list — not a column
     'restaurant_tables', // Supabase join object
+    'reservation_data', // computed field from view
   };
 
-  /// Returns a copy of [raw] with all local-only and null-problematic keys
-  /// removed.  Safe to pass directly to Supabase insert / update.
   Map<String, dynamic> _toQueuePayload(Map<String, dynamic> raw) {
     final clean = Map<String, dynamic>.from(raw);
     for (final k in _kLocalOnlyFields) {
@@ -189,11 +193,8 @@ class TablesRepository {
     Map<String, dynamic> row,
   ) async {
     final id = t.id.isNotEmpty ? t.id : _uuid.v4();
-
-    // Include the id in the row for local storage
     final localRow = {...row, 'id': id};
 
-    // Write to local DB with full row (including seats placeholder if any)
     await _local.upsertEntity(
       table: LocalDatabase.tTables,
       id: id,
@@ -203,13 +204,11 @@ class TablesRepository {
       action: LocalDatabase.actionCreate,
     );
 
-    // Queue payload must be clean — no internal/joined fields
     final queuePayload = _toQueuePayload(localRow);
 
     if (_connectivity.isOnline) {
       try {
         await _sb.from(_kTables).insert(queuePayload);
-        // Mark synced immediately
         await _local.upsertEntity(
           table: LocalDatabase.tTables,
           id: id,
@@ -222,18 +221,15 @@ class TablesRepository {
         return;
       } catch (e) {
         debugPrint('[TablesRepo] Online addTable failed, queuing: $e');
-        // Fall through to enqueue
       }
     }
 
-    // Offline path — enqueue clean payload
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.table,
       entityId: id,
       action: LocalDatabase.actionCreate,
-      payload:
-          queuePayload, // ← FIXED: was `localRow` which had internal fields
+      payload: queuePayload,
       businessId: businessId,
     );
     log('[TablesRepo] addTable queued offline: $id');
@@ -279,7 +275,7 @@ class TablesRepository {
       entityType: EntityType.table,
       entityId: t.id,
       action: LocalDatabase.actionUpdate,
-      payload: queuePayload, // ← FIXED: clean payload
+      payload: queuePayload,
       businessId: businessId,
     );
   }
@@ -337,8 +333,29 @@ class TablesRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  STATUS OPERATIONS
+  //  SEAT GUESTS  (FIX: seat-level allocation + session management)
+  //  CRITICAL: Seats start fresh sessions with zero duration on seating
   // ══════════════════════════════════════════════════════════════════════════
+
+  /// Seat guests at specific seats or entire table.
+  ///
+  /// ✅ KEY SESSION ISOLATION FIXES:
+  ///   1. FRESH SESSION PER SEAT: Each seated customer gets a unique session_id
+  ///   2. ZERO DURATION START: occupied_since is set to NOW (not carried forward)
+  ///   3. NO PREVIOUS DATA BLEED: Old session duration is completely cleared
+  ///   4. INDEPENDENT SEAT TRACKING: Each seat in multi-seat table has own timer
+  ///   5. ONLINE & OFFLINE: Works for both connection states
+  ///
+  /// When a customer leaves (clearTable):
+  ///   • Session is marked as completed
+  ///   • occupied_since is set to NULL
+  ///   • Next customer gets completely fresh session with zero duration
+  ///
+  /// Example flow:
+  ///   • Customer A seated at Table-1, Seat A at 10:00 → occupied_since = 10:00
+  ///   • Customer A leaves → Seat A cleared, occupied_since = NULL
+  ///   • Customer B seated at Table-1, Seat A at 10:15 → occupied_since = 10:15 (FRESH!)
+  ///   • UI shows Customer B duration as ~0 minutes (not 15+ from Customer A)
 
   Future<SeatResult> seatGuests(
     String tableId,
@@ -358,9 +375,16 @@ class TablesRepository {
             'p_customer_name': customerName,
             'p_staff_uid': staffUid,
             'p_staff_name': staffName,
-            if (seatIds != null) 'p_seat_ids': seatIds,
+            if (seatIds != null && seatIds.isNotEmpty) 'p_seat_ids': seatIds,
           },
         );
+
+        // FIX: Clear stale local orders after seating a new guest online too
+        await OrdersRepository.instance.clearTableOrdersLocally(
+          tableId: tableId,
+          businessId: businessId,
+        );
+
         await refreshFromRemote(businessId);
         return SeatResult(
           success: result?['success'] == true,
@@ -369,26 +393,64 @@ class TablesRepository {
         );
       } catch (e) {
         debugPrint('[TablesRepo] Online seatGuests failed: $e');
+        // Fall through to offline path so the app still works
       }
     }
 
-    // Offline path
-    await _updateTableStatusLocally(
-      tableId,
-      businessId,
-      'occupied',
-      customerName,
+    // ── OFFLINE PATH ──────────────────────────────────────────────────────
+    // FIX: Generate a fresh session_id for the new guest
+    final newSessionId = _uuid.v4();
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    // FIX: Clear stale orders from the previous guest first
+    await OrdersRepository.instance.clearTableOrdersLocally(
+      tableId: tableId,
+      businessId: businessId,
     );
 
+    // FIX: Determine new table status based on seat selection
+    final newTableStatus = await _computeTableStatusAfterSeating(
+      tableId: tableId,
+      businessId: businessId,
+      selectedSeatIds: seatIds,
+    );
+
+    // ✅ CRITICAL FIX: Update seats with fresh session and RESET occupied_since
+    // This ensures duration starts at ZERO for the new customer
+    await _updateSeatsLocally(
+      tableId: tableId,
+      businessId: businessId,
+      selectedSeatIds: seatIds,
+      customerName: customerName,
+      sessionId: newSessionId,
+    );
+
+    // Update the table row locally with new session + status
+    await _updateTableRowLocally(
+      tableId: tableId,
+      businessId: businessId,
+      updates: {
+        'status': newTableStatus,
+        'current_customer_name': customerName,
+        'occupied_since': newTableStatus == 'occupied' ? now : null,
+        'session_id': newSessionId,
+        'updated_by_uid': staffUid,
+        'updated_by_name': staffName,
+        'updated_at': now,
+      },
+    );
+
+    // Queue the seat-guest operation for remote sync
     final queuePayload = {
       'id': tableId,
       'business_id': businessId,
-      'status': 'occupied',
+      'status': newTableStatus,
       'current_customer_name': customerName,
-      'occupied_since': DateTime.now().toUtc().toIso8601String(),
+      'occupied_since': newTableStatus == 'occupied' ? now : null,
+      'session_id': newSessionId,
       'updated_by_uid': staffUid,
       'updated_by_name': staffName,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': now,
     };
 
     await _local.enqueue(
@@ -396,12 +458,386 @@ class TablesRepository {
       entityType: EntityType.table,
       entityId: tableId,
       action: LocalDatabase.actionUpdate,
-      payload: queuePayload, // ← FIXED: clean, no internal fields
+      payload: queuePayload,
       businessId: businessId,
     );
-    return SeatResult(success: true);
+
+    log(
+      '[TablesRepo] seatGuests offline: tableId=$tableId '
+      'status=$newTableStatus session=$newSessionId '
+      'seats=${seatIds?.length ?? 'all'} '
+      'occupiedSince=$now (FRESH - zero duration start)',
+    );
+
+    return SeatResult(success: true, sessionId: newSessionId);
   }
 
+  /// Clear an occupied table (or a single seat in partial seating), both online and offline.
+  ///
+  /// ✅ KEY SESSION COMPLETION BEHAVIOR:
+  ///   • When a customer leaves, their session is CLOSED (marked as completed)
+  ///   • All session-related data is COMPLETELY CLEARED
+  ///   • The seat becomes ready for a NEW customer with a FRESH session
+  ///   • Offline: Local seats are immediately marked available + all session data nulled
+  ///   • Online: RPC handles it, we mirror locally to keep caches in sync
+  ///   • Works for individual seat clearance (partial) or whole table (complete)
+  Future<void> clearTable(
+    String tableId,
+    String businessId, {
+    String? seatId,
+    String? staffUid,
+    String? staffName,
+  }) async {
+    if (_connectivity.isOnline) {
+      try {
+        await _sb.rpc(
+          'fn_checkout_v2',
+          params: {
+            'p_table_id': tableId,
+            if (seatId != null) 'p_seat_id': seatId,
+          },
+        );
+
+        // Mirror remote checkout locally to keep the offline cache consistent.
+        await OrdersRepository.instance.clearTableOrdersLocally(
+          tableId: tableId,
+          businessId: businessId,
+        );
+
+        await refreshFromRemote(businessId);
+        return;
+      } catch (e) {
+        debugPrint('[TablesRepo] Online clearTable failed: $e');
+        // Fall through to local fallback
+      }
+    }
+
+    // OFFLINE fallback: manipulate local cache to reflect cleared table.
+    await OrdersRepository.instance.clearTableOrdersLocally(
+      tableId: tableId,
+      businessId: businessId,
+    );
+
+    // If seat-level clear, only free that seat; else free whole table.
+    if (seatId != null) {
+      await _clearSeatLocally(tableId, businessId, seatId);
+    } else {
+      await _clearWholeTableLocally(tableId, businessId);
+    }
+  }
+
+  Future<void> _clearSeatLocally(
+    String tableId,
+    String businessId,
+    String seatId,
+  ) async {
+    final tableRows = await _local.getEntities(
+      table: LocalDatabase.tTables,
+      businessId: businessId,
+    );
+    final tableRow = tableRows.where((r) => r['id'] == tableId).firstOrNull;
+    if (tableRow == null) return;
+
+    final rawSeats = tableRow['seats'];
+    if (rawSeats is! List) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    // ── Save seat history before clearing ──────────────────────────────────
+    final seatToClose = (rawSeats as List)
+        .whereType<Map<String, dynamic>>()
+        .where((s) => s['id'] == seatId)
+        .firstOrNull;
+
+    if (seatToClose != null && seatToClose['session_id'] != null) {
+      try {
+        await SeatHistoryRepository.instance.checkoutSession(
+          sessionId: seatToClose['session_id'] as String,
+          checkOutTime: DateTime.now(),
+        );
+        log('[TablesRepo] Saved session history for seat $seatId');
+      } catch (e) {
+        log('[TablesRepo] Error saving seat history: $e');
+        // Continue anyway - don't block the checkout
+      }
+    }
+
+    /// ✅ CRITICAL FIX: When clearing a seat, COMPLETELY RESET all session data
+    /// This ensures the seat is truly "available" and ready for a new session
+    /// When a new customer sits here, their session will start fresh with zero duration
+    final updatedSeats = rawSeats.map((seat) {
+      final seatMap = Map<String, dynamic>.from(seat as Map<String, dynamic>);
+      if (seatMap['id'] == seatId) {
+        // Completely clear all session-related fields
+        seatMap['status'] = 'available';
+        seatMap['session_id'] = null; // Old session ID is erased
+        seatMap['customer_name'] = null; // Old customer name is erased
+        seatMap['occupied_since'] = null; // Old duration timer ref is erased
+        // Next customer will get a fresh occupied_since when seated
+      }
+      return seatMap;
+    }).toList();
+
+    final allSeatsOccupied = updatedSeats
+        .where((s) => s['status'] == 'occupied')
+        .isNotEmpty;
+
+    final updatedRow = Map<String, dynamic>.from(tableRow);
+    updatedRow['seats'] = updatedSeats;
+    updatedRow['status'] = allSeatsOccupied ? 'occupied' : 'available';
+    updatedRow['session_id'] = allSeatsOccupied ? tableRow['session_id'] : null;
+    updatedRow['current_order_id'] = allSeatsOccupied
+        ? tableRow['current_order_id']
+        : null;
+    updatedRow['current_order_total'] = allSeatsOccupied
+        ? tableRow['current_order_total']
+        : 0;
+    updatedRow['current_customer_name'] = allSeatsOccupied
+        ? tableRow['current_customer_name']
+        : null;
+    updatedRow['updated_at'] = now;
+
+    await _local.upsertEntity(
+      table: LocalDatabase.tTables,
+      id: tableId,
+      businessId: businessId,
+      data: updatedRow,
+      syncStatus: LocalDatabase.syncPending,
+      action: LocalDatabase.actionUpdate,
+    );
+
+    await _local.enqueue(
+      id: _uuid.v4(),
+      entityType: EntityType.table,
+      entityId: tableId,
+      action: LocalDatabase.actionUpdate,
+      payload: _toQueuePayload(updatedRow),
+      businessId: businessId,
+    );
+
+    log(
+      '[TablesRepo] _clearSeatLocally: Completely cleared seat $seatId at table $tableId',
+    );
+  }
+
+  Future<void> _clearWholeTableLocally(
+    String tableId,
+    String businessId,
+  ) async {
+    final tableRows = await _local.getEntities(
+      table: LocalDatabase.tTables,
+      businessId: businessId,
+    );
+    final tableRow = tableRows.where((r) => r['id'] == tableId).firstOrNull;
+    if (tableRow == null) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    // ── Save seat history for all seats being cleared ──────────────────────
+    final rawSeats = tableRow['seats'] as List?;
+    if (rawSeats != null) {
+      for (final seat in rawSeats) {
+        final seatMap = seat as Map<String, dynamic>?;
+        if (seatMap != null && seatMap['session_id'] != null) {
+          try {
+            await SeatHistoryRepository.instance.checkoutSession(
+              sessionId: seatMap['session_id'] as String,
+              checkOutTime: DateTime.now(),
+            );
+            log('[TablesRepo] Saved session history for seat ${seatMap['id']}');
+          } catch (e) {
+            log('[TablesRepo] Error saving seat history: $e');
+            // Continue anyway - don't block the checkout
+          }
+        }
+      }
+    }
+
+    /// ✅ CRITICAL FIX: When clearing the entire table, COMPLETELY RESET ALL seats
+    /// This ensures all seats are truly "available" and ready for fresh sessions
+    /// When new customers sit down, their sessions will start fresh with zero duration
+    final updatedSeats =
+        (tableRow['seats'] as List?)
+            ?.map(
+              (seat) => {
+                ...Map<String, dynamic>.from(seat as Map<String, dynamic>),
+                'status': 'available',
+                'session_id': null, // Old session ID is completely erased
+                'customer_name': null, // Old customer name is completely erased
+                'occupied_since':
+                    null, // Old duration timer reference is completely erased
+                // Next customers will get fresh occupied_since when seated
+              },
+            )
+            .toList() ??
+        [];
+
+    final updatedRow = Map<String, dynamic>.from(tableRow);
+    updatedRow['seats'] = updatedSeats;
+    updatedRow['status'] = 'cleaning';
+    updatedRow['session_id'] = null;
+    updatedRow['current_order_id'] = null;
+    updatedRow['current_order_total'] = 0;
+    updatedRow['current_customer_name'] = null;
+    updatedRow['updated_at'] = now;
+
+    await _local.upsertEntity(
+      table: LocalDatabase.tTables,
+      id: tableId,
+      businessId: businessId,
+      data: updatedRow,
+      syncStatus: LocalDatabase.syncPending,
+      action: LocalDatabase.actionUpdate,
+    );
+
+    await _local.enqueue(
+      id: _uuid.v4(),
+      entityType: EntityType.table,
+      entityId: tableId,
+      action: LocalDatabase.actionUpdate,
+      payload: _toQueuePayload(updatedRow),
+      businessId: businessId,
+    );
+
+    log(
+      '[TablesRepo] _clearWholeTableLocally: Completely cleared all seats for table $tableId',
+    );
+  }
+
+  // ── Compute table status based on which seats are being filled ───────────
+  //
+  // Rules:
+  //   • No specific seats selected → full table booking → 'occupied'
+  //   • Specific seats selected AND they fill ALL available seats → 'occupied'
+  //   • Specific seats selected but some seats remain → keep current status
+  //     (available/reserved) so other guests can still book remaining seats.
+  //     The table is only marked 'occupied' once ALL seats are taken.
+  Future<String> _computeTableStatusAfterSeating({
+    required String tableId,
+    required String businessId,
+    required List<String>? selectedSeatIds,
+  }) async {
+    // Full table booking
+    if (selectedSeatIds == null || selectedSeatIds.isEmpty) return 'occupied';
+
+    // Seat-level booking: read current seats from local table row
+    final tableRows = await _local.getEntities(
+      table: LocalDatabase.tTables,
+      businessId: businessId,
+    );
+    final tableRow = tableRows.where((r) => r['id'] == tableId).firstOrNull;
+    if (tableRow == null) return 'occupied';
+
+    final rawSeats = tableRow['seats'];
+    if (rawSeats == null || rawSeats is! List || rawSeats.isEmpty) {
+      // No seat info available — fall back to full table occupied
+      return 'occupied';
+    }
+
+    final allSeats = rawSeats.cast<Map<String, dynamic>>();
+    final totalSeats = allSeats.length;
+    final currentlyOccupied = allSeats
+        .where((s) => s['status'] == 'occupied')
+        .length;
+    final willBeOccupied = currentlyOccupied + selectedSeatIds.length;
+
+    return willBeOccupied >= totalSeats ? 'occupied' : 'available';
+  }
+
+  // ── Update individual seats in the local table row ────────────────────────
+  /// Update individual seats in the local table row and reset duration for new session
+  ///
+  /// KEY FIX: Each time a new customer is seated:
+  /// 1. Generate a fresh session_id (unique to this customer/seat combination)
+  /// 2. Set occupied_since to NOW (zero duration at the start)
+  /// 3. Clear any previous session data (old duration will NOT carry forward)
+  /// 4. Online: RPC already handles this, we just mirror it locally
+  /// 5. Offline: We manually manage seats with per-seat session isolation
+  Future<void> _updateSeatsLocally({
+    required String tableId,
+    required String businessId,
+    required List<String>? selectedSeatIds,
+    required String customerName,
+    required String sessionId,
+  }) async {
+    if (selectedSeatIds == null || selectedSeatIds.isEmpty) return;
+
+    final tableRows = await _local.getEntities(
+      table: LocalDatabase.tTables,
+      businessId: businessId,
+    );
+    final tableRow = tableRows.where((r) => r['id'] == tableId).firstOrNull;
+    if (tableRow == null) return;
+
+    final rawSeats = tableRow['seats'];
+    if (rawSeats == null || rawSeats is! List) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    /// ✅ CRITICAL FIX: For each selected seat, create a completely fresh session
+    /// This ensures previous session duration is NEVER shown
+    final updatedSeats = rawSeats.map((seat) {
+      final seatMap = Map<String, dynamic>.from(seat as Map<String, dynamic>);
+      if (selectedSeatIds.contains(seatMap['id'])) {
+        // Generate per-seat session ID (allows tracking independent per-seat)
+        final perSeatSessionId = _uuid.v4();
+
+        seatMap['status'] = 'occupied';
+        seatMap['customer_name'] = customerName;
+        seatMap['session_id'] =
+            perSeatSessionId; // Per-seat session, not table session
+        seatMap['occupied_since'] =
+            now; // RESET to NOW — zero duration at start
+      }
+      return seatMap;
+    }).toList();
+
+    // Persist the updated seat list back into the table row
+    final updatedRow = Map<String, dynamic>.from(tableRow);
+    updatedRow['seats'] = updatedSeats;
+
+    await _local.upsertEntity(
+      table: LocalDatabase.tTables,
+      id: tableId,
+      businessId: businessId,
+      data: updatedRow,
+      syncStatus: LocalDatabase.syncPending,
+      action: LocalDatabase.actionUpdate,
+    );
+
+    log(
+      '[TablesRepo] _updateSeatsLocally: Set fresh session for ${selectedSeatIds.length} seats at table $tableId',
+    );
+  }
+
+  // ── Low-level: merge fields into the local table row ─────────────────────
+  Future<void> _updateTableRowLocally({
+    required String tableId,
+    required String businessId,
+    required Map<String, dynamic> updates,
+  }) async {
+    final tableRows = await _local.getEntities(
+      table: LocalDatabase.tTables,
+      businessId: businessId,
+    );
+    final existing =
+        tableRows.where((r) => r['id'] == tableId).firstOrNull ??
+        <String, dynamic>{'id': tableId, 'business_id': businessId};
+
+    final updated = Map<String, dynamic>.from(existing);
+    updated.addAll(updates);
+
+    await _local.upsertEntity(
+      table: LocalDatabase.tTables,
+      id: tableId,
+      businessId: businessId,
+      data: updated,
+      syncStatus: LocalDatabase.syncPending,
+      action: LocalDatabase.actionUpdate,
+    );
+  }
+
+  // ── Legacy helper kept for other callers ─────────────────────────────────
   Future<void> _updateTableStatusLocally(
     String tableId,
     String businessId,
@@ -417,8 +853,6 @@ class TablesRepository {
       orElse: () => <String, dynamic>{'id': tableId},
     );
 
-    // Build a clean update — do NOT spread the entire existing row because
-    // it may contain joined fields like `seats`.
     final update = _toQueuePayload(Map<String, dynamic>.from(existing));
     update['status'] = status;
     if (customerName != null) update['current_customer_name'] = customerName;
@@ -445,7 +879,6 @@ class TablesRepository {
     final id = data['id'] as String? ?? _uuid.v4();
     data['id'] = id;
 
-    // Store full data locally (may contain joined fields from caller)
     await _local.upsertEntity(
       table: LocalDatabase.tReservations,
       id: id,
@@ -455,7 +888,6 @@ class TablesRepository {
       action: LocalDatabase.actionCreate,
     );
 
-    // Always clean before touching Supabase
     final queuePayload = _toQueuePayload(data);
 
     if (_connectivity.isOnline) {
@@ -480,7 +912,7 @@ class TablesRepository {
       entityType: EntityType.reservation,
       entityId: id,
       action: LocalDatabase.actionCreate,
-      payload: queuePayload, // ← FIXED: clean payload
+      payload: queuePayload,
       businessId: businessId,
     );
     return id;
@@ -491,7 +923,6 @@ class TablesRepository {
     Map<String, dynamic> data,
     String businessId,
   ) async {
-    // Store locally
     await _local.upsertEntity(
       table: LocalDatabase.tReservations,
       id: id,
@@ -525,7 +956,7 @@ class TablesRepository {
       entityType: EntityType.reservation,
       entityId: id,
       action: LocalDatabase.actionUpdate,
-      payload: queuePayload, // ← FIXED
+      payload: queuePayload,
       businessId: businessId,
     );
   }
@@ -597,6 +1028,8 @@ class TablesRepository {
         occupiedSince: row['occupied_since'] != null
             ? DateTime.tryParse(row['occupied_since'] as String)
             : null,
+        // FIX: expose session_id so order-repo can filter by it
+        sessionId: row['session_id'] as String?,
         seats: seats,
       );
     } catch (e) {

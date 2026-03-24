@@ -1,5 +1,29 @@
-// lib/services/orders_service.dart
-// v2: Added confirmPayment() — the only way to complete an order
+// lib/services/order_service.dart (fetchTableOrders fix only)
+// ══════════════════════════════════════════════════════════════════════════════
+//  PATCH: Replace only the fetchTableOrders() method in your existing
+//  OrdersService class with this version.
+//
+//  FIX 1: fetchTableOrders() now uses fn_table_orders_v2 RPC which
+//  applies session_id isolation — only the current guest's orders
+//  are returned. Falls back to a direct query if the RPC doesn't
+//  exist yet (safe during migration).
+//
+//  FIX 2: createOrder() partial-seat path no longer marks the whole
+//  table as 'occupied' unless ALL seats are now occupied. This matches
+//  the new fn_seat_guest_v2 server behaviour.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─── DROP-IN REPLACEMENT for fetchTableOrders() ──────────────────────────────
+//
+//   Future<List<Order>> fetchTableOrders({
+//     required String tableId,
+//     required String businessId,
+//   }) async { ... }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Paste the full updated class below into lib/services/order_service.dart,
+// replacing the existing file content.
 
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
@@ -10,6 +34,32 @@ class OrdersService {
   static final instance = OrdersService._();
 
   final _db = Supabase.instance.client;
+
+  // ══════════════════════════════════════════════════════════
+  //  ORDER NUMBER SEQUENCE
+  //  Ensures order_number increments for each business when creating orders.
+  Future<int> _getNextOrderNumber(String businessId) async {
+    try {
+      final latest = await _db
+          .from('orders')
+          .select('order_number')
+          .eq('business_id', businessId)
+          .order('order_number', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (latest is Map<String, dynamic>) {
+        final raw = latest['order_number'];
+        if (raw != null) {
+          return (raw as num).toInt() + 1;
+        }
+      }
+    } catch (e) {
+      debugPrint('[OrdersService] _getNextOrderNumber error: $e');
+    }
+
+    return 1;
+  }
 
   // ══════════════════════════════════════════════════════════
   //  FETCH ORDERS
@@ -69,11 +119,43 @@ class OrdersService {
         .toList();
   }
 
+  // ── FIX: session-aware table orders ────────────────────────────────────────
   Future<List<Order>> fetchTableOrders({
     required String tableId,
     required String businessId,
   }) async {
-    final data = await _db
+    // Try the new session-aware RPC first (available after migration v8)
+    try {
+      final rpcData = await _db.rpc(
+        'fn_table_orders_v2',
+        params: {'p_table_id': tableId},
+      );
+      if (rpcData != null) {
+        return (rpcData as List)
+            .map((j) => Order.fromJson(j as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (rpcError) {
+      // RPC not deployed yet — fall back to direct query with session filter
+      debugPrint(
+        '[OrdersService] fn_table_orders_v2 not found, using fallback: $rpcError',
+      );
+    }
+
+    // ── Fallback: direct query with session_id isolation ────────────────────
+    // Step 1: get the current session_id from the table
+    String? currentSession;
+    try {
+      final tableRow = await _db
+          .from('restaurant_tables')
+          .select('session_id')
+          .eq('id', tableId)
+          .maybeSingle();
+      currentSession = tableRow?['session_id'] as String?;
+    } catch (_) {}
+
+    // Step 2: query active orders, filter by session
+    var query = _db
         .from('vw_orders_with_items')
         .select()
         .eq('business_id', businessId)
@@ -81,9 +163,23 @@ class OrdersService {
         .inFilter('status', ['pending', 'preparing', 'ready'])
         .order('created_at', ascending: true);
 
-    return (data as List)
+    final data = await query;
+    final allOrders = (data as List)
         .map((j) => Order.fromJson(j as Map<String, dynamic>))
         .toList();
+
+    // Step 3: filter by session_id if we have one
+    if (currentSession != null && currentSession.isNotEmpty) {
+      return allOrders.where((o) {
+        // Include orders that match the current session OR have no session
+        // (legacy orders created before session_id was added)
+        return o.sessionId == null ||
+            o.sessionId!.isEmpty ||
+            o.sessionId == currentSession;
+      }).toList();
+    }
+
+    return allOrders;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -106,7 +202,7 @@ class OrdersService {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  CREATE ORDER
+  //  CREATE ORDER  (FIX: seat-level table status)
   // ══════════════════════════════════════════════════════════
 
   Future<Order> createOrder({
@@ -126,7 +222,6 @@ class OrdersService {
     double taxRate = 5.0,
   }) async {
     // ── DUPLICATE ORDER GUARD ────────────────────────────────────────────────
-    // Guard A: Per-seat orders — check for an existing active order on that seat.
     if (tableSeatId != null && tableSeatId.isNotEmpty) {
       final existing = await _db
           .from('orders')
@@ -142,9 +237,6 @@ class OrdersService {
       }
     }
 
-    // Guard B: Whole-table dine-in orders — check for an existing active
-    // order on the table that has no seat ID assigned (same level of order).
-    // This prevents duplicate whole-table orders from double-taps.
     if (tableId != null &&
         orderType == OrderType.dineIn &&
         (tableSeatId == null || tableSeatId.isEmpty)) {
@@ -163,7 +255,7 @@ class OrdersService {
       }
     }
 
-    // ── SEAT LABEL LOOKUP (for per-seat orders) ─────────────────────────────
+    // ── SEAT LABEL LOOKUP ───────────────────────────────────────────────────
     String? seatLabel;
     if (tableSeatId != null && tableSeatId.isNotEmpty) {
       try {
@@ -173,40 +265,72 @@ class OrdersService {
             .eq('id', tableSeatId)
             .maybeSingle();
         seatLabel = seatRow?['seat_label'] as String?;
-      } catch (_) {
-        // non-fatal: proceed without seat label
-      }
+      } catch (_) {}
+    }
+
+    // ── GET CURRENT SESSION ID ──────────────────────────────────────────────
+    String? sessionId;
+    if (tableId != null) {
+      try {
+        final tableRow = await _db
+            .from('restaurant_tables')
+            .select('session_id')
+            .eq('id', tableId)
+            .maybeSingle();
+        sessionId = tableRow?['session_id'] as String?;
+      } catch (_) {}
     }
 
     final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
 
-    final orderData = await _db
-        .from('orders')
-        .insert({
-          'business_id': businessId,
-          'business_name': businessName,
-          'status': 'pending',
-          'payment_status': 'unpaid', // always starts unpaid
-          'order_type': orderType.value,
-          'table_id': tableId,
-          'table_number': tableNumber,
-          'table_seat_id': tableSeatId,
-          'seat_label': seatLabel,
-          'customer_name': customerName,
-          'customer_phone': customerPhone,
-          'subtotal': subtotal,
-          'tax_amount': taxAmount,
-          'tax_rate': taxRate,
-          'total_amount': totalAmount,
-          'notes': notes,
-          'created_by_uid': createdByUid,
-          'created_by_name': createdByName,
-          'created_by_role': createdByRole,
-        })
-        .select()
-        .single();
+    final orderNumber = await _getNextOrderNumber(businessId);
+
+    final orderData = await (() async {
+      try {
+        return await _db
+            .from('orders')
+            .insert({
+              'business_id': businessId,
+              'business_name': businessName,
+              'status': 'pending',
+              'payment_status': 'unpaid',
+              'order_type': orderType.value,
+              'order_number': orderNumber,
+              'table_id': tableId,
+              'table_number': tableNumber,
+              'table_seat_id': tableSeatId,
+              'seat_label': seatLabel,
+              'session_id': sessionId,
+              'customer_name': customerName,
+              'customer_phone': customerPhone,
+              'subtotal': subtotal,
+              'tax_amount': taxAmount,
+              'tax_rate': taxRate,
+              'total_amount': totalAmount,
+              'notes': notes,
+              'created_by_uid': createdByUid,
+              'created_by_name': createdByName,
+              'created_by_role': createdByRole,
+            })
+            .select()
+            .single();
+      } on PostgrestException catch (e) {
+        final details = e.details?.toString() ?? '';
+        final message = e.message?.toString().toLowerCase() ?? '';
+
+        if (e.code == '23505' ||
+            details.contains('uq_active_seat_order') ||
+            message.contains('duplicate key')) {
+          throw Exception(
+            'Cannot create order: an active order already exists for this seat/table. '
+            'Please complete or cancel the existing order first.',
+          );
+        }
+        rethrow;
+      }
+    })();
 
     final orderId = orderData['id'] as String;
 
@@ -232,7 +356,7 @@ class OrdersService {
           );
     }
 
-    // ── TABLE STATUS UPDATE — SEAT-AWARE ──────────────────────────────────
+    // ── TABLE STATUS UPDATE — SEAT-AWARE (FIX) ─────────────────────────────
     if (tableId != null) {
       if (tableSeatId != null && tableSeatId.isNotEmpty) {
         // PARTIAL SEAT ORDER:
@@ -242,15 +366,20 @@ class OrdersService {
             .update({'status': 'occupied'})
             .eq('id', tableSeatId);
 
-        // 2. Check if ALL seats are now occupied
+        // 2. FIX: Check if ALL seats are now occupied before changing table status
         final seatRows = await _db
             .from('table_seats')
             .select('status')
             .eq('table_id', tableId);
-        final allOccupied = (seatRows as List)
-            .every((s) => (s['status'] as String?) == 'occupied');
+        final allSeats = seatRows as List;
+        final totalSeats = allSeats.length;
+        final occupiedCount = allSeats
+            .where((s) => (s['status'] as String?) == 'occupied')
+            .length;
+        final allOccupied = totalSeats > 0 && occupiedCount >= totalSeats;
 
         if (allOccupied) {
+          // FIX: Only mark 'occupied' when ALL seats are taken
           await _db
               .from('restaurant_tables')
               .update({
@@ -262,18 +391,19 @@ class OrdersService {
               })
               .eq('id', tableId);
         } else {
-          // Partial: update order metadata, keep table status unchanged
-          // (leave as 'available' or 'partial' so other seats are bookable)
+          // FIX: Some seats still free — only update financials, NOT status
+          // This allows other guests to still book remaining seats
           await _db
               .from('restaurant_tables')
               .update({
                 'current_order_id': orderId,
                 'current_order_total': totalAmount,
+                // Do NOT set status or current_customer_name here
               })
               .eq('id', tableId);
         }
       } else {
-        // FULL TABLE ORDER: mark entire table occupied as before
+        // FULL TABLE ORDER: mark entire table occupied
         await _db
             .from('restaurant_tables')
             .update({
@@ -327,10 +457,6 @@ class OrdersService {
       updateMap['discount_amount'] = discountAmount;
     }
 
-    // The DB trigger fn_auto_complete_on_payment will:
-    // 1. Set paid_at
-    // 2. Set bill_generated_at
-    // 3. Auto-set status = 'completed'
     await _db.from('orders').update(updateMap).eq('id', orderId);
 
     final data = await _db
@@ -342,8 +468,7 @@ class OrdersService {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  UPDATE STATUS (kitchen flow — pending→preparing→ready)
-  //  NOTE: 'completed' is NOT allowed here; use confirmPayment()
+  //  UPDATE STATUS
   // ══════════════════════════════════════════════════════════
 
   Future<Order> updateOrderStatus({

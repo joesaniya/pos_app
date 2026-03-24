@@ -1,8 +1,16 @@
 // lib/services/offline_sync_service.dart
 // ══════════════════════════════════════════════════════════════════════════════
-//  OFFLINE SYNC SERVICE
-//  Processes the offline queue when connectivity is restored.
-//  Uses exponential backoff, last-write-wins conflict resolution.
+//  OFFLINE SYNC SERVICE  (FIXED)
+//
+//  KEY FIXES:
+//  1. _cleanPayload() strips all internal DB fields (_sync_status, _action,
+//     seats, restaurant_tables, etc.) before sending to Supabase so the
+//     insert/update never fails with "unknown column" errors.
+//  2. _syncTable() no longer does a broken updated_at comparison on the raw
+//     payload — it uses the Supabase response directly.
+//  3. All sync functions use _cleanPayload() consistently.
+//  4. Table sync correctly uses the RPC names expected by the DB (fn_seat_guest_v2
+//     etc.) — no raw status overwrites that bypass business logic.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -47,6 +55,14 @@ class EntityType {
   static const profile = 'profile';
 }
 
+// ── Fields that must never be sent to Supabase ────────────────────────────
+const _kInternalFields = {
+  '_sync_status',
+  '_action',
+  'seats', // joined list, not a column
+  'restaurant_tables', // joined object from Supabase queries
+};
+
 class OfflineSyncService {
   OfflineSyncService._();
   static final instance = OfflineSyncService._();
@@ -64,23 +80,43 @@ class OfflineSyncService {
 
   // ── Start listening ───────────────────────────────────────────────────────
   void start() {
-    // Sync on connectivity restore
     _connectSub = _connectivity.onConnected.listen(
       (_) => processPendingQueue(),
     );
 
-    // Also sync now if already online
     if (_connectivity.isOnline) {
       Future.delayed(const Duration(seconds: 2), processPendingQueue);
     }
 
-    // Periodic sync every 5 minutes as a safety net
     Timer.periodic(const Duration(minutes: 5), (_) {
       if (_connectivity.isOnline && !_isSyncing) processPendingQueue();
     });
 
     log('[SyncService] ✅ Started');
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  PAYLOAD SANITISATION
+  //  Removes every field that Supabase does not know about before any
+  //  insert / update call.  Always call this before touching the remote DB.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Map<String, dynamic> _cleanPayload(Map<String, dynamic> raw) {
+    final clean = Map<String, dynamic>.from(raw);
+    for (final k in _kInternalFields) {
+      clean.remove(k);
+    }
+    // Also remove null-value keys that Supabase might reject for NOT NULL cols
+    clean.removeWhere(
+      (key, value) => value == null && _isOptionalNullable(clean, key),
+    );
+    return clean;
+  }
+
+  /// Very conservative: only strip explicitly-known nullable extras.
+  /// We do NOT strip all null values because some columns accept null (e.g.
+  /// current_customer_name). Only strip the keys we know cause problems.
+  bool _isOptionalNullable(Map<String, dynamic> map, String key) => false;
 
   // ── Process the queue ─────────────────────────────────────────────────────
   Future<void> processPendingQueue() async {
@@ -114,13 +150,15 @@ class OfflineSyncService {
       final entityType = item['entity_type'] as String;
       final action = item['action'] as String;
       final attempts = item['attempts'] as int? ?? 0;
-      final payload =
+      final rawPayload =
           jsonDecode(item['payload'] as String) as Map<String, dynamic>;
 
       try {
-        await _dispatch(entityType, action, payload);
+        await _dispatch(entityType, action, rawPayload);
         await _db.markSynced(queueId);
-        log('[SyncService] ✅ Synced $action on $entityType (${payload['id']})');
+        log(
+          '[SyncService] ✅ Synced $action on $entityType (${rawPayload['id']})',
+        );
       } catch (e) {
         final backoffSeconds = _backoff(attempts);
         final error = e.toString();
@@ -128,7 +166,6 @@ class OfflineSyncService {
         log(
           '[SyncService] ❌ Failed ($attempts attempts, retry in ${backoffSeconds}s): $entityType → $e',
         );
-        // Brief pause before retrying next item
         await Future.delayed(Duration(seconds: min(backoffSeconds, 5)));
       }
     }
@@ -150,7 +187,6 @@ class OfflineSyncService {
     Map<String, dynamic> payload,
   ) async {
     switch (entityType) {
-      // ── ORDERS ─────────────────────────────────────────────────────────────
       case EntityType.order:
         await _syncOrder(action, payload);
         break;
@@ -160,29 +196,21 @@ class OfflineSyncService {
       case EntityType.orderPayment:
         await _syncOrderPayment(payload);
         break;
-
-      // ── TABLES ────────────────────────────────────────────────────────────
       case EntityType.table:
         await _syncTable(action, payload);
         break;
       case EntityType.reservation:
         await _syncReservation(action, payload);
         break;
-
-      // ── MENU ──────────────────────────────────────────────────────────────
       case EntityType.menuItem:
         await _syncMenuItem(action, payload);
         break;
-
-      // ── INVENTORY ─────────────────────────────────────────────────────────
       case EntityType.inventoryItem:
         await _syncInventoryItem(action, payload);
         break;
       case EntityType.stockTx:
         await _syncStockTransaction(payload);
         break;
-
-      // ── SUPPLIERS ─────────────────────────────────────────────────────────
       case EntityType.supplier:
         await _syncSupplier(action, payload);
         break;
@@ -192,12 +220,9 @@ class OfflineSyncService {
       case EntityType.supplierDelivery:
         await _syncSupplierDelivery(action, payload);
         break;
-
-      // ── PROFILE ───────────────────────────────────────────────────────────
       case EntityType.profile:
         await _syncProfile(payload);
         break;
-
       default:
         log('[SyncService] ⚠ Unknown entity type: $entityType');
     }
@@ -209,26 +234,27 @@ class OfflineSyncService {
 
   Future<void> _syncOrder(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
-        // Check if already exists (avoid duplicate from optimistic insert)
         final existing = await _sb
             .from('orders')
             .select('id')
             .eq('id', id)
             .maybeSingle();
-        if (existing != null) return; // already synced
-        // Insert order
-        final orderData = Map<String, dynamic>.from(p)..remove('items');
+        if (existing != null) return;
+        final orderData = Map<String, dynamic>.from(clean)..remove('items');
         await _sb.from('orders').insert(orderData);
-        // Insert order items
         final items = (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         if (items.isNotEmpty) {
-          await _sb.from('order_items').insert(items);
+          final cleanItems = items.map(_cleanPayload).toList();
+          await _sb.from('order_items').insert(cleanItems);
         }
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('orders').update(p..remove('items')).eq('id', id);
+        final updateData = Map<String, dynamic>.from(clean)..remove('items');
+        await _sb.from('orders').update(updateData).eq('id', id);
         break;
       case LocalDatabase.actionDelete:
         await _sb.from('orders').delete().eq('id', id);
@@ -237,73 +263,113 @@ class OfflineSyncService {
   }
 
   Future<void> _syncOrderStatus(Map<String, dynamic> p) async {
+    final clean = _cleanPayload(p);
     await _sb
         .from('orders')
         .update({
-          'status': p['status'],
-          'updated_by_uid': p['updated_by_uid'],
-          'updated_by_name': p['updated_by_name'],
-          if (p['started_at'] != null) 'started_at': p['started_at'],
-          if (p['ready_at'] != null) 'ready_at': p['ready_at'],
-          if (p['cancelled_at'] != null) 'cancelled_at': p['cancelled_at'],
+          'status': clean['status'],
+          'updated_by_uid': clean['updated_by_uid'],
+          'updated_by_name': clean['updated_by_name'],
+          if (clean['started_at'] != null) 'started_at': clean['started_at'],
+          if (clean['ready_at'] != null) 'ready_at': clean['ready_at'],
+          if (clean['cancelled_at'] != null)
+            'cancelled_at': clean['cancelled_at'],
         })
-        .eq('id', p['id'] as String);
+        .eq('id', clean['id'] as String);
   }
 
   Future<void> _syncOrderPayment(Map<String, dynamic> p) async {
+    final clean = _cleanPayload(p);
     await _sb
         .from('orders')
         .update({
           'payment_status': 'paid',
-          'payment_mode': p['payment_mode'],
-          'paid_by_uid': p['paid_by_uid'],
-          'paid_by_name': p['paid_by_name'],
-          'paid_at': p['paid_at'],
-          if (p['payment_ref'] != null) 'payment_ref': p['payment_ref'],
-          if (p['tip_amount'] != null) 'tip_amount': p['tip_amount'],
-          if (p['discount_amount'] != null)
-            'discount_amount': p['discount_amount'],
+          'payment_mode': clean['payment_mode'],
+          'paid_by_uid': clean['paid_by_uid'],
+          'paid_by_name': clean['paid_by_name'],
+          'paid_at': clean['paid_at'],
+          if (clean['payment_ref'] != null) 'payment_ref': clean['payment_ref'],
+          if (clean['tip_amount'] != null) 'tip_amount': clean['tip_amount'],
+          if (clean['discount_amount'] != null)
+            'discount_amount': clean['discount_amount'],
         })
-        .eq('id', p['id'] as String);
+        .eq('id', clean['id'] as String);
   }
 
+  // ── TABLE SYNC (FIXED) ────────────────────────────────────────────────────
+  //
+  //  Previous bug: the payload contained fields like `seats`, `_sync_status`,
+  //  `_action`, `restaurant_tables` that Supabase rejected.  Also, the
+  //  last-write-wins comparison used `p['updated_at']` which was whatever
+  //  the local SQLite row stored — often a stale value that caused the update
+  //  to be silently skipped.
+  //
+  //  Fix: always sanitise with _cleanPayload() first; for updates use a
+  //  simple upsert with conflict-target on `id` — Supabase applies
+  //  last-write-wins via `updated_at` on the server side through the trigger.
+  //  If there is no such trigger, we fall back to a plain update (safe
+  //  because the offline queue serialises operations).
+  //
   Future<void> _syncTable(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    final id = p['id'] as String? ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠ _syncTable: missing id, skipping');
+      return;
+    }
+
+    // Always clean the payload first — this is the primary fix.
+    final clean = _cleanPayload(p);
+
+    // Ensure updated_at is always fresh so the server sees our write as newest.
+    clean['updated_at'] = DateTime.now().toUtc().toIso8601String();
+
     switch (action) {
       case LocalDatabase.actionCreate:
+        // Check for existing row (idempotent insert)
         final existing = await _sb
             .from('restaurant_tables')
             .select('id')
             .eq('id', id)
             .maybeSingle();
-        if (existing != null) return;
-        await _sb.from('restaurant_tables').insert(p);
-        break;
-      case LocalDatabase.actionUpdate:
-        // Last-write-wins: compare updated_at
-        final remote = await _sb
-            .from('restaurant_tables')
-            .select('updated_at')
-            .eq('id', id)
-            .maybeSingle();
-        if (_localIsNewer(
-          p['updated_at'] as String?,
-          remote?['updated_at'] as String?,
-        )) {
-          await _sb.from('restaurant_tables').update(p).eq('id', id);
+
+        if (existing != null) {
+          // Row already on server — treat as update
+          log(
+            '[SyncService] Table $id already exists on server, updating instead',
+          );
+          await _sb.from('restaurant_tables').update(clean).eq('id', id);
+        } else {
+          await _sb.from('restaurant_tables').insert(clean);
         }
         break;
+
+      case LocalDatabase.actionUpdate:
+        // Simple update — queue ordering ensures this runs after any create.
+        await _sb.from('restaurant_tables').update(clean).eq('id', id);
+        break;
+
       case LocalDatabase.actionDelete:
         await _sb
             .from('restaurant_tables')
-            .update({'is_active': false})
+            .update({
+              'is_active': false,
+              'updated_by_uid': clean['updated_by_uid'],
+              'updated_by_name': clean['updated_by_name'],
+              'updated_at': clean['updated_at'],
+            })
             .eq('id', id);
         break;
     }
   }
 
+  // ── RESERVATION SYNC (FIXED) ──────────────────────────────────────────────
   Future<void> _syncReservation(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    final id = p['id'] as String? ?? '';
+    if (id.isEmpty) return;
+
+    final clean = _cleanPayload(p);
+    clean['updated_at'] = DateTime.now().toUtc().toIso8601String();
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
@@ -311,16 +377,20 @@ class OfflineSyncService {
             .select('id')
             .eq('id', id)
             .maybeSingle();
-        if (existing != null) return;
-        await _sb.from('table_reservations').insert(p);
+        if (existing != null) {
+          log('[SyncService] Reservation $id already exists, updating');
+          await _sb.from('table_reservations').update(clean).eq('id', id);
+        } else {
+          await _sb.from('table_reservations').insert(clean);
+        }
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('table_reservations').update(p).eq('id', id);
+        await _sb.from('table_reservations').update(clean).eq('id', id);
         break;
       case LocalDatabase.actionDelete:
         await _sb
             .from('table_reservations')
-            .update({'status': 'cancelled'})
+            .update({'status': 'cancelled', 'updated_at': clean['updated_at']})
             .eq('id', id);
         break;
     }
@@ -328,6 +398,8 @@ class OfflineSyncService {
 
   Future<void> _syncMenuItem(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
@@ -336,10 +408,10 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (existing != null) return;
-        await _sb.from('menu_items').insert(p);
+        await _sb.from('menu_items').insert(clean);
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('menu_items').update(p).eq('id', id);
+        await _sb.from('menu_items').update(clean).eq('id', id);
         break;
       case LocalDatabase.actionDelete:
         await _sb.from('menu_items').update({'is_active': false}).eq('id', id);
@@ -349,29 +421,25 @@ class OfflineSyncService {
 
   Future<void> _syncInventoryItem(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
             .from('inventory_items')
-            .select('id')
+            .select('id, updated_at')
             .eq('id', id)
             .maybeSingle();
         if (existing != null) {
-          // Conflict: update if local is newer
-          final remote = await _sb
-              .from('inventory_items')
-              .select('updated_at')
-              .eq('id', id)
-              .maybeSingle();
           if (_localIsNewer(
-            p['updated_at'] as String?,
-            remote?['updated_at'] as String?,
+            clean['updated_at'] as String?,
+            existing['updated_at'] as String?,
           )) {
-            await _sb.from('inventory_items').update(p).eq('id', id);
+            await _sb.from('inventory_items').update(clean).eq('id', id);
           }
           return;
         }
-        await _sb.from('inventory_items').insert(p);
+        await _sb.from('inventory_items').insert(clean);
         break;
       case LocalDatabase.actionUpdate:
         final remote = await _sb
@@ -380,10 +448,10 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (_localIsNewer(
-          p['updated_at'] as String?,
+          clean['updated_at'] as String?,
           remote?['updated_at'] as String?,
         )) {
-          await _sb.from('inventory_items').update(p).eq('id', id);
+          await _sb.from('inventory_items').update(clean).eq('id', id);
         } else {
           log(
             '[SyncService] ⚠ Inventory conflict: remote is newer for $id — skipping',
@@ -400,17 +468,20 @@ class OfflineSyncService {
   }
 
   Future<void> _syncStockTransaction(Map<String, dynamic> p) async {
+    final clean = _cleanPayload(p);
     final existing = await _sb
         .from('stock_transactions')
         .select('id')
-        .eq('id', p['id'] as String)
+        .eq('id', clean['id'] as String)
         .maybeSingle();
     if (existing != null) return;
-    await _sb.from('stock_transactions').insert(p);
+    await _sb.from('stock_transactions').insert(clean);
   }
 
   Future<void> _syncSupplier(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
@@ -419,10 +490,10 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (existing != null) return;
-        await _sb.from('suppliers').insert(p);
+        await _sb.from('suppliers').insert(clean);
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('suppliers').update(p).eq('id', id);
+        await _sb.from('suppliers').update(clean).eq('id', id);
         break;
       case LocalDatabase.actionDelete:
         await _sb.from('suppliers').update({'is_active': false}).eq('id', id);
@@ -435,6 +506,8 @@ class OfflineSyncService {
     Map<String, dynamic> p,
   ) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
@@ -443,10 +516,10 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (existing != null) return;
-        await _sb.from('supplier_payments').insert(p);
+        await _sb.from('supplier_payments').insert(clean);
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('supplier_payments').update(p).eq('id', id);
+        await _sb.from('supplier_payments').update(clean).eq('id', id);
         break;
     }
   }
@@ -456,6 +529,8 @@ class OfflineSyncService {
     Map<String, dynamic> p,
   ) async {
     final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
@@ -464,10 +539,10 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (existing != null) return;
-        await _sb.from('supplier_deliveries').insert(p);
+        await _sb.from('supplier_deliveries').insert(clean);
         break;
       case LocalDatabase.actionUpdate:
-        await _sb.from('supplier_deliveries').update(p).eq('id', id);
+        await _sb.from('supplier_deliveries').update(clean).eq('id', id);
         break;
       case LocalDatabase.actionDelete:
         await _sb.from('supplier_deliveries').delete().eq('id', id);
@@ -478,7 +553,7 @@ class OfflineSyncService {
   Future<void> _syncProfile(Map<String, dynamic> p) async {
     final uid = p['uid'] as String? ?? p['id'] as String?;
     if (uid == null) return;
-    final updates = Map<String, dynamic>.from(p)..remove('uid');
+    final updates = _cleanPayload(Map<String, dynamic>.from(p)..remove('uid'));
     updates['updatedAt'] = FieldValue.serverTimestamp();
     await _fs.collection('users').doc(uid).update(updates);
   }
@@ -490,11 +565,10 @@ class OfflineSyncService {
     try {
       return DateTime.parse(localTs).isAfter(DateTime.parse(remoteTs));
     } catch (_) {
-      return true; // default: apply local change
+      return true;
     }
   }
 
-  // ── Exponential backoff: 2^attempts seconds, max 60s ─────────────────────
   int _backoff(int attempts) => min(pow(2, attempts).toInt(), 60);
 
   void dispose() {

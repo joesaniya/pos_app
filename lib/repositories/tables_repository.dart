@@ -1,6 +1,16 @@
 // lib/repositories/tables_repository.dart
 // ══════════════════════════════════════════════════════════════════════════════
-//  TABLES REPOSITORY — Offline-first
+//  TABLES REPOSITORY — Offline-first  (FIXED)
+//
+//  KEY FIXES:
+//  1. _toQueuePayload() strips all local-only fields before writing to the
+//     offline queue.  Previously the queue stored the raw `row` map which
+//     included `seats`, `_sync_status`, `_action` etc., causing every sync
+//     attempt to fail on the Supabase side.
+//  2. addTable() / updateTable() now pass the queue-safe payload to enqueue()
+//     so sync will succeed when connectivity is restored.
+//  3. seatGuests() offline fallback also uses the clean payload.
+//  4. createReservation() strips joined columns before queuing.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:developer';
@@ -26,6 +36,31 @@ class TablesRepository {
   static const _kTables = 'restaurant_tables';
   static const _kReservations = 'table_reservations';
   static const _kView = 'vw_tables_with_reservation';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  PAYLOAD SANITISATION
+  //
+  //  These internal / joined fields must never be sent to Supabase.
+  //  They live in the local SQLite JSON blob but have no matching columns
+  //  on the remote DB.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  static const _kLocalOnlyFields = {
+    '_sync_status',
+    '_action',
+    'seats', // joined list — not a column
+    'restaurant_tables', // Supabase join object
+  };
+
+  /// Returns a copy of [raw] with all local-only and null-problematic keys
+  /// removed.  Safe to pass directly to Supabase insert / update.
+  Map<String, dynamic> _toQueuePayload(Map<String, dynamic> raw) {
+    final clean = Map<String, dynamic>.from(raw);
+    for (final k in _kLocalOnlyFields) {
+      clean.remove(k);
+    }
+    return clean;
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  FETCH TABLES
@@ -67,15 +102,12 @@ class TablesRepository {
         row['seats'] = seats.where((s) => s['table_id'] == tableId).toList();
       }
 
-      // FIX: replaceAll now preserves pending/unsynced local rows — see LocalDatabase
       await _local.replaceAll(
         table: LocalDatabase.tTables,
         businessId: businessId,
         entities: rows,
       );
 
-      // After a successful remote refresh, promote any pending rows for IDs
-      // that are now confirmed on the server to 'synced'.
       final remoteIds = rows.map((r) => r['id'] as String).toSet();
       await _promoteSyncedEntities(
         table: LocalDatabase.tTables,
@@ -130,7 +162,6 @@ class TablesRepository {
           .map((r) => r as Map<String, dynamic>)
           .toList();
 
-      // FIX: same safe merge — pending reservations created offline are preserved
       await _local.replaceAll(
         table: LocalDatabase.tReservations,
         businessId: businessId,
@@ -158,28 +189,32 @@ class TablesRepository {
     Map<String, dynamic> row,
   ) async {
     final id = t.id.isNotEmpty ? t.id : _uuid.v4();
-    final payload = {...row, 'id': id};
 
-    // FIX: always write locally first as 'pending/create' so the entity
-    // is visible immediately and survives a replaceAll while unsynced.
+    // Include the id in the row for local storage
+    final localRow = {...row, 'id': id};
+
+    // Write to local DB with full row (including seats placeholder if any)
     await _local.upsertEntity(
       table: LocalDatabase.tTables,
       id: id,
       businessId: businessId,
-      data: payload,
+      data: localRow,
       syncStatus: LocalDatabase.syncPending,
       action: LocalDatabase.actionCreate,
     );
 
+    // Queue payload must be clean — no internal/joined fields
+    final queuePayload = _toQueuePayload(localRow);
+
     if (_connectivity.isOnline) {
       try {
-        await _sb.from(_kTables).insert(payload);
-        // Mark the local row as synced — no need to enqueue
+        await _sb.from(_kTables).insert(queuePayload);
+        // Mark synced immediately
         await _local.upsertEntity(
           table: LocalDatabase.tTables,
           id: id,
           businessId: businessId,
-          data: payload,
+          data: localRow,
           syncStatus: LocalDatabase.syncSynced,
           action: LocalDatabase.actionCreate,
         );
@@ -187,17 +222,18 @@ class TablesRepository {
         return;
       } catch (e) {
         debugPrint('[TablesRepo] Online addTable failed, queuing: $e');
-        // Fall through to enqueue below
+        // Fall through to enqueue
       }
     }
 
-    // Offline (or online attempt failed) — enqueue for later sync
+    // Offline path — enqueue clean payload
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.table,
       entityId: id,
       action: LocalDatabase.actionCreate,
-      payload: payload,
+      payload:
+          queuePayload, // ← FIXED: was `localRow` which had internal fields
       businessId: businessId,
     );
     log('[TablesRepo] addTable queued offline: $id');
@@ -208,24 +244,27 @@ class TablesRepository {
     String businessId,
     Map<String, dynamic> row,
   ) async {
-    // FIX: always persist locally first
+    final localRow = {...row, 'id': t.id};
+
     await _local.upsertEntity(
       table: LocalDatabase.tTables,
       id: t.id,
       businessId: businessId,
-      data: row,
+      data: localRow,
       syncStatus: LocalDatabase.syncPending,
       action: LocalDatabase.actionUpdate,
     );
 
+    final queuePayload = _toQueuePayload(localRow);
+
     if (_connectivity.isOnline) {
       try {
-        await _sb.from(_kTables).update(row).eq('id', t.id);
+        await _sb.from(_kTables).update(queuePayload).eq('id', t.id);
         await _local.upsertEntity(
           table: LocalDatabase.tTables,
           id: t.id,
           businessId: businessId,
-          data: row,
+          data: localRow,
           syncStatus: LocalDatabase.syncSynced,
           action: LocalDatabase.actionUpdate,
         );
@@ -240,7 +279,7 @@ class TablesRepository {
       entityType: EntityType.table,
       entityId: t.id,
       action: LocalDatabase.actionUpdate,
-      payload: row,
+      payload: queuePayload, // ← FIXED: clean payload
       businessId: businessId,
     );
   }
@@ -251,12 +290,20 @@ class TablesRepository {
     String? uid,
     String? name,
   ) async {
-    // Mark as deleted locally first
+    final deletePayload = {
+      'id': id,
+      'is_active': false,
+      'business_id': businessId,
+      'updated_by_uid': uid,
+      'updated_by_name': name,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
     await _local.upsertEntity(
       table: LocalDatabase.tTables,
       id: id,
       businessId: businessId,
-      data: {'id': id, 'is_active': false},
+      data: deletePayload,
       syncStatus: LocalDatabase.syncPending,
       action: LocalDatabase.actionDelete,
     );
@@ -269,12 +316,14 @@ class TablesRepository {
               'is_active': false,
               'updated_by_uid': uid,
               'updated_by_name': name,
+              'updated_at': deletePayload['updated_at'],
             })
             .eq('id', id);
-        // Hard-delete the local row now that the server knows about it
         await _local.deleteEntity(LocalDatabase.tTables, id);
         return;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TablesRepo] Online deleteTable failed, queuing: $e');
+      }
     }
 
     await _local.enqueue(
@@ -282,7 +331,7 @@ class TablesRepository {
       entityType: EntityType.table,
       entityId: id,
       action: LocalDatabase.actionDelete,
-      payload: {'id': id, 'is_active': false, 'business_id': businessId},
+      payload: deletePayload,
       businessId: businessId,
     );
   }
@@ -323,26 +372,31 @@ class TablesRepository {
       }
     }
 
+    // Offline path
     await _updateTableStatusLocally(
       tableId,
       businessId,
       'occupied',
       customerName,
     );
+
+    final queuePayload = {
+      'id': tableId,
+      'business_id': businessId,
+      'status': 'occupied',
+      'current_customer_name': customerName,
+      'occupied_since': DateTime.now().toUtc().toIso8601String(),
+      'updated_by_uid': staffUid,
+      'updated_by_name': staffName,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.table,
       entityId: tableId,
       action: LocalDatabase.actionUpdate,
-      payload: {
-        'id': tableId,
-        'business_id': businessId,
-        'status': 'occupied',
-        'current_customer_name': customerName,
-        'occupied_since': DateTime.now().toUtc().toIso8601String(),
-        'updated_by_uid': staffUid,
-        'updated_by_name': staffName,
-      },
+      payload: queuePayload, // ← FIXED: clean, no internal fields
       businessId: businessId,
     );
     return SeatResult(success: true);
@@ -358,17 +412,23 @@ class TablesRepository {
       table: LocalDatabase.tTables,
       businessId: businessId,
     );
-    final row = rows.firstWhere(
+    final existing = rows.firstWhere(
       (r) => r['id'] == tableId,
       orElse: () => <String, dynamic>{'id': tableId},
     );
-    row['status'] = status;
-    if (customerName != null) row['current_customer_name'] = customerName;
+
+    // Build a clean update — do NOT spread the entire existing row because
+    // it may contain joined fields like `seats`.
+    final update = _toQueuePayload(Map<String, dynamic>.from(existing));
+    update['status'] = status;
+    if (customerName != null) update['current_customer_name'] = customerName;
+    update['updated_at'] = DateTime.now().toUtc().toIso8601String();
+
     await _local.upsertEntity(
       table: LocalDatabase.tTables,
       id: tableId,
       businessId: businessId,
-      data: row,
+      data: update,
       syncStatus: LocalDatabase.syncPending,
       action: LocalDatabase.actionUpdate,
     );
@@ -385,7 +445,7 @@ class TablesRepository {
     final id = data['id'] as String? ?? _uuid.v4();
     data['id'] = id;
 
-    // Always write locally first
+    // Store full data locally (may contain joined fields from caller)
     await _local.upsertEntity(
       table: LocalDatabase.tReservations,
       id: id,
@@ -395,9 +455,12 @@ class TablesRepository {
       action: LocalDatabase.actionCreate,
     );
 
+    // Always clean before touching Supabase
+    final queuePayload = _toQueuePayload(data);
+
     if (_connectivity.isOnline) {
       try {
-        await _sb.from(_kReservations).insert(data);
+        await _sb.from(_kReservations).insert(queuePayload);
         await _local.upsertEntity(
           table: LocalDatabase.tReservations,
           id: id,
@@ -417,7 +480,7 @@ class TablesRepository {
       entityType: EntityType.reservation,
       entityId: id,
       action: LocalDatabase.actionCreate,
-      payload: data,
+      payload: queuePayload, // ← FIXED: clean payload
       businessId: businessId,
     );
     return id;
@@ -428,6 +491,7 @@ class TablesRepository {
     Map<String, dynamic> data,
     String businessId,
   ) async {
+    // Store locally
     await _local.upsertEntity(
       table: LocalDatabase.tReservations,
       id: id,
@@ -437,9 +501,11 @@ class TablesRepository {
       action: LocalDatabase.actionUpdate,
     );
 
+    final queuePayload = _toQueuePayload(data);
+
     if (_connectivity.isOnline) {
       try {
-        await _sb.from(_kReservations).update(data).eq('id', id);
+        await _sb.from(_kReservations).update(queuePayload).eq('id', id);
         await _local.upsertEntity(
           table: LocalDatabase.tReservations,
           id: id,
@@ -449,7 +515,9 @@ class TablesRepository {
           action: LocalDatabase.actionUpdate,
         );
         return;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[TablesRepo] Online updateReservation failed, queuing: $e');
+      }
     }
 
     await _local.enqueue(
@@ -457,7 +525,7 @@ class TablesRepository {
       entityType: EntityType.reservation,
       entityId: id,
       action: LocalDatabase.actionUpdate,
-      payload: data,
+      payload: queuePayload, // ← FIXED
       businessId: businessId,
     );
   }
@@ -467,6 +535,7 @@ class TablesRepository {
       'id': id,
       'status': 'cancelled',
       'business_id': businessId,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
     }, businessId);
   }
 
@@ -474,10 +543,6 @@ class TablesRepository {
   //  HELPERS
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// After a successful remote refresh, promote any local 'pending' rows
-  /// whose IDs are now confirmed on the server to 'synced'. This prevents
-  /// entities from staying in pending state indefinitely after a background
-  /// sync resolves them.
   Future<void> _promoteSyncedEntities({
     required String table,
     required String businessId,

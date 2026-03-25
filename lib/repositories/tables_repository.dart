@@ -174,9 +174,12 @@ class TablesRepository {
       whereExtra: 'action != ?',
       whereExtraArgs: [LocalDatabase.actionDelete],
     );
+    // ✅ FIX: Filter by status in Dart code since local table stores status in JSON
+    // Only return reservations with status='active' (exclude 'seated', 'completed', etc.)
     return rows
         .map(_rowToReservation)
         .whereType<ReservationHistoryItem>()
+        .where((r) => r.status == 'active')
         .toList();
   }
 

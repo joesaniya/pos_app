@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/seated_duration_timer.dart';
 import 'reservation_sheet.dart';
+import 'seated_reservation_section.dart';
 import 'add_edit_table_sheet.dart';
 import '../widgets/seat_selection_dialog.dart';
 
@@ -214,7 +215,13 @@ class TableDetailSheet extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  if (table.status == TableStatus.occupied)
+                  if (table.status == TableStatus.occupied &&
+                      table.reservation != null &&
+                      table.reservation!.status == 'seated')
+                  // ✅ FIX: Show seated reserved guest section ONLY for reserved guests who are now seated
+                  ...[
+                    SeatedReservationSection(table: table, prov: prov),
+                  ] else if (table.status == TableStatus.occupied)
                   // ✅ FIX: Show occupied details and allow walk-in seating at remaining available seats
                   ...[
                     OccupiedSection(table: table, prov: prov),

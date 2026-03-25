@@ -386,7 +386,7 @@ class TablesRepository {
             params: {
               // Alphabetical order per Supabase schema cache matching
               'p_customer_name': customerName,
-              if (seatIds != null && seatIds.isNotEmpty) 'p_seat_ids': seatIds,
+              'p_seat_ids': seatIds ?? [],
               'p_staff_name': staffName,
               'p_staff_uid': staffUid,
               'p_table_id': tableId,

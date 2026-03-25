@@ -90,17 +90,16 @@ class SeatRepository {
           final params = {
             // Alphabetical order per Supabase schema cache matching
             'p_customer_name': customerName,
-            if (seatIds != null && seatIds.isNotEmpty)
-              'p_seat_ids': seatIds
-                  .map((id) {
-                    try {
-                      return id; // Already a UUID
-                    } catch (e) {
-                      return null;
-                    }
-                  })
-                  .whereType<String>()
-                  .toList(),
+            'p_seat_ids': (seatIds ?? [])
+                .map((id) {
+                  try {
+                    return id; // Already a UUID
+                  } catch (e) {
+                    return null;
+                  }
+                })
+                .whereType<String>()
+                .toList(),
             'p_staff_name': staffName,
             'p_staff_uid': staffUid,
             'p_table_id': tableId,

@@ -23,6 +23,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:pos_app/database/local_database.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:pos_app/repositories/tables_repository.dart';
 import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/services/offline_sync_service.dart';
 import 'package:pos_app/services/order_service.dart';
@@ -583,6 +584,11 @@ class OrdersRepository {
 
   // ══════════════════════════════════════════════════════════════════════════
   //  CONFIRM PAYMENT
+  //  CRITICAL FIX (March 26, 2026):
+  //  1. Payment confirmation marks THIS order as paid (only this one!)
+  //  2. DB trigger auto-completes the paid order (NOT all table orders)
+  //  3. NO auto-seat-release - let staff manually clear when ready
+  //  4. Prevents incorrect marking of unpaid orders as completed
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<Order> confirmPayment({
@@ -607,9 +613,15 @@ class OrdersRepository {
           tipAmount: tipAmount,
           discountAmount: discountAmount,
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint(
+          '[OrdersRepo] Online confirmPayment failed: $e, falling back to offline',
+        );
+      }
     }
 
+    // ── OFFLINE FALLBACK ──────────────────────────────────────────────────────
+    // Mark ONLY this order as paid (no auto-seat-release, no marking other orders)
     final now = DateTime.now().toUtc().toIso8601String();
     final payload = <String, dynamic>{
       'id': orderId,

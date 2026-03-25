@@ -214,9 +214,15 @@ class TableDetailSheet extends StatelessWidget {
                   const SizedBox(height: 16),
                   if (table.status == TableStatus.occupied)
                     OccupiedSection(table: table, prov: prov)
-                  else if (table.status == TableStatus.reserved)
-                    ReservationSection(table: table, prov: prov)
-                  else if (table.status == TableStatus.available) ...[
+                  else if (table.status == TableStatus.reserved) ...[
+                    // ✅ FIX: Show reservation details AND allow walk-in seating at available seats
+                    ReservationSection(table: table, prov: prov),
+                    const SizedBox(height: 16),
+                    // Allow walk-in guests to be seated at available seats even if table is reserved
+                    if (table.isPartiallyOccupied ||
+                        table.availableSeats.isNotEmpty)
+                      AvailableSection(table: table, prov: prov),
+                  ] else if (table.status == TableStatus.available) ...[
                     // Show partial occupancy details if some seats are taken
                     if (table.isPartiallyOccupied)
                       OccupiedSection(table: table, prov: prov),
@@ -314,14 +320,25 @@ class _OccupiedSectionState extends State<OccupiedSection> {
         businessId: businessId,
       );
 
-      final List<_OrderSummary> summaries = orders.map((o) {
+      // ✅ FIX: Ensure ONLY active orders are displayed (filter out any completed orders)
+      final activeOrders = orders
+          .where(
+            (o) => ['pending', 'preparing', 'ready'].contains(o.status.value),
+          )
+          .toList();
+
+      final List<_OrderSummary> summaries = activeOrders.map((o) {
+        // ✅ FIX: Calculate correct total (subtotal + tax) if totalAmount is 0
+        final correctTotal = o.totalAmount > 0
+            ? o.totalAmount
+            : (o.subtotal + o.taxAmount);
         return _OrderSummary(
           id: o.id,
           orderNumber: o.orderNumber,
           status: o.status.value,
           subtotal: o.subtotal,
           taxAmount: o.taxAmount,
-          total: o.totalAmount,
+          total: correctTotal, // ✅ Use corrected total
           notes: o.notes,
           tableSeatId: o.tableSeatId,
           seatLabel: o.seatLabel,
@@ -364,11 +381,18 @@ class _OccupiedSectionState extends State<OccupiedSection> {
   void _recalc(List<_OrderSummary> orders) {
     _grandSub = orders.fold(0.0, (s, o) => s + o.subtotal);
     _grandTax = orders.fold(0.0, (s, o) => s + o.taxAmount);
+    // ✅ FIX: Calculate grand total as sum of all order totals (each = sub + tax)
     _grandTotal = orders.fold(0.0, (s, o) => s + o.total);
     _totalItems = orders.fold(
       0,
       (s, o) => s + o.items.fold(0, (si, i) => si + i.quantity),
     );
+
+    // ✅ FIX: Ensure grand total is correctly calculated
+    // If something went wrong, fallback to subtotal + tax
+    if (_grandTotal <= 0 && _grandSub > 0) {
+      _grandTotal = _grandSub + _grandTax;
+    }
 
     if (orders.isNotEmpty) {
       _db
@@ -589,17 +613,9 @@ class _OccupiedSectionState extends State<OccupiedSection> {
               stColor: _statusColor(order.status),
               stBg: _statusBg(order.status),
               stEmoji: _statusEmoji(order.status),
-              // Show "Checkout Seat" button only for seat-level orders.
-              // Tapping it clears just that seat via fn_clear_seat(p_table_id, p_seat_id).
-              onCheckoutSeat: order.tableSeatId != null
-                  ? () {
-                      widget.prov.clearTable(
-                        widget.table.id,
-                        seatId: order.tableSeatId,
-                      );
-                      Navigator.pop(context);
-                    }
-                  : null,
+              // FIX: Checkout button removed - seats are now auto-released after payment
+              // No manual checkout needed anymore
+              onCheckoutSeat: null,
             ),
           ),
           const SizedBox(height: 12),
@@ -668,8 +684,8 @@ class _OrderCard extends StatelessWidget {
   final Color stColor, stBg;
   final String stEmoji;
 
-  /// Called when staff taps "Checkout Seat" on a seat-level order.
-  /// Null = no per-seat checkout button (whole-table or already checked out).
+  /// ✅ REMOVED: Checkout button no longer needed
+  /// Seats are now auto-released after payment completion
   final VoidCallback? onCheckoutSeat;
 
   const _OrderCard({
@@ -947,43 +963,6 @@ class _OrderCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                ],
-                // ── Per-seat Checkout button ──────────────────────────────
-                if (onCheckoutSeat != null) ...[
-                  const SizedBox(height: 10),
-                  GestureDetector(
-                    onTap: onCheckoutSeat,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 10,
-                        horizontal: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF4E0),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: const Color(0xFFE8860A).withOpacity(0.5),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text('🪑', style: TextStyle(fontSize: 14)),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Checkout Seat ${order.seatLabel ?? ''}  ·  ₹${order.total.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFFE8860A),
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                 ],

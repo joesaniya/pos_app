@@ -584,16 +584,41 @@ class OrdersService {
             try {
               final record = payload.newRecord;
               if (record.isEmpty) return;
-              final full = await _db
-                  .from('vw_orders_with_items')
-                  .select()
-                  .eq('id', record['id'])
-                  .maybeSingle();
-              if (full != null) {
-                onEvent(
-                  Order.fromJson(full as Map<String, dynamic>),
-                  payload.eventType.name,
-                );
+
+              // Try to fetch from view first (preferred)
+              try {
+                final full = await _db
+                    .from('vw_orders_with_items')
+                    .select()
+                    .eq('id', record['id'])
+                    .maybeSingle();
+                if (full != null) {
+                  onEvent(
+                    Order.fromJson(full as Map<String, dynamic>),
+                    payload.eventType.name,
+                  );
+                }
+              } on PostgrestException catch (e) {
+                // If view is missing, fallback to orders table with empty items
+                if (e.message?.contains('vw_orders_with_items') ?? false) {
+                  debugPrint(
+                    '[OrdersService] View unavailable, using fallback: ${e.message}',
+                  );
+                  final fallback = await _db
+                      .from('orders')
+                      .select()
+                      .eq('id', record['id'])
+                      .maybeSingle();
+                  if (fallback != null) {
+                    final orderData = {
+                      ...(fallback as Map<String, dynamic>),
+                      'items': [],
+                    };
+                    onEvent(Order.fromJson(orderData), payload.eventType.name);
+                  }
+                } else {
+                  rethrow;
+                }
               }
             } catch (e, st) {
               debugPrint('[OrdersService] realtime callback error: $e\n$st');

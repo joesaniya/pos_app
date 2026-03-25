@@ -384,11 +384,12 @@ class TablesRepository {
           final result = await _sb.rpc(
             'fn_seat_guest_v2',
             params: {
-              'p_table_id': tableId,
+              // Alphabetical order per Supabase schema cache matching
               'p_customer_name': customerName,
-              'p_staff_uid': staffUid,
-              'p_staff_name': staffName,
               if (seatIds != null && seatIds.isNotEmpty) 'p_seat_ids': seatIds,
+              'p_staff_name': staffName,
+              'p_staff_uid': staffUid,
+              'p_table_id': tableId,
             },
           );
 
@@ -534,8 +535,9 @@ class TablesRepository {
           final rpcFunction = seatId != null
               ? 'fn_clear_seat'
               : 'fn_checkout_v2';
+          // Pass parameters in alphabetical order to match Supabase schema cache
           final rpcParams = seatId != null
-              ? {'p_table_id': tableId, 'p_seat_id': seatId}
+              ? {'p_seat_id': seatId, 'p_table_id': tableId}
               : {'p_table_id': tableId};
 
           await _sb.rpc(rpcFunction, params: rpcParams);

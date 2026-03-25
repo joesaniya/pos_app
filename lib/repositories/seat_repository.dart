@@ -88,10 +88,8 @@ class SeatRepository {
       if (_connectivity.isOnline) {
         try {
           final params = {
-            'p_table_id': tableId,
+            // Alphabetical order per Supabase schema cache matching
             'p_customer_name': customerName,
-            'p_staff_uid': staffUid,
-            'p_staff_name': staffName,
             if (seatIds != null && seatIds.isNotEmpty)
               'p_seat_ids': seatIds
                   .map((id) {
@@ -103,6 +101,9 @@ class SeatRepository {
                   })
                   .whereType<String>()
                   .toList(),
+            'p_staff_name': staffName,
+            'p_staff_uid': staffUid,
+            'p_table_id': tableId,
           };
 
           final result = await _sb.rpc('fn_seat_guest_v2', params: params);
@@ -386,7 +387,7 @@ class SeatRepository {
         try {
           final result = await _sb.rpc(
             'fn_clear_seat',
-            params: {'p_table_id': tableId, 'p_seat_id': seatId},
+            params: {'p_seat_id': seatId, 'p_table_id': tableId},
           );
 
           if (result?['success'] == true) {

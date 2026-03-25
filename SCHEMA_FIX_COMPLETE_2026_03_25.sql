@@ -235,7 +235,7 @@ AS $$
 DECLARE v_count INT;
 BEGIN
   UPDATE public.table_reservations
-  SET status='expired',updated_at=NOW()
+  SET status='no_show',updated_at=NOW()
   WHERE business_id=p_business_id
     AND status='active'
     AND check_in IS NULL

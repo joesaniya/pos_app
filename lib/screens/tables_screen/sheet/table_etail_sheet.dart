@@ -80,7 +80,9 @@ class TableDetailSheet extends StatelessWidget {
     final secCol = sectionColor(table.section);
     final secBg = sectionBg(table.section);
 
-    log('TableDetailSheet: table=${table.tableNumber} status=${table.status}');
+    log(
+      'TableDetailSheet id:${table.id} table=${table.tableNumber} status=${table.status}',
+    );
 
     return DraggableScrollableSheet(
       initialChildSize: 0.78,
@@ -1265,6 +1267,7 @@ class ReservationSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final res = table.reservation;
+    log('Building ReservationSection for table ${table.id}, res: $res');
     if (res == null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -125,7 +125,7 @@ class TableSeat {
           : null,
       customerName: j['customer_name'],
       occupiedSince: j['occupied_since'] != null
-          ? DateTime.parse(j['occupied_since']).toLocal()
+          ? parseToIST(j['occupied_since'].toString())
           : null,
     );
   }
@@ -232,18 +232,18 @@ class Reservation {
       phone: j['phone'],
       guestCount: j['guest_count'] ?? 1,
       reservedFor: j['reserved_for'] != null
-          ? DateTime.parse(j['reserved_for']).toLocal()
-          : DateTime.now(),
+          ? parseToIST(j['reserved_for'].toString())
+          : nowIST(),
       checkIn: j['check_in'] != null
-          ? DateTime.parse(j['check_in']).toLocal()
+          ? parseToIST(j['check_in'].toString())
           : null,
       checkOut: j['check_out'] != null
-          ? DateTime.parse(j['check_out']).toLocal()
+          ? parseToIST(j['check_out'].toString())
           : null,
       notes: j['notes'],
       status: j['status'] ?? 'active',
       warningSent: false, // default
-      createdAt: DateTime.now(), // default, not in json
+      createdAt: nowIST(), // default, use IST now
       createdByName: j['created_by_name'],
       createdByRole: null, // default
     );
@@ -361,11 +361,11 @@ class ReservationHistoryItem {
 
     DateTime? cancelledAt;
     if (row['cancelled_at'] != null) {
-      cancelledAt = DateTime.parse(row['cancelled_at'] as String).toLocal();
+      cancelledAt = parseToIST(row['cancelled_at'] as String);
     } else if (row['updated_at'] != null) {
       final status = row['status'] as String? ?? '';
       if (status == 'cancelled' || status == 'no_show') {
-        cancelledAt = DateTime.parse(row['updated_at'] as String).toLocal();
+        cancelledAt = parseToIST(row['updated_at'] as String);
       }
     }
 
@@ -382,20 +382,20 @@ class ReservationHistoryItem {
       phone: row['phone'] as String?,
       guestCount: row['guest_count'] as int? ?? 0,
       reservedFor: row['reserved_for'] != null
-          ? DateTime.parse(row['reserved_for'] as String).toLocal()
-          : DateTime.now(),
+          ? parseToIST(row['reserved_for'] as String)
+          : nowIST(),
       checkIn: row['check_in'] != null
-          ? DateTime.parse(row['check_in'] as String).toLocal()
+          ? parseToIST(row['check_in'] as String)
           : null,
       checkOut: row['check_out'] != null
-          ? DateTime.parse(row['check_out'] as String).toLocal()
+          ? parseToIST(row['check_out'] as String)
           : null,
       notes: row['notes'] as String?,
       status: row['status'] as String? ?? 'active',
       createdByName: row['created_by_name'] as String? ?? 'Staff',
       createdAt: row['created_at'] != null
-          ? DateTime.parse(row['created_at'] as String).toLocal()
-          : DateTime.now(),
+          ? parseToIST(row['created_at'] as String)
+          : nowIST(),
       updatedByName: row['updated_by_name'] as String?,
       cancelledByName: row['updated_by_name'] as String?,
       cancelledAt: cancelledAt,

@@ -1068,6 +1068,9 @@ class TablesRepository {
           .toList();
 
       Reservation? reservation;
+
+      // 🔧 FIX: Handle both JSON reservation_data field (new view)
+      // AND individual columns (fallback for old view)
       final reservationData = row['reservation_data'];
       if (reservationData != null) {
         Map<String, dynamic> resMap;
@@ -1079,17 +1082,53 @@ class TablesRepository {
           resMap = {};
         }
         try {
-          reservation = Reservation.fromJson(resMap);
+          if (resMap.isNotEmpty) {
+            reservation = Reservation.fromJson(resMap);
+          }
         } catch (e) {
           debugPrint('[TablesRepo] Failed to parse reservation_data: $e');
         }
+      } else {
+        // 🔧 FALLBACK: Build from individual columns if JSON not available
+        // (handles older view schema)
+        if (row['reservation_id'] != null) {
+          try {
+            reservation = Reservation.fromJson({
+              'id': row['reservation_id'] ?? '',
+              'customer_name': row['customer_name'] ?? '',
+              'phone': row['phone'],
+              'guest_count': row['guest_count'] ?? 1,
+              'reserved_for': row['reserved_for'],
+              'check_in': row['check_in'],
+              'check_out': row['check_out'],
+              'notes': row['notes'],
+              'status': row['reservation_status'] ?? 'active',
+              'warning_sent': row['warning_sent'] ?? false,
+              'created_at': row['created_at'],
+              'created_by_name': row['created_by_name'],
+              'created_by_role': row['created_by_role'],
+            });
+          } catch (e) {
+            debugPrint('[TablesRepo] Failed to parse reservation columns: $e');
+          }
+        }
+      }
+
+      final tableStatus = _parseStatus(row['status'] as String? ?? 'available');
+
+      // ⚠️ LOG: Warn if table is reserved but no reservation data
+      if (tableStatus == TableStatus.reserved && reservation == null) {
+        debugPrint(
+          '[TablesRepo] ⚠️ INCONSISTENT STATE: Table ${row['table_number']} '
+          'marked as RESERVED but no reservation data found.',
+        );
       }
 
       return RestaurantTable(
         id: row['id'] as String,
         tableNumber: row['table_number'] as int? ?? 0,
         capacity: row['capacity'] as int? ?? 4,
-        status: _parseStatus(row['status'] as String? ?? 'available'),
+        status: tableStatus,
         section: _parseSection(row['section'] as String? ?? 'ac'),
         shape: _parseShape(row['shape'] as String? ?? 'square'),
         hasWindow: row['has_window'] as bool? ?? false,

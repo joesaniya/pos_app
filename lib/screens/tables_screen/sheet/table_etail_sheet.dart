@@ -215,8 +215,14 @@ class TableDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   if (table.status == TableStatus.occupied)
-                    OccupiedSection(table: table, prov: prov)
-                  else if (table.status == TableStatus.reserved) ...[
+                  // ✅ FIX: Show occupied details and allow walk-in seating at remaining available seats
+                  ...[
+                    OccupiedSection(table: table, prov: prov),
+                    const SizedBox(height: 16),
+                    // Allow walk-in guests to be seated at available seats even if table is partially occupied
+                    if (table.availableSeats.isNotEmpty)
+                      AvailableSection(table: table, prov: prov),
+                  ] else if (table.status == TableStatus.reserved) ...[
                     // ✅ FIX: Show reservation details AND allow walk-in seating at available seats
                     ReservationSection(table: table, prov: prov),
                     const SizedBox(height: 16),
@@ -1819,7 +1825,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation info banner ───────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -1909,7 +1915,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Info note + Cancel/Edit (only when upcoming reservation exists) ─
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
@@ -3806,7 +3812,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation info banner (shown when table has future res) ──
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -3897,7 +3903,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Slot info note ─────────────────────────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
@@ -4094,7 +4100,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation banner ──────────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -4184,7 +4190,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Info note when upcoming reservation exists ────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
@@ -6047,7 +6053,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation info banner ───────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -6137,7 +6143,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Info note + Cancel/Edit (only when upcoming reservation exists) ─
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
@@ -7966,7 +7972,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation info banner (shown when table has future res) ──
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -8057,7 +8063,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Slot info note ─────────────────────────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
@@ -8254,7 +8260,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Upcoming reservation banner ──────────────────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -8344,7 +8350,7 @@ class AvailableSection extends StatelessWidget {
         ),
 
         // ── Info note when upcoming reservation exists ────────────────────
-        if (upcomingRes != null) ...[
+        if (upcomingRes != null && upcomingRes.countdownLabel != 'Overdue') ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),

@@ -718,6 +718,9 @@ class TablesProvider extends ChangeNotifier {
         nextReservationTime = await _nextReservationToday(tableId);
       }
 
+      // Store reservation details before clearing notification keys
+      final existingReservation = t?.reservation;
+
       // Clear check-in notification keys for any existing reservation
       if (t?.reservation != null) {
         _notif.clearReservationKeys(t!.reservation!.id);
@@ -735,6 +738,20 @@ class TablesProvider extends ChangeNotifier {
       );
 
       await _refreshAll();
+
+      // ✅ FIX: Update reservation status to 'seated' when guest is seated
+      //         This ensures the reservation status changes from 'active' to 'seated'
+      //         and records the check-in time
+      if (result.success && existingReservation != null && !isWalkIn) {
+        await updateReservation(
+          tableId,
+          existingReservation.copyWith(
+            id: existingReservation.id,
+            status: 'seated',
+            checkIn: DateTime.now(),
+          ),
+        );
+      }
 
       return SeatResult(
         success: result.success,
@@ -781,6 +798,9 @@ class TablesProvider extends ChangeNotifier {
 
   Future<void> clearTable(String tableId, {String? seatId}) async {
     try {
+      final t = _tables.where((t) => t.id == tableId).firstOrNull;
+      final existingReservation = t?.reservation;
+
       await TablesRepository.instance.clearTable(
         tableId,
         _userCtx!.businessId,
@@ -791,6 +811,21 @@ class TablesProvider extends ChangeNotifier {
 
       // After clearing, refresh local table + reservation view
       await _refreshAll();
+
+      // ✅ FIX: Update reservation checkout time and status to 'completed' when cleared
+      //         This ensures the checkout time is recorded in the activity log
+      if (existingReservation != null &&
+          (existingReservation.status == 'active' ||
+              existingReservation.status == 'seated')) {
+        await updateReservation(
+          tableId,
+          existingReservation.copyWith(
+            id: existingReservation.id,
+            status: 'completed',
+            checkOut: DateTime.now(),
+          ),
+        );
+      }
 
       // Re-check and restore reserved status if needed (mainly for full tables)
       if (seatId == null) {
@@ -959,7 +994,9 @@ class TablesProvider extends ChangeNotifier {
         'phone': updated.phone,
         'guest_count': updated.guestCount,
         'reserved_for': updated.reservedFor.toUtc().toIso8601String(),
+        'check_in': updated.checkIn?.toUtc().toIso8601String(),
         'check_out': updated.checkOut?.toUtc().toIso8601String(),
+        'status': updated.status,
         'notes': updated.notes,
         'updated_by_uid': _userCtx?.uid,
         'updated_by_name': _userCtx?.name,

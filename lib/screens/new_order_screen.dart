@@ -11,6 +11,10 @@ import 'package:pos_app/models/order_modal.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/orders_provider.dart';
+import '../../services/connectivity_service.dart';
+import '../../database/local_database.dart';
+import '../../services/connectivity_service.dart';
+import '../../database/local_database.dart';
 
 class _C {
   static const bg = Color(0xFFF6F6FB);
@@ -60,6 +64,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   List<Map<String, dynamic>> _allMenuItems = [];
   List<Map<String, dynamic>> _tables = [];
   bool _menuLoading = true;
+  bool _isOnline = true;
+  bool _isLoadingOfflineData = false;
 
   // ── Cart ──────────────────────────────────────────────────
   final Map<String, CartItem> _cart = {};
@@ -118,7 +124,30 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     super.initState();
     _selectedTableId = widget.preselectedTableId;
     _selectedTableNumber = widget.preselectedTableNumber;
+    _setupConnectivityListener();
     _load();
+  }
+
+  void _setupConnectivityListener() {
+    final connectivity = ConnectivityService.instance;
+    _isOnline = connectivity.isOnline;
+
+    connectivity.onStatusChange.listen((status) {
+      if (!mounted) return;
+      final wasOffline = !_isOnline;
+      _isOnline = status == NetworkStatus.online;
+
+      if (wasOffline && _isOnline) {
+        // Just came online — reload fresh data from Supabase
+        debugPrint('🛒 Came online, refreshing menu and tables');
+        if (mounted) {
+          setState(() => _menuLoading = true);
+          Future.wait([_loadMenu(), _loadTables()]);
+        }
+      }
+
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -190,65 +219,162 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
   Future<void> _loadMenu() async {
     if (_businessId.isEmpty) return;
+
+    if (_isOnline) {
+      // ── ONLINE: Load from Supabase ────────────────────────────────────────
+      try {
+        final cats = await Supabase.instance.client
+            .from('menu_categories')
+            .select('id, name, icon, color_hex')
+            .eq('business_id', _businessId)
+            .eq('is_active', true)
+            .order('display_order');
+
+        final items = await Supabase.instance.client
+            .from('menu_items')
+            .select(
+              'id, name, description, price, discount_price, is_veg, is_available, '
+              'is_featured, is_best_seller, preparation_time, category_id, '
+              'menu_categories!inner(name, icon, color_hex)',
+            )
+            .eq('business_id', _businessId)
+            .order('sort_order');
+
+        // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+        if (!mounted) return;
+
+        setState(() {
+          _categories = (cats as List).cast<Map<String, dynamic>>();
+          _allMenuItems = (items as List).map((item) {
+            final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
+            return {
+              ...Map<String, dynamic>.from(item as Map),
+              'category_name': cat['name'] ?? '',
+              'category_icon': cat['icon'] ?? '🍽️',
+              'category_color': cat['color_hex'] ?? '#D4673A',
+            };
+          }).toList();
+          _menuLoading = false;
+        });
+      } catch (e) {
+        debugPrint('🛒 _loadMenu ERROR (Online): $e');
+        // Fall back to offline
+        await _loadMenuOffline();
+      }
+    } else {
+      // ── OFFLINE: Load from LocalDatabase ──────────────────────────────────
+      await _loadMenuOffline();
+    }
+  }
+
+  Future<void> _loadMenuOffline() async {
+    if (_businessId.isEmpty) return;
     try {
-      final cats = await Supabase.instance.client
-          .from('menu_categories')
-          .select('id, name, icon, color_hex')
-          .eq('business_id', _businessId)
-          .eq('is_active', true)
-          .order('display_order');
+      if (!mounted) setState(() => _isLoadingOfflineData = true);
 
-      final items = await Supabase.instance.client
-          .from('menu_items')
-          .select(
-            'id, name, description, price, discount_price, is_veg, is_available, '
-            'is_featured, is_best_seller, preparation_time, category_id, '
-            'menu_categories!inner(name, icon, color_hex)',
-          )
-          .eq('business_id', _businessId)
-          .order('sort_order');
+      final localDb = LocalDatabase.instance;
 
-      // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+      // Load menu items from local database
+      final localItems = await localDb.getEntities(
+        table: LocalDatabase.tMenuItems,
+        businessId: _businessId,
+        whereExtra: 'action != ?',
+        whereExtraArgs: [LocalDatabase.actionDelete],
+      );
+
       if (!mounted) return;
+
+      // Build categories and items from local data
+      final categoriesSet = <String>{};
+      final processedItems = localItems.map((item) {
+        final categoryName = item['category_name'] as String? ?? 'Other';
+        categoriesSet.add(categoryName);
+        return {
+          ...item,
+          'category_name': categoryName,
+          'category_icon': item['category_icon'] as String? ?? '🍽️',
+          'category_color': item['category_color'] as String? ?? '#D4673A',
+        };
+      }).toList();
+
+      // Create category list from items
+      final localCats = categoriesSet
+          .map(
+            (name) => {
+              'name': name,
+              'id': name.toLowerCase().replaceAll(' ', '_'),
+              'icon': '🍽️',
+              'color_hex': '#D4673A',
+            },
+          )
+          .toList();
 
       setState(() {
-        _categories = (cats as List).cast<Map<String, dynamic>>();
-        _allMenuItems = (items as List).map((item) {
-          final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
-          return {
-            ...Map<String, dynamic>.from(item as Map),
-            'category_name': cat['name'] ?? '',
-            'category_icon': cat['icon'] ?? '🍽️',
-            'category_color': cat['color_hex'] ?? '#D4673A',
-          };
-        }).toList();
+        _categories = localCats;
+        _allMenuItems = processedItems;
         _menuLoading = false;
+        _isLoadingOfflineData = false;
       });
+
+      debugPrint('🛒 Menu loaded offline: ${localItems.length} items');
     } catch (e) {
-      debugPrint('🛒 _loadMenu ERROR: $e');
-      // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+      debugPrint('🛒 _loadMenuOffline ERROR: $e');
       if (!mounted) return;
-      setState(() => _menuLoading = false);
+      setState(() {
+        _menuLoading = false;
+        _isLoadingOfflineData = false;
+      });
     }
   }
 
   Future<void> _loadTables() async {
     if (_businessId.isEmpty) return;
-    try {
-      final data = await Supabase.instance.client
-          .from('restaurant_tables')
-          .select(
-            'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status)',
-          )
-          .eq('business_id', _businessId)
-          .eq('is_active', true)
-          .order('table_number');
 
-      // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+    if (_isOnline) {
+      // ── ONLINE: Load from Supabase ────────────────────────────────────────
+      try {
+        final data = await Supabase.instance.client
+            .from('restaurant_tables')
+            .select(
+              'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status)',
+            )
+            .eq('business_id', _businessId)
+            .eq('is_active', true)
+            .order('table_number');
+
+        // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+        if (!mounted) return;
+        setState(() => _tables = (data as List).cast<Map<String, dynamic>>());
+      } catch (e) {
+        debugPrint('🛒 _loadTables ERROR (Online): $e');
+        // Fall back to offline
+        await _loadTablesOffline();
+      }
+    } else {
+      // ── OFFLINE: Load from LocalDatabase ──────────────────────────────────
+      await _loadTablesOffline();
+    }
+  }
+
+  Future<void> _loadTablesOffline() async {
+    if (_businessId.isEmpty) return;
+    try {
+      final localDb = LocalDatabase.instance;
+
+      // Load tables from local database
+      final localTables = await localDb.getEntities(
+        table: LocalDatabase.tTables,
+        businessId: _businessId,
+        whereExtra: 'action != ?',
+        whereExtraArgs: [LocalDatabase.actionDelete],
+      );
+
       if (!mounted) return;
-      setState(() => _tables = (data as List).cast<Map<String, dynamic>>());
+
+      setState(() => _tables = localTables);
+      debugPrint('🛒 Tables loaded offline: ${localTables.length} tables');
     } catch (e) {
-      debugPrint('🛒 _loadTables ERROR: $e');
+      debugPrint('🛒 _loadTablesOffline ERROR: $e');
     }
   }
 
@@ -321,9 +447,21 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             : _phoneCtrl.text.trim(),
         notes: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       );
-      if (mounted) Navigator.pop(context);
+
+      if (mounted) {
+        if (!_isOnline) {
+          _snack('✅ Order created offline. Will sync when online.');
+        } else {
+          _snack('✅ Order placed successfully');
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) Navigator.pop(context);
+      }
     } catch (e) {
-      _snack('Failed to place order: $e');
+      final msg = _isOnline
+          ? 'Failed to place order: $e'
+          : 'Offline: Could not create order: $e';
+      _snack(msg);
     } finally {
       if (mounted) setState(() => _placing = false);
     }
@@ -413,84 +551,120 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     return Container(
       color: _C.surface,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Row(
+      child: Column(
         children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              padding: const EdgeInsets.all(10),
+          if (!_isOnline)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
-                color: _C.surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _C.border),
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFF59E0B), width: 1),
               ),
-              child: const Icon(
-                Icons.arrow_back_ios_new,
-                size: 16,
-                color: _C.textPri,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'New Order',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: _C.textPri,
-                  ),
-                ),
-                Text(
-                  'Select items from menu',
-                  style: TextStyle(fontSize: 11, color: _C.textSec),
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => setState(() => _showCart = !_showCart),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              decoration: BoxDecoration(
-                color: _showCart ? _C.primaryL : _C.primary,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
+              child: const Row(
                 children: [
-                  Icon(
-                    _showCart
-                        ? Icons.menu_book_rounded
-                        : Icons.shopping_cart_outlined,
-                    color: _showCart ? _C.primary : Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 6),
+                  Icon(Icons.cloud_off, color: Color(0xFFD97706), size: 16),
+                  SizedBox(width: 8),
                   Text(
-                    _showCart ? 'Menu' : 'Cart ($cartCount)',
+                    '📵 You are offline. Orders will sync when online.',
                     style: TextStyle(
-                      color: _showCart ? _C.primary : Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      color: Color(0xFFD97706),
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  if (!_showCart && cartTotal > 0) ...[
-                    const SizedBox(width: 6),
-                    Text(
-                      '₹${cartTotal.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _C.surfaceAlt,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _C.border),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_back_ios_new,
+                    size: 16,
+                    color: _C.textPri,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'New Order',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: _C.textPri,
+                      ),
+                    ),
+                    Text(
+                      _isLoadingOfflineData
+                          ? 'Loading offline menu...'
+                          : _isOnline
+                          ? 'Select items from menu'
+                          : 'Offline mode - locked data',
+                      style: const TextStyle(fontSize: 11, color: _C.textSec),
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: () => setState(() => _showCart = !_showCart),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _showCart ? _C.primaryL : _C.primary,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _showCart
+                            ? Icons.menu_book_rounded
+                            : Icons.shopping_cart_outlined,
+                        color: _showCart ? _C.primary : Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _showCart ? 'Menu' : 'Cart ($cartCount)',
+                        style: TextStyle(
+                          color: _showCart ? _C.primary : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (!_showCart && cartTotal > 0) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '₹${cartTotal.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -147,7 +147,21 @@ class TableDetailSheet extends StatelessWidget {
                               bg: secBg,
                             ),
                             const SizedBox(width: 6),
-                            _Badge(text: table.status.label, color: sc, bg: sb),
+                            // ✅ FIX: Show reservation status for seated reservations
+                            if (table.status == TableStatus.occupied &&
+                                table.reservation != null &&
+                                table.reservation!.status == 'seated')
+                              _Badge(
+                                text: '🍽️ Seated',
+                                color: TC.available,
+                                bg: const Color(0xFFDCFCE7),
+                              )
+                            else
+                              _Badge(
+                                text: table.status.label,
+                                color: sc,
+                                bg: sb,
+                              ),
                           ],
                         ),
                       ],

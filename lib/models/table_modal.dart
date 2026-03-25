@@ -326,6 +326,7 @@ class ReservationHistoryItem {
   final DateTime reservedFor;
   final DateTime? checkIn;
   final DateTime? checkOut;
+  final DateTime? actualCheckOut;
   final String? notes;
   final String status;
   final String createdByName;
@@ -346,6 +347,7 @@ class ReservationHistoryItem {
     required this.reservedFor,
     this.checkIn,
     this.checkOut,
+    this.actualCheckOut,
     this.notes,
     required this.status,
     required this.createdByName,
@@ -390,6 +392,9 @@ class ReservationHistoryItem {
       checkOut: row['check_out'] != null
           ? parseToIST(row['check_out'] as String)
           : null,
+      actualCheckOut: row['actual_check_out'] != null
+          ? parseToIST(row['actual_check_out'] as String)
+          : null,
       notes: row['notes'] as String?,
       status: row['status'] as String? ?? 'active',
       createdByName: row['created_by_name'] as String? ?? 'Staff',
@@ -431,6 +436,7 @@ class ReservationHistoryItem {
     DateTime? reservedFor,
     DateTime? checkIn,
     DateTime? checkOut,
+    DateTime? actualCheckOut,
     String? notes,
     String? status,
     String? createdByName,
@@ -450,6 +456,7 @@ class ReservationHistoryItem {
     reservedFor: reservedFor ?? this.reservedFor,
     checkIn: checkIn ?? this.checkIn,
     checkOut: checkOut ?? this.checkOut,
+    actualCheckOut: actualCheckOut ?? this.actualCheckOut,
     notes: notes ?? this.notes,
     status: status ?? this.status,
     createdByName: createdByName ?? this.createdByName,

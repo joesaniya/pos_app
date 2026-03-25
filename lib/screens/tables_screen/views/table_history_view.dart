@@ -556,7 +556,7 @@ class _ActivityTimeline extends StatelessWidget {
       );
     }
 
-    // 3. Cancellation / No-show / Completed
+    // 3. Status-specific events
     if (item.status == 'cancelled') {
       // Use updatedAt if available, else estimate from reservedFor
       final cancelTime = item.checkOut ?? item.reservedFor;
@@ -588,7 +588,7 @@ class _ActivityTimeline extends StatelessWidget {
         ),
       );
     } else if (item.status == 'seated') {
-      // Still seated or completed without explicit check-out
+      // Seated but not yet checked out - show as currently seated
       events.add(
         _TimelineEvent(
           emoji: '✅',
@@ -598,17 +598,29 @@ class _ActivityTimeline extends StatelessWidget {
           color: TC.available,
         ),
       );
-    } else if (item.checkOut != null &&
-        item.checkOut!.isBefore(DateTime.now())) {
-      events.add(
-        _TimelineEvent(
-          emoji: '✅',
-          title: 'Visit Completed',
-          subtitle: 'Guest checked out',
-          time: item.checkOut!,
-          color: const Color(0xFF9CA3AF),
-        ),
-      );
+    } else if (item.status == 'completed') {
+      // Show completion with checkout time
+      if (item.actualCheckOut != null) {
+        events.add(
+          _TimelineEvent(
+            emoji: '✅',
+            title: 'Visit Completed',
+            subtitle: 'Guest checked out',
+            time: item.actualCheckOut!,
+            color: const Color(0xFF9CA3AF),
+          ),
+        );
+      } else if (item.checkOut != null) {
+        events.add(
+          _TimelineEvent(
+            emoji: '✅',
+            title: 'Visit Completed',
+            subtitle: 'Guest checked out',
+            time: item.checkOut!,
+            color: const Color(0xFF9CA3AF),
+          ),
+        );
+      }
     }
 
     return events;

@@ -243,8 +243,14 @@ class TablesProvider extends ChangeNotifier {
   }
 
   Future<void> _refreshAll() async {
+    debugPrint(
+      '[TablesProvider] _refreshAll: Refreshing table and reservation data...',
+    );
     await Future.wait([_fetchTables(), _fetchCalendarReservations()]);
     notifyListeners();
+    debugPrint(
+      '[TablesProvider] _refreshAll: Complete. Tables: ${_tables.length}, Reservations: ${_calendarReservations.length}',
+    );
   }
 
   // ── Notification timer ─────────────────────────────────
@@ -316,7 +322,9 @@ class TablesProvider extends ChangeNotifier {
   }
 
   // ── Fallback local expiry (used if DB function not yet deployed) ────────
-  // Reads calendar reservations already in memory — no extra DB query needed.
+  // CRITICAL: Must use same timing logic as DB function:
+  //   - Grace period: 15 min after reserved_for time
+  //   - Auto-expire if: status='active' AND check_in IS NULL AND time >= grace_period_end
   Future<void> _localExpireStaleReservations() async {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
@@ -324,23 +332,21 @@ class TablesProvider extends ChangeNotifier {
     bool anyExpired = false;
 
     for (final res in List.of(_calendarReservations)) {
-      // Skip if already seated/cancelled/completed
-      if (res.status != 'active') continue;
-      // Skip if guest already checked in
-      if (res.checkIn != null) continue;
+      // Skip if not active or already checked in
+      if (res.status != 'active' || res.checkIn != null) continue;
 
-      // Calculate slot end time
-      final slotEnd =
-          res.checkOut ?? res.reservedFor.add(const Duration(hours: 2));
+      // 🔧 FIX: Use same grace period as DB (15 min after reserved_for)
+      final gracePeriodEnd = res.reservedFor.add(const Duration(minutes: 15));
 
-      // Expire if the entire slot has passed
-      if (slotEnd.isBefore(now)) {
+      // Expire only if grace period has completely passed
+      if (now.isAfter(gracePeriodEnd)) {
         try {
           await _sb
               .from(_kReservations)
               .update({
                 'status': 'no_show',
                 'updated_by_name': 'System (Auto-Expired)',
+                'updated_by_uid': 'system',
               })
               .eq('id', res.id)
               .eq('status', 'active');
@@ -351,15 +357,14 @@ class TablesProvider extends ChangeNotifier {
               .update({
                 'status': 'available',
                 'updated_by_name': 'System (Auto-Expired)',
+                'updated_by_uid': 'system',
               })
-              .eq(
-                'id',
-                res.tableId,
-              ) // NOTE: tableId is on ReservationHistoryItem
+              .eq('id', res.tableId)
               .eq('status', 'reserved');
 
           debugPrint(
-            '[Expiry] ✅ Local-expired reservation ${res.id} for ${res.customerName}',
+            '[Expiry] ✅ Local-expired reservation ${res.id} for ${res.customerName} '
+            '(grace period ended at ${gracePeriodEnd.toIso8601String()})',
           );
           anyExpired = true;
 
@@ -371,12 +376,15 @@ class TablesProvider extends ChangeNotifier {
             businessName: _userCtx?.businessName ?? '',
           );
         } catch (e) {
-          debugPrint('[Expiry] ⚠️ Local expiry error: $e');
+          debugPrint('[Expiry] ⚠️ Local expiry error for ${res.id}: $e');
         }
       }
     }
 
-    if (anyExpired) await _refreshAll();
+    if (anyExpired) {
+      debugPrint('[Expiry] ✅ Local expiry check complete: $anyExpired expired');
+      await _refreshAll();
+    }
   }
 
   // ── Fetch reservation details and send expiry notification ──────────────
@@ -423,16 +431,84 @@ class TablesProvider extends ChangeNotifier {
 
   // ── Update slot-based table statuses ────────────────────────────────────
   // Calls the combined DB function that handles both expiry and slot windows.
+  // This function:
+  //   1. Marks tables 'reserved' when in buffer period (30 min before reservation)
+  //   2. Marks tables 'available' when buffer period expires
+  //   3. Auto-expires 'active' reservations as 'no_show' after grace period (15 min)
   Future<void> _updateSlotStatuses() async {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
     try {
-      await _sb.rpc(
+      final result = await _sb.rpc(
         'fn_update_table_statuses_for_slots',
         params: {'p_business_id': bId},
       );
-    } catch (_) {
-      // Silent — local fallback in _expireStaleReservations handles it
+
+      final reserved = result?['tables_marked_reserved'] as int? ?? 0;
+      final available = result?['tables_marked_available'] as int? ?? 0;
+      final expired = result?['reservations_expired'] as int? ?? 0;
+
+      // Log significant state changes
+      if (reserved > 0 || available > 0 || expired > 0) {
+        debugPrint(
+          '[SlotStatus] ✅ Updated: '
+          'Reserved=$reserved, Available=$available, Expired=$expired',
+        );
+        // Refresh tables and reservations to sync with DB changes
+        await _refreshAll();
+      }
+    } catch (e) {
+      // RPC may fail if function not yet deployed — fail gracefully
+      debugPrint(
+        '[SlotStatus] ⚠️ fn_update_table_statuses_for_slots error: $e',
+      );
+      // Fallback: local slot status check (less efficient but works offline)
+      await _localUpdateSlotStatuses();
+    }
+  }
+
+  // ── Fallback: Local slot status updates (when DB function unavailable) ────
+  Future<void> _localUpdateSlotStatuses() async {
+    final bId = _userCtx?.businessId;
+    if (bId == null || bId.isEmpty) return;
+    final now = DateTime.now();
+    bool anyUpdated = false;
+
+    try {
+      // 1. Mark tables as 'reserved' if in buffer/grace period
+      for (final res in _calendarReservations) {
+        if (res.status != 'active' || res.checkIn != null) continue;
+
+        final bufferStart = res.reservedFor.subtract(
+          const Duration(minutes: 30),
+        );
+        final graceEnd = res.reservedFor.add(const Duration(minutes: 15));
+
+        if (now.isAfter(bufferStart) && now.isBefore(graceEnd)) {
+          // Find the table and check if it needs update
+          final table = _tables.where((t) => t.id == res.tableId).firstOrNull;
+          if (table != null &&
+              table.status != TableStatus.reserved &&
+              table.status != TableStatus.occupied) {
+            try {
+              await _sb
+                  .from(_kTables)
+                  .update({
+                    'status': 'reserved',
+                    'updated_by_name': 'System (Local Slot)',
+                  })
+                  .eq('id', res.tableId);
+              anyUpdated = true;
+            } catch (e) {
+              debugPrint('[SlotStatus] Local update error: $e');
+            }
+          }
+        }
+      }
+
+      if (anyUpdated) await _refreshAll();
+    } catch (e) {
+      debugPrint('[SlotStatus] ⚠️ Local slot status error: $e');
     }
   }
 
@@ -493,6 +569,22 @@ class TablesProvider extends ChangeNotifier {
       final tables = await TablesRepository.instance.fetchTables(bId);
       _tables.clear();
       _tables.addAll(tables);
+
+      // 🔧 LOG: Count tables by status
+      final statusCounts = <String, int>{};
+      for (final t in _tables) {
+        final key = t.status.name;
+        statusCounts[key] = (statusCounts[key] ?? 0) + 1;
+      }
+      final reserved = _tables
+          .where((t) => t.status == TableStatus.reserved)
+          .toList();
+      final missingData = reserved.where((t) => t.reservation == null).length;
+
+      debugPrint(
+        '[TablesProvider] _fetchTables: ${_tables.length} tables loaded. '
+        'Status: $statusCounts. Reserved: ${reserved.length} (${missingData} missing reservation data)',
+      );
 
       notifyListeners();
       _runNotifCheck();

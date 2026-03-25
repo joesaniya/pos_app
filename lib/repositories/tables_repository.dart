@@ -109,9 +109,37 @@ class TablesRepository {
           .map((r) => r as Map<String, dynamic>)
           .toList();
 
+      // 🔧 FIX: Log tables with reservation data for debugging
+      final reservedTables = rows
+          .where((r) => r['status'] == 'reserved')
+          .length;
+      final tablesWithReservationData = rows
+          .where(
+            (r) =>
+                r['reservation_data'] != null &&
+                r['reservation_data'] is Map &&
+                (r['reservation_data'] as Map).isNotEmpty,
+          )
+          .length;
+
+      debugPrint(
+        '[TablesRepo] Remote refresh: ${rows.length} tables, '
+        '$reservedTables reserved, $tablesWithReservationData with reservation data',
+      );
+
       for (final row in rows) {
         final tableId = row['id'] as String;
         row['seats'] = seats.where((s) => s['table_id'] == tableId).toList();
+
+        // 🔧 FIX: Log if reserved table has no reservation data
+        if (row['status'] == 'reserved' &&
+            (row['reservation_data'] == null ||
+                (row['reservation_data'] is Map &&
+                    (row['reservation_data'] as Map).isEmpty))) {
+          debugPrint(
+            '[TablesRepo] ⚠️ Reserved table ${row['table_number']} has NO reservation data!',
+          );
+        }
       }
 
       await _local.replaceAll(
@@ -1086,7 +1114,9 @@ class TablesRepository {
             reservation = Reservation.fromJson(resMap);
           }
         } catch (e) {
-          debugPrint('[TablesRepo] Failed to parse reservation_data: $e');
+          debugPrint(
+            '[TablesRepo] ⚠️ Failed to parse reservation_data for table ${row['table_number']}: $e',
+          );
         }
       } else {
         // 🔧 FALLBACK: Build from individual columns if JSON not available
@@ -1109,7 +1139,9 @@ class TablesRepository {
               'created_by_role': row['created_by_role'],
             });
           } catch (e) {
-            debugPrint('[TablesRepo] Failed to parse reservation columns: $e');
+            debugPrint(
+              '[TablesRepo] ⚠️ Failed to parse reservation columns for table ${row['table_number']}: $e',
+            );
           }
         }
       }
@@ -1119,8 +1151,9 @@ class TablesRepository {
       // ⚠️ LOG: Warn if table is reserved but no reservation data
       if (tableStatus == TableStatus.reserved && reservation == null) {
         debugPrint(
-          '[TablesRepo] ⚠️ INCONSISTENT STATE: Table ${row['table_number']} '
-          'marked as RESERVED but no reservation data found.',
+          '[TablesRepo] ⚠️ CRITICAL: Table ${row['table_number']} marked RESERVED '
+          'but NO reservation data found. reservation_data=${row['reservation_data']}, '
+          'reservation_id=${row['reservation_id']}',
         );
       }
 
@@ -1149,7 +1182,9 @@ class TablesRepository {
         seats: seats,
       );
     } catch (e) {
-      debugPrint('[TablesRepo] _rowToTable error: $e');
+      debugPrint(
+        '[TablesRepo] ⚠️ _rowToTable error for table ${row['table_number']}: $e',
+      );
       return null;
     }
   }

@@ -579,6 +579,42 @@ class Order {
 
   Duration get elapsed => DateTime.now().difference(createdAt);
 
+  // ── TABLE & SEAT DISPLAY HELPERS ─────────────────────────────
+  String get tableDisplayName {
+    if (tableNumber != null && tableNumber! > 0) {
+      return 'Table ${tableNumber.toString().padLeft(2, '0')}';
+    }
+    return 'No Table';
+  }
+
+  String get seatDisplayLabel {
+    if (seatLabel != null && seatLabel!.isNotEmpty) {
+      return seatLabel!;
+    }
+    if (tableSeatId != null && tableSeatId!.isNotEmpty) {
+      return 'Seat ID: ${tableSeatId!.substring(0, 8)}';
+    }
+    return '—';
+  }
+
+  String get tableAndSeatLabel {
+    if (tableNumber == null || tableNumber! <= 0) {
+      return orderType == OrderType.dineIn
+          ? 'No Table Assigned'
+          : orderType.label;
+    }
+    final table = 'T${tableNumber.toString().padLeft(2, '0')}';
+    if (seatLabel != null && seatLabel!.isNotEmpty) {
+      return '$table - Seat ${seatLabel!}';
+    }
+    return table;
+  }
+
+  bool get hasSeatAssignment => tableSeatId != null && tableSeatId!.isNotEmpty;
+
+  bool get hasDineInTable =>
+      orderType == OrderType.dineIn && tableNumber != null && tableNumber! > 0;
+
   // ── Deserialization ─────────────────────────────────────────
   factory Order.fromJson(Map<String, dynamic> j) {
     List<OrderItem> items = [];
@@ -611,11 +647,14 @@ class Order {
       tableNumber: j['table_number'] as int?,
       tableSeatId: j['table_seat_id'] as String?,
       seatLabel: j['seat_label'] as String?,
-      sessionId: j['session_id'] as String?, // FIX: parse session_id
+      sessionId:
+          j['session_id'] is String && (j['session_id'] as String).isNotEmpty
+          ? j['session_id'] as String
+          : null, // FIX: parse session_id
       customerName: j['customer_name'] as String?,
       customerPhone: j['customer_phone'] as String?,
       subtotal: (j['subtotal'] as num? ?? 0).toDouble(),
-      taxAmount: (j['tax_amount'] as num? ?? 0).toDouble(),
+      taxAmount: (j['tax_amount'] as num? ?? j['tax'] as num? ?? 0).toDouble(),
       discountAmount: (j['discount_amount'] as num? ?? 0).toDouble(),
       tipAmount: (j['tip_amount'] as num? ?? 0).toDouble(),
       roundOff: (j['round_off'] as num? ?? 0).toDouble(),

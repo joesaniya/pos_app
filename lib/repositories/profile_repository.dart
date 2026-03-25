@@ -125,28 +125,21 @@ class ProfileRepository {
     final sb = Supabase.instance.client;
 
     try {
-      final now_dt = DateTime.now();
-      final now = now_dt.toUtc().toIso8601String();
+      final nowDt = DateTime.now();
 
       // Today's stats
-      final todayStartDt = now_dt
+      final todayStartDt = nowDt
           .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0)
           .toUtc();
 
       // This week start (Monday)
-      final weekStartDt = now_dt
-          .subtract(Duration(days: now_dt.weekday - 1))
+      final weekStartDt = nowDt
+          .subtract(Duration(days: nowDt.weekday - 1))
           .copyWith(hour: 0, minute: 0, second: 0, millisecond: 0)
           .toUtc();
 
       // This month start
-      final monthStartDt = DateTime(
-        now_dt.year,
-        now_dt.month,
-        1,
-      ).toUtc();
-
-      final weekStart = weekStartDt.toIso8601String();
+      final monthStartDt = DateTime(nowDt.year, nowDt.month, 1).toUtc();
 
       // Fetch all completed orders for this user to compute aggregates locally
       final List<dynamic> orders = await sb
@@ -183,35 +176,30 @@ class ProfileRepository {
         revenueAllTimeAmount += amount;
         if (tableId != null) tablesAllTime.add(tableId);
 
-        if (createdAt.isAfter(monthStartDt) || createdAt.isAtSameMomentAs(monthStartDt)) {
+        if (createdAt.isAfter(monthStartDt) ||
+            createdAt.isAtSameMomentAs(monthStartDt)) {
           ordersMonthCount++;
           revenueMonthAmount += amount;
           if (tableId != null) tablesMonth.add(tableId);
         }
 
-        if (createdAt.isAfter(weekStartDt) || createdAt.isAtSameMomentAs(weekStartDt)) {
+        if (createdAt.isAfter(weekStartDt) ||
+            createdAt.isAtSameMomentAs(weekStartDt)) {
           ordersWeekCount++;
           revenueWeekAmount += amount;
           if (tableId != null) tablesWeek.add(tableId);
         }
 
-        if (createdAt.isAfter(todayStartDt) || createdAt.isAtSameMomentAs(todayStartDt)) {
+        if (createdAt.isAfter(todayStartDt) ||
+            createdAt.isAtSameMomentAs(todayStartDt)) {
           ordersTodayCount++;
           revenueTodayAmount += amount;
           if (tableId != null) tablesToday.add(tableId);
         }
       }
 
-      // Fetch shifts this week
-      final List<dynamic> shiftsWeek = await sb
-          .from('shifts')
-          .select('id')
-          .eq('business_id', businessId)
-          .eq('staff_uid', uid)
-          .gte('start_time', weekStart)
-          .lte('start_time', now);
-
-      final shiftCount = shiftsWeek.length;
+      // NOTE: Shifts table not implemented yet - return 0 for now
+      final shiftCount = 0;
 
       return {
         'ordersTodayCount': ordersTodayCount,
@@ -220,11 +208,15 @@ class ProfileRepository {
         'ordersWeekCount': ordersWeekCount,
         'revenueWeekAmount': revenueWeekAmount,
         'tablesWeekCount': tablesWeek.length,
-        'avgOrderValueWeek': ordersWeekCount > 0 ? revenueWeekAmount / ordersWeekCount : 0.0,
+        'avgOrderValueWeek': ordersWeekCount > 0
+            ? revenueWeekAmount / ordersWeekCount
+            : 0.0,
         'ordersMonthCount': ordersMonthCount,
         'revenueMonthAmount': revenueMonthAmount,
         'tablesMonthCount': tablesMonth.length,
-        'avgOrderValueMonth': ordersMonthCount > 0 ? revenueMonthAmount / ordersMonthCount : 0.0,
+        'avgOrderValueMonth': ordersMonthCount > 0
+            ? revenueMonthAmount / ordersMonthCount
+            : 0.0,
         'ordersAllTimeCount': ordersAllTimeCount,
         'revenueAllTimeAmount': revenueAllTimeAmount,
         'tablesAllTimeCount': tablesAllTime.length,

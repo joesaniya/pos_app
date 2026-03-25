@@ -20,6 +20,7 @@
 //     calls clearTableOrdersLocally() after a successful remote RPC.
 // ══════════════════════════════════════════════════════════════════════════════
 
+import 'dart:convert';
 import 'dart:developer';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/providers/tables_provider.dart';
@@ -45,6 +46,13 @@ class TablesRepository {
   static const _kTables = 'restaurant_tables';
   static const _kReservations = 'table_reservations';
   static const _kView = 'vw_tables_with_reservation';
+
+  bool _isUuid(String id) {
+    final uuidRe = RegExp(
+      r'^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$',
+    );
+    return uuidRe.hasMatch(id);
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  PAYLOAD SANITISATION
@@ -367,33 +375,49 @@ class TablesRepository {
     String? staffName,
   }) async {
     if (_connectivity.isOnline) {
-      try {
-        final result = await _sb.rpc(
-          'fn_seat_guest_v2',
-          params: {
-            'p_table_id': tableId,
-            'p_customer_name': customerName,
-            'p_staff_uid': staffUid,
-            'p_staff_name': staffName,
-            if (seatIds != null && seatIds.isNotEmpty) 'p_seat_ids': seatIds,
-          },
+      if (!_isUuid(tableId)) {
+        debugPrint(
+          '[TablesRepo] seatGuests: tableId is non-UUID (offline fallback): $tableId',
         );
+      } else {
+        try {
+          final result = await _sb.rpc(
+            'fn_seat_guest_v2',
+            params: {
+              'p_table_id': tableId,
+              'p_customer_name': customerName,
+              'p_staff_uid': staffUid,
+              'p_staff_name': staffName,
+              if (seatIds != null && seatIds.isNotEmpty) 'p_seat_ids': seatIds,
+            },
+          );
 
-        // FIX: Clear stale local orders after seating a new guest online too
-        await OrdersRepository.instance.clearTableOrdersLocally(
-          tableId: tableId,
-          businessId: businessId,
-        );
+          // FIX: Clear stale local orders after seating a new guest online too
+          if (seatIds != null && seatIds.isNotEmpty) {
+            for (final sid in seatIds) {
+              await OrdersRepository.instance.clearSeatOrdersLocally(
+                tableId: tableId,
+                seatId: sid,
+                businessId: businessId,
+              );
+            }
+          } else {
+            await OrdersRepository.instance.clearTableOrdersLocally(
+              tableId: tableId,
+              businessId: businessId,
+            );
+          }
 
-        await refreshFromRemote(businessId);
-        return SeatResult(
-          success: result?['success'] == true,
-          sessionId: result?['session_id'] as String?,
-          reservationId: result?['reservation_id'] as String?,
-        );
-      } catch (e) {
-        debugPrint('[TablesRepo] Online seatGuests failed: $e');
-        // Fall through to offline path so the app still works
+          await refreshFromRemote(businessId);
+          return SeatResult(
+            success: result?['success'] == true,
+            sessionId: result?['session_id'] as String?,
+            reservationId: result?['reservation_id'] as String?,
+          );
+        } catch (e) {
+          debugPrint('[TablesRepo] Online seatGuests failed: $e');
+          // Fall through to offline path so the app still works
+        }
       }
     }
 
@@ -402,11 +426,22 @@ class TablesRepository {
     final newSessionId = _uuid.v4();
     final now = DateTime.now().toUtc().toIso8601String();
 
-    // FIX: Clear stale orders from the previous guest first
-    await OrdersRepository.instance.clearTableOrdersLocally(
-      tableId: tableId,
-      businessId: businessId,
-    );
+    // FIX: Clear stale local orders from the previous guest first.
+    // Seat-level seating should not clear other seats' active orders.
+    if (seatIds != null && seatIds.isNotEmpty) {
+      for (final sid in seatIds) {
+        await OrdersRepository.instance.clearSeatOrdersLocally(
+          tableId: tableId,
+          seatId: sid,
+          businessId: businessId,
+        );
+      }
+    } else {
+      await OrdersRepository.instance.clearTableOrdersLocally(
+        tableId: tableId,
+        businessId: businessId,
+      );
+    }
 
     // FIX: Determine new table status based on seat selection
     final newTableStatus = await _computeTableStatusAfterSeating(
@@ -489,26 +524,42 @@ class TablesRepository {
     String? staffName,
   }) async {
     if (_connectivity.isOnline) {
-      try {
-        await _sb.rpc(
-          'fn_checkout_v2',
-          params: {
-            'p_table_id': tableId,
-            if (seatId != null) 'p_seat_id': seatId,
-          },
+      if (!_isUuid(tableId)) {
+        debugPrint(
+          '[TablesRepo] clearTable: tableId is non-UUID (offline fallback): $tableId',
         );
+      } else {
+        try {
+          // Choose the correct RPC function based on whether we're clearing a seat or entire table
+          final rpcFunction = seatId != null
+              ? 'fn_clear_seat'
+              : 'fn_checkout_v2';
+          final rpcParams = seatId != null
+              ? {'p_table_id': tableId, 'p_seat_id': seatId}
+              : {'p_table_id': tableId};
 
-        // Mirror remote checkout locally to keep the offline cache consistent.
-        await OrdersRepository.instance.clearTableOrdersLocally(
-          tableId: tableId,
-          businessId: businessId,
-        );
+          await _sb.rpc(rpcFunction, params: rpcParams);
 
-        await refreshFromRemote(businessId);
-        return;
-      } catch (e) {
-        debugPrint('[TablesRepo] Online clearTable failed: $e');
-        // Fall through to local fallback
+          // Mirror remote checkout locally to keep the offline cache consistent.
+          if (seatId != null) {
+            await OrdersRepository.instance.clearSeatOrdersLocally(
+              tableId: tableId,
+              seatId: seatId,
+              businessId: businessId,
+            );
+          } else {
+            await OrdersRepository.instance.clearTableOrdersLocally(
+              tableId: tableId,
+              businessId: businessId,
+            );
+          }
+
+          await refreshFromRemote(businessId);
+          return;
+        } catch (e) {
+          debugPrint('[TablesRepo] Online clearTable failed: $e');
+          // Fall through to local fallback
+        }
       }
     }
 
@@ -1013,6 +1064,25 @@ class TablesRepository {
       final seats = (row['seats'] as List? ?? [])
           .map((s) => TableSeat.fromJson(s as Map<String, dynamic>))
           .toList();
+
+      Reservation? reservation;
+      final reservationData = row['reservation_data'];
+      if (reservationData != null) {
+        Map<String, dynamic> resMap;
+        if (reservationData is Map<String, dynamic>) {
+          resMap = reservationData;
+        } else if (reservationData is String) {
+          resMap = jsonDecode(reservationData) as Map<String, dynamic>;
+        } else {
+          resMap = {};
+        }
+        try {
+          reservation = Reservation.fromJson(resMap);
+        } catch (e) {
+          debugPrint('[TablesRepo] Failed to parse reservation_data: $e');
+        }
+      }
+
       return RestaurantTable(
         id: row['id'] as String,
         tableNumber: row['table_number'] as int? ?? 0,
@@ -1029,7 +1099,12 @@ class TablesRepository {
             ? DateTime.tryParse(row['occupied_since'] as String)
             : null,
         // FIX: expose session_id so order-repo can filter by it
-        sessionId: row['session_id'] as String?,
+        sessionId:
+            row['session_id'] is String &&
+                (row['session_id'] as String).isNotEmpty
+            ? row['session_id'] as String
+            : null,
+        reservation: reservation,
         seats: seats,
       );
     } catch (e) {

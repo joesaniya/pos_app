@@ -235,6 +235,53 @@ class OrdersRepository {
     }
   }
 
+  /// Clears only active orders for a specific seat, preserving other seats' orders
+  Future<void> clearSeatOrdersLocally({
+    required String tableId,
+    required String seatId,
+    required String businessId,
+  }) async {
+    try {
+      final localRows = await _local.getEntities(
+        table: LocalDatabase.tOrders,
+        businessId: businessId,
+        whereExtra: 'action != ?',
+        whereExtraArgs: [LocalDatabase.actionDelete],
+      );
+
+      final activeStatuses = {'pending', 'preparing', 'ready'};
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      for (final row in localRows) {
+        final status = row['status'] as String? ?? '';
+        if (row['table_id'] == tableId &&
+            row['table_seat_id'] == seatId &&
+            activeStatuses.contains(status)) {
+          final updated = Map<String, dynamic>.from(row);
+          updated['status'] = 'completed';
+          updated['payment_status'] = 'paid';
+          updated['completed_at'] = now;
+          updated['updated_at'] = now;
+
+          await _local.upsertEntity(
+            table: LocalDatabase.tOrders,
+            id: row['id'] as String,
+            businessId: businessId,
+            data: updated,
+            syncStatus: LocalDatabase.syncSynced,
+            action: LocalDatabase.actionUpdate,
+          );
+        }
+      }
+
+      log(
+        '[OrdersRepo] Cleared stale orders for seat $seatId on table $tableId',
+      );
+    } catch (e) {
+      debugPrint('[OrdersRepo] clearSeatOrdersLocally error: $e');
+    }
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  ORDER NUMBER SEQUENCE (LOCAL FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
@@ -274,6 +321,7 @@ class OrdersRepository {
     String? tableId,
     int? tableNumber,
     String? tableSeatId,
+    String? seatLabel,
     String? customerName,
     String? customerPhone,
     String? notes,
@@ -293,6 +341,7 @@ class OrdersRepository {
           tableId: tableId,
           tableNumber: tableNumber,
           tableSeatId: tableSeatId,
+          seatLabel: seatLabel,
           customerName: customerName,
           customerPhone: customerPhone,
           notes: notes,
@@ -424,6 +473,7 @@ class OrdersRepository {
       'table_id': tableId,
       'table_number': tableNumber,
       'table_seat_id': tableSeatId,
+      'seat_label': seatLabel, // FIX: store seat label
       'session_id': sessionId, // FIX: persist session_id
       'customer_name': customerName,
       'customer_phone': customerPhone,

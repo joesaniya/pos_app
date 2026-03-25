@@ -79,7 +79,7 @@ class SeatHistoryRepository {
   // ── Update session (checkout) ─────────────────────────────────────────────
 
   /// Update session with checkout time (when guest leaves)
-  Future<SeatSessionHistory> checkoutSession({
+  Future<SeatSessionHistory?> checkoutSession({
     required String sessionId,
     DateTime? checkOutTime,
     String status = 'checked-out',
@@ -90,7 +90,13 @@ class SeatHistoryRepository {
       // Find the session
       final existing = await _db.getSeatHistoryBySessionId(sessionId);
       if (existing == null) {
-        throw Exception('Session not found: $sessionId');
+        // ✅ FIX: Session may not exist in history (e.g., if created via seatGuests
+        // but createSession() was never called). Log as warning, not error - don't crash.
+        log(
+          '[SeatHistory] ⚠️ Session not in history (may be from web session): $sessionId',
+          level: 1,
+        );
+        return null; // Return null gracefully
       }
 
       // Calculate duration
@@ -124,7 +130,7 @@ class SeatHistoryRepository {
 
       return SeatSessionHistory.fromJson(updatedData);
     } catch (e) {
-      log('[SeatHistory] Error checking out session: $e');
+      log('[SeatHistory] Error checking out session: $e', level: 2);
       rethrow;
     }
   }

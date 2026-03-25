@@ -590,7 +590,7 @@ class _OccupiedSectionState extends State<OccupiedSection> {
               stBg: _statusBg(order.status),
               stEmoji: _statusEmoji(order.status),
               // Show "Checkout Seat" button only for seat-level orders.
-              // Tapping it clears just that seat via fn_checkout_v2(p_seat_id).
+              // Tapping it clears just that seat via fn_clear_seat(p_table_id, p_seat_id).
               onCheckoutSeat: order.tableSeatId != null
                   ? () {
                       widget.prov.clearTable(

@@ -119,26 +119,38 @@ class OrdersService {
         .toList();
   }
 
+  bool _isTableIdUuid(String id) {
+    final uuidRe = RegExp(
+      r'^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$',
+    );
+    return uuidRe.hasMatch(id);
+  }
+
   // ── FIX: session-aware table orders ────────────────────────────────────────
   Future<List<Order>> fetchTableOrders({
     required String tableId,
     required String businessId,
   }) async {
     // Try the new session-aware RPC first (available after migration v8)
-    try {
-      final rpcData = await _db.rpc(
-        'fn_table_orders_v2',
-        params: {'p_table_id': tableId},
-      );
-      if (rpcData != null) {
-        return (rpcData as List)
-            .map((j) => Order.fromJson(j as Map<String, dynamic>))
-            .toList();
+    if (_isTableIdUuid(tableId)) {
+      try {
+        final rpcData = await _db.rpc(
+          'fn_table_orders_v2',
+          params: {'p_table_id': tableId},
+        );
+        if (rpcData != null) {
+          return (rpcData as List)
+              .map((j) => Order.fromJson(j as Map<String, dynamic>))
+              .toList();
+        }
+      } catch (rpcError) {
+        debugPrint(
+          '[OrdersService] fn_table_orders_v2 RPC failed, using fallback: $rpcError',
+        );
       }
-    } catch (rpcError) {
-      // RPC not deployed yet — fall back to direct query with session filter
+    } else {
       debugPrint(
-        '[OrdersService] fn_table_orders_v2 not found, using fallback: $rpcError',
+        '[OrdersService] tableId is not UUID, skipping fn_table_orders_v2 RPC: $tableId',
       );
     }
 
@@ -216,6 +228,7 @@ class OrdersService {
     String? tableId,
     int? tableNumber,
     String? tableSeatId,
+    String? seatLabel,
     String? customerName,
     String? customerPhone,
     String? notes,

@@ -126,7 +126,7 @@ class OrdersProvider extends ChangeNotifier {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
       final storedData = await StorageService.instance.getUserData();
-      
+
       _uid = storedData['uid'] as String? ?? firebaseUser?.uid ?? '';
       _name = storedData['name'] as String? ?? '';
       _role = storedData['role'] as String? ?? 'staff';
@@ -174,7 +174,9 @@ class OrdersProvider extends ChangeNotifier {
     // ── Double-fetch for offline-first ─────────────────────────────────────────
     if (ConnectivityService.instance.isOnline && _businessId.isNotEmpty) {
       try {
-        await OrdersRepository.instance.refreshOrdersFromRemote(businessId: _businessId);
+        await OrdersRepository.instance.refreshOrdersFromRemote(
+          businessId: _businessId,
+        );
         _orders = await OrdersRepository.instance.fetchTodayOrders(
           businessId: _businessId,
           staffUid: null,
@@ -213,6 +215,7 @@ class OrdersProvider extends ChangeNotifier {
     String? tableId,
     int? tableNumber,
     String? tableSeatId,
+    String? seatLabel,
     String? customerName,
     String? customerPhone,
     String? notes,
@@ -243,6 +246,7 @@ class OrdersProvider extends ChangeNotifier {
       tableId: tableId,
       tableNumber: tableNumber,
       tableSeatId: tableSeatId,
+      seatLabel: seatLabel,
       customerName: customerName,
       customerPhone: customerPhone,
       notes: notes,
@@ -447,7 +451,9 @@ class OrdersProvider extends ChangeNotifier {
   }
 
   Future<void> markNotificationsRead() async {
-    await OrdersRepository.instance.markNotificationsRead(businessId: _businessId);
+    await OrdersRepository.instance.markNotificationsRead(
+      businessId: _businessId,
+    );
     _unreadCount = 0;
     notifyListeners();
   }

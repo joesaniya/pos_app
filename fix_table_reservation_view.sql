@@ -21,6 +21,7 @@ SELECT
   rt.capacity,
   rt.status,
   rt.current_customer_name,
+  rt.current_customer_name AS customer_name,
   rt.current_order_id,
   rt.current_order_total,
   rt.occupied_since,

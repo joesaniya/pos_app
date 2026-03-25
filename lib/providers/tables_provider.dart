@@ -464,6 +464,18 @@ class TablesProvider extends ChangeNotifier {
           ),
           callback: (_) => _refreshAll(),
         )
+        // FIX: Subscribe to seat status changes — critical for real-time occupancy sync
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'table_seats',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'business_id',
+            value: bId,
+          ),
+          callback: (_) => _refreshAll(),
+        )
         .subscribe();
   }
 

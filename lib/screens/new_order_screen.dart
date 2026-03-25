@@ -1069,6 +1069,15 @@ class _CartView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
       children: [
+        // ── ALLOCATION DISPLAY BANNER ──────────────────────────────────────
+        if (orderType == OrderType.dineIn && selectedTableId != null)
+          _AllocationDisplayBanner(
+            tableId: selectedTableId,
+            tables: tables,
+            seatId: selectedSeatId,
+          ),
+        const SizedBox(height: 16),
+
         _SectionLabel('Order Type'),
         const SizedBox(height: 10),
         Row(
@@ -1171,7 +1180,8 @@ class _CartView extends StatelessWidget {
                 final occupiedCount = tSeats
                     .where((s) => (s as Map)['status'] == 'occupied')
                     .length;
-                final isPartial = tSeats.isNotEmpty &&
+                final isPartial =
+                    tSeats.isNotEmpty &&
                     occupiedCount > 0 &&
                     occupiedCount < tSeats.length;
                 final availCount = tSeats.length - occupiedCount;
@@ -1239,9 +1249,7 @@ class _CartView extends StatelessWidget {
                         ),
                         // Show available/total when partial; capacity otherwise
                         Text(
-                          isPartial
-                              ? '$availCount/$cap free'
-                              : '$cap seats',
+                          isPartial ? '$availCount/$cap free' : '$cap seats',
                           style: TextStyle(
                             fontSize: 9,
                             color: isSel
@@ -1309,47 +1317,49 @@ class _CartView extends StatelessWidget {
           const SizedBox(height: 14),
 
           if (selectedTableId != null) ...[
-            Builder(builder: (context) {
-              final selectedTable = tables.firstWhere(
-                (t) => t['id'] == selectedTableId,
-                orElse: () => {},
-              );
-              final List<dynamic> seats = selectedTable['table_seats'] ?? [];
-              if (seats.isEmpty) return const SizedBox.shrink();
+            Builder(
+              builder: (context) {
+                final selectedTable = tables.firstWhere(
+                  (t) => t['id'] == selectedTableId,
+                  orElse: () => {},
+                );
+                final List<dynamic> seats = selectedTable['table_seats'] ?? [];
+                if (seats.isEmpty) return const SizedBox.shrink();
 
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _SectionLabel('Select Seat (Optional)'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _SeatChip(
-                        label: 'Whole Table',
-                        isSelected: selectedSeatId == null,
-                        onTap: () => onSeatSelected(null),
-                      ),
-                      ...seats.map((s) {
-                        final sid = s['id'] as String;
-                        final sl = s['seat_label'] as String;
-                        final status = s['status'] as String? ?? 'available';
-                        final isSel = selectedSeatId == sid;
-                        
-                        return _SeatChip(
-                          label: 'Seat $sl',
-                          isSelected: isSel,
-                          status: status,
-                          onTap: () => onSeatSelected(sid),
-                        );
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                ],
-              );
-            }),
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _SectionLabel('Select Seat (Optional)'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _SeatChip(
+                          label: 'Whole Table',
+                          isSelected: selectedSeatId == null,
+                          onTap: () => onSeatSelected(null),
+                        ),
+                        ...seats.map((s) {
+                          final sid = s['id'] as String;
+                          final sl = s['seat_label'] as String;
+                          final status = s['status'] as String? ?? 'available';
+                          final isSel = selectedSeatId == sid;
+
+                          return _SeatChip(
+                            label: 'Seat $sl',
+                            isSelected: isSel,
+                            status: status,
+                            onTap: () => onSeatSelected(sid),
+                          );
+                        }),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                );
+              },
+            ),
           ],
         ],
 
@@ -4674,6 +4684,199 @@ class _BillRow extends StatelessWidget {
 //   }
 // }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  ALLOCATION DISPLAY BANNER WIDGET
+// ══════════════════════════════════════════════════════════════════════════════
+// Shows currently allocated table and seat information with real-time updates
+class _AllocationDisplayBanner extends StatelessWidget {
+  final String? tableId;
+  final List<Map<String, dynamic>> tables;
+  final String? seatId;
+
+  const _AllocationDisplayBanner({
+    required this.tableId,
+    required this.tables,
+    this.seatId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (tableId == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Find the selected table
+    final selectedTable = tables.firstWhere(
+      (t) => t['id'] == tableId,
+      orElse: () => {},
+    );
+
+    if (selectedTable.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final tableNum = selectedTable['table_number'] as int? ?? 0;
+    final tableStatus = selectedTable['status'] as String? ?? 'available';
+    final totalSeats = (selectedTable['table_seats'] as List?)?.length ?? 0;
+
+    // Find selected seat details if provided
+    String? selectedSeatLabel;
+    if (seatId != null && seatId!.isNotEmpty) {
+      final seats = selectedTable['table_seats'] as List? ?? [];
+      try {
+        final seat = seats.firstWhere(
+          (s) => (s as Map)['id'] == seatId,
+          orElse: () => {},
+        );
+        if ((seat as Map).isNotEmpty) {
+          selectedSeatLabel = seat['seat_label'] as String?;
+        }
+      } catch (_) {}
+    }
+
+    final statusColor = _tableStatusColor(tableStatus);
+    final statusEmoji = _tableStatusEmoji(tableStatus);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: statusColor.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: Status and Table Number
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(statusEmoji, style: const TextStyle(fontSize: 20)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'TABLE ${tableNum.toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: statusColor,
+                      ),
+                    ),
+                    Text(
+                      '$totalSeats seats available • ${_statusLabel(tableStatus)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _C.textMute,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // Seat selection info if a specific seat is selected
+          if (selectedSeatLabel != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: _C.primary.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _C.primary.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Text('🪗 ', style: TextStyle(fontSize: 14)),
+                  Expanded(
+                    child: Text(
+                      'Seat $selectedSeatLabel is allocated to this order',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _C.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text(
+              '📋 Whole table is allocated',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: statusColor.withOpacity(0.8),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Helper methods from _CartView
+  Color _tableStatusColor(String status) {
+    switch (status) {
+      case 'available':
+        return _C.available;
+      case 'occupied':
+        return _C.occupied;
+      case 'reserved':
+        return _C.reserved;
+      case 'cleaning':
+        return _C.cleaning;
+      default:
+        return _C.textMute;
+    }
+  }
+
+  String _tableStatusEmoji(String status) {
+    switch (status) {
+      case 'available':
+        return '✅';
+      case 'occupied':
+        return '🍽️';
+      case 'reserved':
+        return '📅';
+      case 'cleaning':
+        return '🧹';
+      default:
+        return '❓';
+    }
+  }
+
+  String _statusLabel(String status) {
+    if (status == 'available') return 'Available';
+    if (status == 'occupied') return 'Occupied (can order)';
+    if (status == 'reserved') return 'Reserved (can order)';
+    if (status == 'cleaning') return 'Cleaning';
+    return 'Unknown';
+  }
+}
+
 class _SeatChip extends StatelessWidget {
   final String label;
   final bool isSelected;
@@ -4702,7 +4905,7 @@ class _SeatChip extends StatelessWidget {
       borderColor = _C.available.withOpacity(0.3);
       iconColor = _C.available;
     }
-    
+
     if (isSelected) {
       bgColor = _C.primary;
       borderColor = _C.primary;
@@ -4725,14 +4928,20 @@ class _SeatChip extends StatelessWidget {
             if (status == 'occupied')
               Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.person, size: 14, color: isSelected ? Colors.white : iconColor),
+                child: Icon(
+                  Icons.person,
+                  size: 14,
+                  color: isSelected ? Colors.white : iconColor,
+                ),
               ),
             Text(
               label,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: isSelected ? Colors.white : (status == 'occupied' ? _C.occupied : _C.textPri),
+                color: isSelected
+                    ? Colors.white
+                    : (status == 'occupied' ? _C.occupied : _C.textPri),
               ),
             ),
           ],

@@ -10,7 +10,6 @@ import 'package:pos_app/models/order_modal.dart';
 import '../../providers/orders_provider.dart';
 import 'new_order_screen.dart';
 
-
 // ── Color palette ──────────────────────────────────────────────────────────────
 class OC {
   static const bg = Color(0xFFF6F6FB);
@@ -118,7 +117,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
             icon: const Icon(Icons.add, color: Colors.white),
             label: const Text(
               'New Order',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         );
@@ -280,9 +282,17 @@ class _StatusFilter extends StatelessWidget {
     final tabs = [
       (null, 'All', prov.allOrders.length),
       (OrderStatus.pending, 'Pending', prov.countByStatus(OrderStatus.pending)),
-      (OrderStatus.preparing, 'Preparing', prov.countByStatus(OrderStatus.preparing)),
+      (
+        OrderStatus.preparing,
+        'Preparing',
+        prov.countByStatus(OrderStatus.preparing),
+      ),
       (OrderStatus.ready, 'Ready', prov.countByStatus(OrderStatus.ready)),
-      (OrderStatus.completed, 'Done', prov.countByStatus(OrderStatus.completed)),
+      (
+        OrderStatus.completed,
+        'Done',
+        prov.countByStatus(OrderStatus.completed),
+      ),
     ];
 
     return Container(
@@ -294,8 +304,9 @@ class _StatusFilter extends StatelessWidget {
         child: Row(
           children: tabs.map((tab) {
             final isSel = prov.filterStatus == tab.$1;
-            final tabColor =
-                tab.$1 == null ? OC.primary : _statusColor(tab.$1!);
+            final tabColor = tab.$1 == null
+                ? OC.primary
+                : _statusColor(tab.$1!);
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
@@ -339,7 +350,8 @@ class _StatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = prov.countByStatus(OrderStatus.pending) +
+    final active =
+        prov.countByStatus(OrderStatus.pending) +
         prov.countByStatus(OrderStatus.preparing);
     return Container(
       color: OC.surface,
@@ -403,8 +415,7 @@ class _Body extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (prov.isLoading && prov.allOrders.isEmpty) {
-      return const Center(
-          child: CircularProgressIndicator(color: OC.primary));
+      return const Center(child: CircularProgressIndicator(color: OC.primary));
     }
 
     if (prov.error != null && prov.allOrders.isEmpty) {
@@ -544,12 +555,12 @@ class _OrderCard extends StatelessWidget {
     final sBg = _statusBg(status);
 
     // Kitchen flow: pending and preparing can advance (not ready)
-    final canAdvanceKitchen = status == OrderStatus.pending ||
-        status == OrderStatus.preparing;
-    final canCancel = status == OrderStatus.pending ||
-        status == OrderStatus.preparing;
-    final needsPayment = status == OrderStatus.ready &&
-        payStatus == PaymentStatus.unpaid;
+    final canAdvanceKitchen =
+        status == OrderStatus.pending || status == OrderStatus.preparing;
+    final canCancel =
+        status == OrderStatus.pending || status == OrderStatus.preparing;
+    final needsPayment =
+        status == OrderStatus.ready && payStatus == PaymentStatus.unpaid;
     final isCompleted = status == OrderStatus.completed;
 
     return Container(
@@ -578,8 +589,9 @@ class _OrderCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             decoration: BoxDecoration(
               color: sBg,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(15)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(15),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -638,8 +650,7 @@ class _OrderCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       order.timeLabel,
-                      style:
-                          const TextStyle(fontSize: 10, color: OC.textMute),
+                      style: const TextStyle(fontSize: 10, color: OC.textMute),
                     ),
                   ],
                 ),
@@ -679,14 +690,13 @@ class _OrderCard extends StatelessWidget {
                     ),
                   ),
                   if (order.paidByName != null) ...[
-                    const Text(' · ',
-                        style: TextStyle(color: OC.textMute, fontSize: 10)),
+                    const Text(
+                      ' · ',
+                      style: TextStyle(color: OC.textMute, fontSize: 10),
+                    ),
                     Text(
                       'Billed by ${order.paidByName}',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: OC.textMute,
-                      ),
+                      style: const TextStyle(fontSize: 10, color: OC.textMute),
                     ),
                   ],
                 ],
@@ -699,7 +709,11 @@ class _OrderCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
               child: Row(
                 children: [
-                  const Icon(Icons.person_outline, size: 12, color: OC.textMute),
+                  const Icon(
+                    Icons.person_outline,
+                    size: 12,
+                    color: OC.textMute,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'by ${order.createdByName} (${order.createdByRole})',
@@ -725,7 +739,10 @@ class _OrderCard extends StatelessWidget {
                       child: OutlinedButton(
                         onPressed: onCancel,
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: OC.cancelled, width: 1.2),
+                          side: const BorderSide(
+                            color: OC.cancelled,
+                            width: 1.2,
+                          ),
                           foregroundColor: OC.cancelled,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
@@ -735,7 +752,11 @@ class _OrderCard extends StatelessWidget {
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.close_rounded, color: OC.cancelled, size: 16),
+                            Icon(
+                              Icons.close_rounded,
+                              color: OC.cancelled,
+                              size: 16,
+                            ),
                             SizedBox(width: 6),
                             Text(
                               'Cancel',
@@ -770,7 +791,10 @@ class _OrderCard extends StatelessWidget {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(status.emoji, style: const TextStyle(fontSize: 14)),
+                            Text(
+                              status.emoji,
+                              style: const TextStyle(fontSize: 14),
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               status.nextLabel,
@@ -833,7 +857,11 @@ class _OrderCard extends StatelessWidget {
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.receipt_rounded, size: 15, color: OC.primary),
+                            Icon(
+                              Icons.receipt_rounded,
+                              size: 15,
+                              color: OC.primary,
+                            ),
                             SizedBox(width: 6),
                             Text(
                               'View Bill',
@@ -914,47 +942,112 @@ class _StatusBadge extends StatelessWidget {
 }
 
 // ── Order Meta Row ─────────────────────────────────────────────────────────────
+// Enhanced to prominently display table and seat information
 class _OrderMeta extends StatelessWidget {
   final Order order;
   const _OrderMeta({required this.order});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final hasTable = order.tableNumber != null && order.tableNumber! > 0;
+    final hasSeat = order.seatLabel != null && order.seatLabel!.isNotEmpty;
+    final hasCustomer =
+        order.customerName != null && order.customerName!.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(order.orderType.emoji, style: const TextStyle(fontSize: 11)),
-        const SizedBox(width: 4),
-        Text(
-          order.orderType.label,
-          style: const TextStyle(fontSize: 11, color: OC.textSec),
-        ),
-        if (order.tableNumber != null) ...[
-          const Text(' • ', style: TextStyle(color: OC.textMute, fontSize: 11)),
-          Text(
-            'Table ${order.tableNumber}',
-            style: const TextStyle(fontSize: 11, color: OC.textSec),
-          ),
-        ],
-        // Show seat number for partial-table (seat-level) orders
-        if (order.seatLabel != null) ...[
-          const Text(' • ', style: TextStyle(color: OC.textMute, fontSize: 11)),
-          Text(
-            order.seatLabel!,
-            style: const TextStyle(
-              fontSize: 11,
-              color: OC.textSec,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-        if (order.customerName != null && order.customerName!.isNotEmpty) ...[
-          const Text(' • ', style: TextStyle(color: OC.textMute, fontSize: 11)),
-          Flexible(
-            child: Text(
-              order.customerName!,
+        // Primary row: Order type + Table/Seats
+        Row(
+          children: [
+            Text(order.orderType.emoji, style: const TextStyle(fontSize: 11)),
+            const SizedBox(width: 4),
+            Text(
+              order.orderType.label,
               style: const TextStyle(fontSize: 11, color: OC.textSec),
-              overflow: TextOverflow.ellipsis,
             ),
+            // ── TABLE & SEAT INFO (Primary) ──────────────────────────────
+            if (hasTable) ...[
+              const Text(
+                ' • ',
+                style: TextStyle(color: OC.textMute, fontSize: 11),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: OC.primary.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('🍽️ ', style: TextStyle(fontSize: 10)),
+                    Text(
+                      'Table ${order.tableNumber!.toString().padLeft(2, '0')}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: OC.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (hasSeat) ...[
+                      const Text(
+                        ' - ',
+                        style: TextStyle(color: OC.textMute, fontSize: 10),
+                      ),
+                      Text(
+                        'Seat ${order.seatLabel!}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: OC.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ] else if (order.orderType != OrderType.dineIn) ...[
+              const Text(
+                ' • ',
+                style: TextStyle(color: OC.textMute, fontSize: 11),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  order.orderType.label,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFFF59E0B),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        // Secondary row: Customer name if available
+        if (hasCustomer) ...[
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              const Text('👤 ', style: TextStyle(fontSize: 10)),
+              Flexible(
+                child: Text(
+                  order.customerName!,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: OC.textSec,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
         ],
       ],
@@ -969,8 +1062,9 @@ class _ItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dotColor =
-        item.isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+    final dotColor = item.isVeg
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFB71C1C);
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
       child: Row(

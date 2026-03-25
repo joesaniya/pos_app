@@ -30,6 +30,7 @@ class LocalDatabase {
   static const tQueue = 'offline_queue';
   static const tOrders = 'local_orders';
   static const tTables = 'local_tables';
+  static const tSeats = 'table_seats';
   static const tReservations = 'local_reservations';
   static const tMenuItems = 'local_menu_items';
   static const tInventory = 'local_inventory';

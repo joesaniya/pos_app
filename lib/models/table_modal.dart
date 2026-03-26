@@ -366,7 +366,8 @@ class ReservationHistoryItem {
       cancelledAt = parseToIST(row['cancelled_at'] as String);
     } else if (row['updated_at'] != null) {
       final status = row['status'] as String? ?? '';
-      if (status == 'cancelled' || status == 'no_show') {
+      // Mark expired/no_show with updated_at as cancellation time
+      if (status == 'cancelled' || status == 'no_show' || status == 'expired') {
         cancelledAt = parseToIST(row['updated_at'] as String);
       }
     }
@@ -418,6 +419,8 @@ class ReservationHistoryItem {
         return '✅ Completed';
       case 'cancelled':
         return '✖️ Cancelled';
+      case 'expired':
+        return '⏰ Expired';
       case 'no_show':
         return '👻 No Show';
       default:

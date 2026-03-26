@@ -674,7 +674,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pos_app/firebase_options.dart';
 
-
 const kLongSeatedTask = 'long_seated_check';
 const kLongSeatedTag = 'reservation_checks';
 const _kSentKeys = '_notif_sent_keys';
@@ -797,7 +796,8 @@ Future<void> _runBackgroundChecks() async {
     ),
   );
 
-  bool hasConnection = await InternetConnectionChecker.createInstance().hasConnection;
+  bool hasConnection =
+      await InternetConnectionChecker.createInstance().hasConnection;
   if (!hasConnection) {
     log('[BG] Device is offline — skipping background notifications');
     return;
@@ -1125,7 +1125,14 @@ Future<void> _runBackgroundChecks() async {
   }
 
   // ── 9.5. Subscription Expiry Reminders ────────────────────────────────────
-  await _checkSubscriptionExpiryReminders(plugin, businessId, biz, sentKeys, today, now);
+  await _checkSubscriptionExpiryReminders(
+    plugin,
+    businessId,
+    biz,
+    sentKeys,
+    today,
+    now,
+  );
 
   // ── 10. Persist sent-keys ─────────────────────────────────────────────────
   final cleaned = sentKeys.where((k) => k.startsWith(today)).toList();
@@ -1237,12 +1244,15 @@ Future<void> _directExpireStaleReservations(
       final customerName = row['customer_name'] as String? ?? 'Guest';
       final resId = row['id'] as String;
 
-      // Mark reservation as no_show
+      // ✅ Mark reservation as EXPIRED (automatic grace period expiry, not completed)
       await sb
           .from('table_reservations')
           .update({
-            'status': 'no_show',
+            'status': 'expired',
+            'auto_expired_at': DateTime.now().toIso8601String(),
+            'expiry_reason': 'grace_period_expired',
             'updated_by_name': 'System (Auto-Expired)',
+            'updated_by_uid': 'system',
           })
           .eq('id', resId)
           .eq('status', 'active');
@@ -1252,10 +1262,12 @@ Future<void> _directExpireStaleReservations(
           .from('restaurant_tables')
           .update({
             'status': 'available',
+            'freed_at': DateTime.now().toIso8601String(),
+            'freed_by_system': 'reservation_expiry',
             'updated_by_name': 'System (Auto-Expired)',
+            'updated_by_uid': 'system',
           })
-          .eq('id', tableId)
-          .eq('status', 'reserved');
+          .eq('id', tableId);
 
       log('[BG] ⏰ Direct-expired: $tName — $customerName');
 
@@ -1287,7 +1299,9 @@ Future<void> _ensureFirebase() async {
   try {
     Firebase.app();
   } catch (_) {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     log('[BG] Firebase initialized');
   }
 }
@@ -1322,7 +1336,9 @@ Future<void> _checkSubscriptionExpiryReminders(
       final expiryKey = '${today}_subExpired_$businessId';
       if (!sentKeys.contains(expiryKey)) {
         sentKeys.add(expiryKey);
-        log('[BG] ⏰ Subscription expired for business $businessId — setting isActive=false');
+        log(
+          '[BG] ⏰ Subscription expired for business $businessId — setting isActive=false',
+        );
 
         // 1. Deactivate subscription document
         await db.collection('subscriptions').doc(businessId).update({
@@ -1348,7 +1364,9 @@ Future<void> _checkSubscriptionExpiryReminders(
           });
         }
         await batch.commit();
-        log('[BG] ✅ Deactivated ${usersSnap.docs.length} user(s) for expired subscription');
+        log(
+          '[BG] ✅ Deactivated ${usersSnap.docs.length} user(s) for expired subscription',
+        );
 
         // 3. Send expiry notification
         await plugin.show(

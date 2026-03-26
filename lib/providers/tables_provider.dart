@@ -32,7 +32,6 @@ class _UserCtx {
 class TablesProvider extends ChangeNotifier {
   final _sb = Supabase.instance.client;
   final _auth = FirebaseAuth.instance;
-  final _fs = FirebaseFirestore.instance;
   final _notif = ReservationNotificationService();
 
   // ── State ──────────────────────────────────────────────
@@ -266,7 +265,7 @@ class TablesProvider extends ChangeNotifier {
   // ── Runs every minute: expiry check + slot status + notifications ──────
   Future<void> _runPeriodicChecks() async {
     // 1. Auto-expire stale reservations (no check-in after slot ends)
-    await _expireStaleReservations();
+    await _expireStaleReservationsEnhanced();
     // 2. Update slot-based table statuses (available ↔ reserved at 15-min window)
     await _updateSlotStatuses();
     // 3. Notification checks (long-seated, checkout warnings, walk-in warnings)
@@ -325,6 +324,7 @@ class TablesProvider extends ChangeNotifier {
   // CRITICAL: Must use same timing logic as DB function:
   //   - Grace period: 15 min after reserved_for time
   //   - Auto-expire if: status='active' AND check_in IS NULL AND time >= grace_period_end
+  //   - Sets status='expired' (NOT 'no_show' - expired is auto, no_show is manual)
   Future<void> _localExpireStaleReservations() async {
     final bId = _userCtx?.businessId;
     if (bId == null || bId.isEmpty) return;
@@ -341,26 +341,32 @@ class TablesProvider extends ChangeNotifier {
       // Expire only if grace period has completely passed
       if (now.isAfter(gracePeriodEnd)) {
         try {
+          // ✅ Set status to 'expired' (automatic expiry, not completed)
           await _sb
               .from(_kReservations)
               .update({
-                'status': 'no_show',
-                'updated_by_name': 'System (Auto-Expired)',
+                'status': 'expired',
+                'auto_expired_at': DateTime.now().toIso8601String(),
+                'expiry_reason': 'grace_period_expired',
+                'updated_by_name': 'System (Auto-Expiry)',
                 'updated_by_uid': 'system',
+                'updated_at': DateTime.now().toIso8601String(),
               })
               .eq('id', res.id)
               .eq('status', 'active');
 
-          // Free the table if it's still 'reserved'
+          // Free the table if it's still 'reserved' or 'occupied'
           await _sb
               .from(_kTables)
               .update({
                 'status': 'available',
-                'updated_by_name': 'System (Auto-Expired)',
+                'freed_at': DateTime.now().toIso8601String(),
+                'freed_by_system': 'reservation_expiry',
+                'updated_by_name': 'System (Auto-Expiry)',
                 'updated_by_uid': 'system',
+                'updated_at': DateTime.now().toIso8601String(),
               })
-              .eq('id', res.tableId)
-              .eq('status', 'reserved');
+              .eq('id', res.tableId);
 
           debugPrint(
             '[Expiry] ✅ Local-expired reservation ${res.id} for ${res.customerName} '
@@ -426,6 +432,200 @@ class TablesProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('[Expiry] ⚠️ Notification error: $e');
+    }
+  }
+
+  // ── Manual Expiry Trigger (Admin/Emergency) ────────────────────────────
+  // Use this to manually expire a reservation if auto-expiry fails
+  // This will immediately mark the reservation as 'expired' and free the table
+  Future<bool> manuallyExpireReservation(String reservationId) async {
+    try {
+      debugPrint('[Expiry] 🔨 MANUAL trigger for reservation: $reservationId');
+
+      // Call the DB function to atomically expire
+      final result = await _sb.rpc(
+        'fn_expire_single_reservation',
+        params: {
+          'p_reservation_id': reservationId,
+          'p_reason': 'manual_admin_expiry',
+        },
+      );
+
+      final success = result?['success'] == true;
+      if (success) {
+        debugPrint('[Expiry] ✅ Manual expiry successful for $reservationId');
+        // Refresh UI to show the changes
+        await _refreshAll();
+        return true;
+      } else {
+        final error = result?['error'] ?? 'Unknown error';
+        debugPrint('[Expiry] ❌ Manual expiry failed: $error');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('[Expiry] ❌ Manual expiry exception: $e');
+      // Try fallback: direct DB update
+      try {
+        await _sb
+            .from(_kReservations)
+            .update({
+              'status': 'expired',
+              'auto_expired_at': DateTime.now().toIso8601String(),
+              'expiry_reason': 'manual_admin_expiry',
+              'updated_by_name': 'Admin (Manual Expiry)',
+              'updated_by_uid': 'admin',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', reservationId)
+            .eq('status', 'active');
+
+        debugPrint(
+          '[Expiry] ✅ Manual expiry (fallback) successful for $reservationId',
+        );
+        await _refreshAll();
+        return true;
+      } catch (e2) {
+        debugPrint('[Expiry] ❌ Fallback also failed: $e2');
+        return false;
+      }
+    }
+  }
+
+  // ── Enhanced Expiry Check with Detailed Logging ─────────────────────────
+  // This version provides better debugging info
+  Future<void> _expireStaleReservationsEnhanced() async {
+    final bId = _userCtx?.businessId;
+    if (bId == null || bId.isEmpty) {
+      debugPrint(
+        '[Expiry] ⚠️ Business ID not available, skipping expiry check',
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    debugPrint('[Expiry] 🔍 Starting expiry check for business=$bId at $now');
+
+    try {
+      // Try DB function first
+      final result = await _sb.rpc(
+        'fn_expire_stale_reservations',
+        params: {'p_business_id': bId},
+      );
+
+      final expiredCount = result?['expired_count'] as int? ?? 0;
+      debugPrint('[Expiry] DB function returned: expired_count=$expiredCount');
+
+      if (expiredCount > 0) {
+        debugPrint('[Expiry] ✅ DB-expired $expiredCount stale reservation(s)');
+
+        final expiredIds = (result?['expired_ids'] as List?) ?? [];
+        for (final id in expiredIds) {
+          await _sendExpiryNotification(id as String);
+        }
+
+        await _refreshAll();
+      } else {
+        debugPrint('[Expiry] ℹ️ No stale reservations found by DB function');
+      }
+    } catch (e) {
+      debugPrint('[Expiry] ⚠️ DB function error (trying fallback): $e');
+      // Fallback: local expiry check
+      await _localExpireStaleReservationsEnhanced();
+    }
+  }
+
+  // ── Fallback Local Expiry with Enhanced Logging ─────────────────────────
+  Future<void> _localExpireStaleReservationsEnhanced() async {
+    final bId = _userCtx?.businessId;
+    if (bId == null || bId.isEmpty) return;
+
+    final now = DateTime.now();
+    bool anyExpired = false;
+
+    debugPrint(
+      '[Expiry] 📱 Local fallback: checking ${_calendarReservations.length} cached reservations',
+    );
+
+    for (final res in List.of(_calendarReservations)) {
+      // Check all conditions
+      final isActive = res.status == 'active';
+      final notCheckedIn = res.checkIn == null;
+      final gracePeriodEnd = res.reservedFor.add(const Duration(minutes: 15));
+      final isPastGrace = now.isAfter(gracePeriodEnd);
+
+      if (!isActive) {
+        debugPrint(
+          '[Expiry] ⏭️ ${res.id}: Skipping (not active, status=${res.status})',
+        );
+        continue;
+      }
+
+      if (!notCheckedIn) {
+        debugPrint(
+          '[Expiry] ⏭️ ${res.id}: Skipping (checked in at ${res.checkIn})',
+        );
+        continue;
+      }
+
+      final minutesPastGrace = now.difference(gracePeriodEnd).inMinutes;
+
+      if (!isPastGrace) {
+        debugPrint(
+          '[Expiry] ⏳ ${res.id}: Not yet past grace (${-minutesPastGrace} min remaining)',
+        );
+        continue;
+      }
+
+      // This one should be expired!
+      debugPrint(
+        '[Expiry] 🎯 ${res.id}: Candidate for expiry (${minutesPastGrace} min past grace)',
+      );
+
+      try {
+        await _sb
+            .from(_kReservations)
+            .update({
+              'status': 'expired',
+              'auto_expired_at': DateTime.now().toIso8601String(),
+              'expiry_reason': 'grace_period_expired',
+              'updated_by_name': 'System (Auto-Expiry)',
+              'updated_by_uid': 'system',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', res.id)
+            .eq('status', 'active');
+
+        await _sb
+            .from(_kTables)
+            .update({
+              'status': 'available',
+              'freed_at': DateTime.now().toIso8601String(),
+              'freed_by_system': 'reservation_expiry',
+              'updated_by_name': 'System (Auto-Expiry)',
+              'updated_by_uid': 'system',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', res.tableId);
+
+        debugPrint('[Expiry] ✅ Local-expired: ${res.customerName} (${res.id})');
+        anyExpired = true;
+
+        await _notif.sendExpiryNotification(
+          tableNumber: res.tableNumber,
+          customerName: res.customerName,
+          reservedFor: res.reservedFor,
+          businessName: _userCtx?.businessName ?? '',
+        );
+      } catch (e) {
+        debugPrint('[Expiry] ❌ Error expiring ${res.id}: $e');
+      }
+    }
+
+    if (anyExpired) {
+      debugPrint('[Expiry] ✅ Local expiry complete with $anyExpired expired');
+      await _refreshAll();
+    } else {
+      debugPrint('[Expiry] ℹ️ Local expiry check complete (no expirations)');
     }
   }
 

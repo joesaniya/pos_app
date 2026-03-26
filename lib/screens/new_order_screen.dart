@@ -8,11 +8,10 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:pos_app/utils/ist_utils.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/orders_provider.dart';
-import '../../services/connectivity_service.dart';
-import '../../database/local_database.dart';
 import '../../services/connectivity_service.dart';
 import '../../database/local_database.dart';
 
@@ -243,17 +242,23 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
         if (!mounted) return;
 
+        // ── CACHE TO LOCAL DATABASE for offline use ────────────────────────────
+        final processedItems = (items as List).map((item) {
+          final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
+          return {
+            ...Map<String, dynamic>.from(item as Map),
+            'category_name': cat['name'] ?? '',
+            'category_icon': cat['icon'] ?? '🍽️',
+            'category_color': cat['color_hex'] ?? '#D4673A',
+          };
+        }).toList();
+
+        // Save to local DB in background (don't wait for it)
+        _cacheMenuItemsLocally(processedItems);
+
         setState(() {
           _categories = (cats as List).cast<Map<String, dynamic>>();
-          _allMenuItems = (items as List).map((item) {
-            final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
-            return {
-              ...Map<String, dynamic>.from(item as Map),
-              'category_name': cat['name'] ?? '',
-              'category_icon': cat['icon'] ?? '🍽️',
-              'category_color': cat['color_hex'] ?? '#D4673A',
-            };
-          }).toList();
+          _allMenuItems = processedItems;
           _menuLoading = false;
         });
       } catch (e) {
@@ -267,12 +272,56 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     }
   }
 
+  /// Cache menu items to local database for offline use
+  Future<void> _cacheMenuItemsLocally(List<Map<String, dynamic>> items) async {
+    try {
+      final localDb = LocalDatabase.instance;
+      if (!localDb.isInitialized) await localDb.init();
+
+      for (final item in items) {
+        final itemId = item['id'] as String? ?? '';
+        if (itemId.isEmpty) continue;
+
+        // Store the full item data with category info for offline access
+        await localDb.upsertEntity(
+          table: LocalDatabase.tMenuItems,
+          id: itemId,
+          businessId: _businessId,
+          data: {
+            'id': item['id'],
+            'name': item['name'],
+            'description': item['description'],
+            'price': item['price'],
+            'discount_price': item['discount_price'],
+            'is_veg': item['is_veg'],
+            'is_available': item['is_available'],
+            'is_featured': item['is_featured'],
+            'is_best_seller': item['is_best_seller'],
+            'preparation_time': item['preparation_time'],
+            'category_id': item['category_id'],
+            'category_name': item['category_name'],
+            'category_icon': item['category_icon'],
+            'category_color': item['category_color'],
+          },
+          syncStatus: LocalDatabase.syncSynced,
+          action: LocalDatabase.actionUpdate,
+        );
+      }
+      debugPrint(
+        '🛒 Cached ${items.length} menu items to local DB for offline use',
+      );
+    } catch (e) {
+      debugPrint('🛒 _cacheMenuItemsLocally ERROR: $e');
+    }
+  }
+
   Future<void> _loadMenuOffline() async {
     if (_businessId.isEmpty) return;
     try {
       if (!mounted) setState(() => _isLoadingOfflineData = true);
 
       final localDb = LocalDatabase.instance;
+      if (!localDb.isInitialized) await localDb.init();
 
       // Load menu items from local database
       final localItems = await localDb.getEntities(
@@ -284,30 +333,52 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
       if (!mounted) return;
 
-      // Build categories and items from local data
-      final categoriesSet = <String>{};
-      final processedItems = localItems.map((item) {
+      if (localItems.isEmpty) {
+        // No cached data available
+        debugPrint('⚠️ No cached menu items found for offline mode');
+        setState(() {
+          _categories = [];
+          _allMenuItems = [];
+          _menuLoading = false;
+          _isLoadingOfflineData = false;
+        });
+        return;
+      }
+
+      // Build categories and items from local cached data
+      final categoriesSet = <String, Map<String, dynamic>>{};
+      final processedItems = <Map<String, dynamic>>[];
+
+      for (final item in localItems) {
+        // Each item already has category_name, category_icon, category_color
+        // from when it was cached online
         final categoryName = item['category_name'] as String? ?? 'Other';
-        categoriesSet.add(categoryName);
-        return {
+        final categoryIcon = item['category_icon'] as String? ?? '🍽️';
+        final categoryColor = item['category_color'] as String? ?? '#D4673A';
+
+        // Store category for later
+        if (!categoriesSet.containsKey(categoryName)) {
+          categoriesSet[categoryName] = {
+            'name': categoryName,
+            'id': categoryName.toLowerCase().replaceAll(' ', '_'),
+            'icon': categoryIcon,
+            'color_hex': categoryColor,
+          };
+        }
+
+        // Ensure all required fields exist for display
+        processedItems.add({
           ...item,
           'category_name': categoryName,
-          'category_icon': item['category_icon'] as String? ?? '🍽️',
-          'category_color': item['category_color'] as String? ?? '#D4673A',
-        };
-      }).toList();
+          'category_icon': categoryIcon,
+          'category_color': categoryColor,
+        });
+      }
 
-      // Create category list from items
-      final localCats = categoriesSet
-          .map(
-            (name) => {
-              'name': name,
-              'id': name.toLowerCase().replaceAll(' ', '_'),
-              'icon': '🍽️',
-              'color_hex': '#D4673A',
-            },
-          )
-          .toList();
+      // Convert categories map to list
+      final localCats = categoriesSet.values.toList();
+
+      if (!mounted) return;
 
       setState(() {
         _categories = localCats;
@@ -316,7 +387,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         _isLoadingOfflineData = false;
       });
 
-      debugPrint('🛒 Menu loaded offline: ${localItems.length} items');
+      debugPrint(
+        '✅ Menu loaded offline: ${localItems.length} items, ${localCats.length} categories',
+      );
     } catch (e) {
       debugPrint('🛒 _loadMenuOffline ERROR: $e');
       if (!mounted) return;
@@ -336,7 +409,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         final data = await Supabase.instance.client
             .from('restaurant_tables')
             .select(
-              'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status)',
+              'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status), table_reservations(id, customer_name, check_in, check_out, status)',
             )
             .eq('business_id', _businessId)
             .eq('is_active', true)
@@ -1498,7 +1571,98 @@ class _CartView extends StatelessWidget {
                   orElse: () => {},
                 );
                 final List<dynamic> seats = selectedTable['table_seats'] ?? [];
-                if (seats.isEmpty) return const SizedBox.shrink();
+
+                // ✅ Check if table has an active reservation (between check-in and check-out)
+                // If reservation is active, don't show seat selection
+                final tableStatus =
+                    selectedTable['status'] as String? ?? 'available';
+                final reservations =
+                    (selectedTable['table_reservations'] as List<dynamic>?)
+                        ?.cast<Map<String, dynamic>>() ??
+                    [];
+                final now = nowIST();
+
+                bool isReservationActive = false;
+                if (reservations.isNotEmpty && tableStatus == 'reserved') {
+                  for (var reservation in reservations) {
+                    final checkInStr = reservation['check_in'] as String?;
+                    final checkOutStr = reservation['check_out'] as String?;
+
+                    if (checkInStr != null && checkOutStr != null) {
+                      try {
+                        final checkIn = parseToIST(checkInStr);
+                        final checkOut = parseToIST(checkOutStr);
+                        // Check if current time is between check-in and check-out
+                        if (now.isAfter(checkIn) && now.isBefore(checkOut)) {
+                          isReservationActive = true;
+                          break;
+                        }
+                      } catch (e) {
+                        // If date parsing fails, continue to next reservation
+                        continue;
+                      }
+                    }
+                  }
+                }
+
+                // ✅ Don't show seat selection if reservation is currently active
+                if (isReservationActive) {
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF4E0),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFFE8860A).withOpacity(0.3),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Text('⏰', style: TextStyle(fontSize: 14)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Table is reserved. Seats cannot be individually selected during active reservation.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF92400E),
+                              fontWeight: FontWeight.w600,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                // ✅ Show seat selection for all other cases
+                if (seats.isEmpty) {
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _C.primaryL,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _C.primary.withOpacity(0.3)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Text('ℹ️', style: TextStyle(fontSize: 14)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'No individual seats defined. Booking entire table.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _C.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

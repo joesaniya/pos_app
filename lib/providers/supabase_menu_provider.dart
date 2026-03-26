@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,17 +7,26 @@ import 'package:pos_app/models/menu_category.dart';
 import 'package:pos_app/models/menu_item.dart';
 
 import 'package:pos_app/services/menu_services.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/services/storage_service.dart';
+import 'package:pos_app/repositories/menu_repository.dart';
 
 enum MenuLoadState { idle, loading, loaded, error }
 
+/// Sync state for menu operations
+enum MenuSyncState { idle, syncing, synced, failed }
+
 class SupabaseMenuProvider extends ChangeNotifier {
   final MenuSupabaseService _svc = MenuSupabaseService();
+  final MenuRepository _repo = MenuRepository.instance;
 
   // ── State ────────────────────────────────────────────────────
   MenuLoadState _categoryState = MenuLoadState.idle;
   MenuLoadState _itemState = MenuLoadState.idle;
   String? _error;
+
+  final MenuSyncState _syncState = MenuSyncState.idle;
+  int _pendingSyncCount = 0;
 
   List<SupabaseMenuCategory> _categories = [];
   final Map<String, List<SupabaseMenuItem>> _itemsCache = {};
@@ -47,6 +55,11 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
   /// Exposed so the UI can gate add/edit/delete controls by role.
   String? get userRole => _userRole;
+
+  /// Offline-first sync status
+  MenuSyncState get syncState => _syncState;
+  int get pendingSyncCount => _pendingSyncCount;
+  bool get hasOfflineChanges => _pendingSyncCount > 0;
 
   List<SupabaseMenuItem> itemsForCategory(String categoryId) =>
       _itemsCache[categoryId] ?? [];
@@ -81,11 +94,11 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
       if (doc.exists) {
         final data = doc.data()!;
-        _businessId   = data['businessId']   as String? ?? '';
+        _businessId = data['businessId'] as String? ?? '';
         _businessName = data['businessName'] as String? ?? '';
-        _userName     = data['name']         as String? ?? fbUser.displayName ?? '';
-        _userRole     = data['role']         as String? ?? 'staff';
-        _userPhone    = data['phone']        as String?;
+        _userName = data['name'] as String? ?? fbUser.displayName ?? '';
+        _userRole = data['role'] as String? ?? 'staff';
+        _userPhone = data['phone'] as String?;
       }
 
       // Notify so role badge in header updates immediately after login.
@@ -105,36 +118,45 @@ class SupabaseMenuProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _categories = await _svc.getCategories(_businessId);
+      // Offline-first: Load from local cache, with background sync if online
+      _categories = await _repo.fetchCategories(_businessId);
+
       for (final cat in _categories) {
         await _loadItems(cat.id);
         cat.itemCount = _itemsCache[cat.id]?.length ?? 0;
       }
       _categoryState = MenuLoadState.loaded;
+
+      debugPrint(
+        '[MenuProvider] ✅ Loaded ${_categories.length} categories (offline-first)',
+      );
     } catch (e) {
       _error = e.toString();
       _categoryState = MenuLoadState.error;
+      debugPrint('[MenuProvider] ❌ Load error: $e');
     }
     notifyListeners();
   }
 
   void subscribeCategories() {
     _categorySub?.cancel();
-    _categorySub = _svc.watchCategories(_businessId).listen(
-      (cats) {
-        _categories = cats;
-        notifyListeners();
-      },
-      onError: (e) {
-        // Channel error (WebSocket drop, protocol error, etc.)
-        // Log silently and schedule a reconnect — do NOT rethrow.
-        debugPrint('[SupabaseMenuProvider] category channel error: $e');
-        Future.delayed(const Duration(seconds: 3), () {
-          if (_businessId.isNotEmpty) subscribeCategories();
-        });
-      },
-      cancelOnError: false, // keep the subscription alive on error
-    );
+    _categorySub = _svc
+        .watchCategories(_businessId)
+        .listen(
+          (cats) {
+            _categories = cats;
+            notifyListeners();
+          },
+          onError: (e) {
+            // Channel error (WebSocket drop, protocol error, etc.)
+            // Log silently and schedule a reconnect — do NOT rethrow.
+            debugPrint('[SupabaseMenuProvider] category channel error: $e');
+            Future.delayed(const Duration(seconds: 3), () {
+              if (_businessId.isNotEmpty) subscribeCategories();
+            });
+          },
+          cancelOnError: false, // keep the subscription alive on error
+        );
   }
 
   Future<void> createCategory({
@@ -146,26 +168,31 @@ class SupabaseMenuProvider extends ChangeNotifier {
     File? imageFile,
   }) async {
     try {
-      final cat = await _svc.createCategory(
+      // Offline-first: Create locally and enqueue for sync
+      final cat = await _repo.createCategory(
+        businessId: _businessId,
+        businessName: _businessName,
         name: name,
         description: description,
         icon: icon,
         colorHex: colorHex,
         displayOrder: displayOrder,
-        businessId: _businessId,
-        businessName: _businessName,
         createdByUid: _userUid,
         createdByName: _userName,
         createdByEmail: _userEmail,
         createdByRole: _userRole,
         createdByPhone: _userPhone,
-        imageFile: imageFile,
       );
 
       cat.itemCount = 0;
       _itemsCache[cat.id] = [];
       _categories.add(cat);
       _categoryState = MenuLoadState.loaded;
+      _pendingSyncCount++;
+
+      debugPrint(
+        '[MenuProvider] ✅ Category created locally (pending sync): ${cat.id}',
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
@@ -182,15 +209,21 @@ class SupabaseMenuProvider extends ChangeNotifier {
     String? categoryName,
   }) async {
     try {
-      final updated = await _svc.updateCategory(
-        id: id,
+      // Offline-first: Update locally and enqueue for sync
+      await _repo.updateCategory(
+        categoryId: id,
+        businessId: _businessId,
         updates: updates,
         updatedByUid: _userUid,
         updatedByName: _userName,
         updatedByRole: _userRole,
-        imageFile: imageFile,
-        businessId: _businessId,
-        categoryName: categoryName ?? '',
+      );
+
+      // Reload from cache
+      final cats = await _repo.fetchCategories(_businessId);
+      final updated = cats.firstWhere(
+        (c) => c.id == id,
+        orElse: () => _categories.firstWhere((c) => c.id == id),
       );
 
       final idx = _categories.indexWhere((c) => c.id == id);
@@ -198,6 +231,11 @@ class SupabaseMenuProvider extends ChangeNotifier {
         updated.itemCount = _categories[idx].itemCount;
         _categories[idx] = updated;
       }
+      _pendingSyncCount++;
+
+      debugPrint(
+        '[MenuProvider] ✅ Category updated locally (pending sync): $id',
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
@@ -208,13 +246,21 @@ class SupabaseMenuProvider extends ChangeNotifier {
 
   Future<void> deactivateCategory(String id) async {
     try {
-      await _svc.deactivateCategory(
-        id: id,
-        updatedByUid: _userUid,
-        updatedByName: _userName,
+      // Offline-first: Mark as deleted locally and enqueue for sync
+      await _repo.deleteCategory(
+        categoryId: id,
+        businessId: _businessId,
+        deletedByUid: _userUid,
+        deletedByName: _userName,
       );
+
       _categories.removeWhere((c) => c.id == id);
       _itemsCache.remove(id);
+      _pendingSyncCount++;
+
+      debugPrint(
+        '[MenuProvider] ✅ Category deleted locally (pending sync): $id',
+      );
       notifyListeners();
     } catch (e) {
       _error = e.toString();
@@ -228,7 +274,8 @@ class SupabaseMenuProvider extends ChangeNotifier {
   // ════════════════════════════════════════════════════════════
 
   Future<void> _loadItems(String categoryId) async {
-    final items = await _svc.getItemsByCategory(categoryId);
+    // Offline-first: Load from local cache with background sync
+    final items = await _repo.fetchItemsForCategory(_businessId, categoryId);
     _itemsCache[categoryId] = items;
   }
 
@@ -242,9 +289,13 @@ class SupabaseMenuProvider extends ChangeNotifier {
         _categories[catIdx].itemCount = _itemsCache[categoryId]?.length ?? 0;
       }
       _itemState = MenuLoadState.loaded;
+      debugPrint(
+        '[MenuProvider] ✅ Loaded ${_itemsCache[categoryId]?.length ?? 0} items for category (offline-first)',
+      );
     } catch (e) {
       _error = e.toString();
       _itemState = MenuLoadState.error;
+      debugPrint('[MenuProvider] ❌ Load items error: $e');
     }
     notifyListeners();
   }
@@ -253,24 +304,28 @@ class SupabaseMenuProvider extends ChangeNotifier {
     // If already subscribed to this category, skip — don't create duplicates.
     if (_itemSubs.containsKey(categoryId)) return;
 
-    _itemSubs[categoryId] = _svc.watchItems(categoryId).listen(
-      (items) {
-        _itemsCache[categoryId] = items;
-        final catIdx = _categories.indexWhere((c) => c.id == categoryId);
-        if (catIdx != -1) _categories[catIdx].itemCount = items.length;
-        notifyListeners();
-      },
-      onError: (e) {
-        // Swallow the RealtimeSubscribeException — remove stale sub
-        // and reconnect after a short delay.
-        debugPrint('[SupabaseMenuProvider] item channel error ($categoryId): $e');
-        _itemSubs.remove(categoryId)?.cancel();
-        Future.delayed(const Duration(seconds: 3), () {
-          subscribeItems(categoryId);
-        });
-      },
-      cancelOnError: false,
-    );
+    _itemSubs[categoryId] = _svc
+        .watchItems(categoryId)
+        .listen(
+          (items) {
+            _itemsCache[categoryId] = items;
+            final catIdx = _categories.indexWhere((c) => c.id == categoryId);
+            if (catIdx != -1) _categories[catIdx].itemCount = items.length;
+            notifyListeners();
+          },
+          onError: (e) {
+            // Swallow the RealtimeSubscribeException — remove stale sub
+            // and reconnect after a short delay.
+            debugPrint(
+              '[SupabaseMenuProvider] item channel error ($categoryId): $e',
+            );
+            _itemSubs.remove(categoryId)?.cancel();
+            Future.delayed(const Duration(seconds: 3), () {
+              subscribeItems(categoryId);
+            });
+          },
+          cancelOnError: false,
+        );
   }
 
   /// Unsubscribe from a specific category's realtime channel.
@@ -301,39 +356,42 @@ class SupabaseMenuProvider extends ChangeNotifier {
     double rating = 4.0,
     File? imageFile,
   }) async {
-    final item = await _svc.createItem(
-      categoryId: categoryId,
-      name: name,
-      price: price,
-      isVeg: isVeg,
+    // Offline-first: Create locally and enqueue for sync
+    final item = await _repo.createMenuItem(
       businessId: _businessId,
       businessName: _businessName,
+      categoryId: categoryId,
+      name: name,
+      description: description,
+      price: price,
       createdByUid: _userUid,
       createdByName: _userName,
       createdByEmail: _userEmail,
       createdByRole: _userRole,
       createdByPhone: _userPhone,
-      description: description,
       discountPrice: discountPrice,
-      ingredients: ingredients,
-      allergens: allergens,
+      isVeg: isVeg,
+      isFeatured: isFeatured,
+      isBestSeller: isBestSeller,
+      isAvailable: isAvailable,
       preparationTime: preparationTime,
       calories: calories,
       protein: protein,
       carbs: carbs,
       fat: fat,
-      isAvailable: isAvailable,
-      isBestSeller: isBestSeller,
-      isFeatured: isFeatured,
-      isNewArrival: isNewArrival,
+      allergens: allergens,
+      ingredients: ingredients,
       isSpicy: isSpicy,
-      rating: rating,
-      imageFile: imageFile,
     );
 
     _itemsCache.putIfAbsent(categoryId, () => []).add(item);
     final catIdx = _categories.indexWhere((c) => c.id == categoryId);
     if (catIdx != -1) _categories[catIdx].itemCount++;
+    _pendingSyncCount++;
+
+    debugPrint(
+      '[MenuProvider] ✅ Menu item created locally (pending sync): ${item.id}',
+    );
     notifyListeners();
     return item;
   }
@@ -345,21 +403,25 @@ class SupabaseMenuProvider extends ChangeNotifier {
     File? imageFile,
     String? itemName,
   }) async {
-    final updated = await _svc.updateItem(
-      id: id,
+    // Offline-first: Update locally and enqueue for sync
+    await _repo.updateMenuItem(
+      itemId: id,
+      businessId: _businessId,
+      categoryId: categoryId,
       updates: updates,
       updatedByUid: _userUid,
       updatedByName: _userName,
       updatedByRole: _userRole,
-      imageFile: imageFile,
-      businessId: _businessId,
-      itemName: itemName,
     );
-    final list = _itemsCache[categoryId];
-    if (list != null) {
-      final idx = list.indexWhere((i) => i.id == id);
-      if (idx != -1) list[idx] = updated;
-    }
+
+    // Reload from cache
+    final items = await _repo.fetchItemsForCategory(_businessId, categoryId);
+    _itemsCache[categoryId] = items;
+    _pendingSyncCount++;
+
+    debugPrint(
+      '[MenuProvider] ✅ Menu item updated locally (pending sync): $id',
+    );
     notifyListeners();
   }
 
@@ -368,53 +430,12 @@ class SupabaseMenuProvider extends ChangeNotifier {
     required String categoryId,
     required bool isAvailable,
   }) async {
-    await _svc.toggleAvailability(
+    // Offline-first: Update locally
+    await updateItem(
       id: id,
-      isAvailable: isAvailable,
-      updatedByUid: _userUid,
-      updatedByName: _userName,
+      categoryId: categoryId,
+      updates: {'is_available': isAvailable},
     );
-    final list = _itemsCache[categoryId];
-    if (list != null) {
-      final idx = list.indexWhere((i) => i.id == id);
-      if (idx != -1) {
-        final old = list[idx];
-        list[idx] = SupabaseMenuItem(
-          id: old.id,
-          categoryId: old.categoryId,
-          name: old.name,
-          description: old.description,
-          price: old.price,
-          discountPrice: old.discountPrice,
-          imageUrl: old.imageUrl,
-          isAvailable: isAvailable,
-          isVeg: old.isVeg,
-          isFeatured: old.isFeatured,
-          isBestSeller: old.isBestSeller,
-          isNewArrival: old.isNewArrival,
-          isSpicy: old.isSpicy,
-          preparationTime: old.preparationTime,
-          calories: old.calories,
-          protein: old.protein,
-          carbs: old.carbs,
-          fat: old.fat,
-          allergens: old.allergens,
-          tags: old.tags,
-          ingredients: old.ingredients,
-          rating: old.rating,
-          sortOrder: old.sortOrder,
-          businessId: old.businessId,
-          businessName: old.businessName,
-          createdByUid: old.createdByUid,
-          createdByName: old.createdByName,
-          updatedByUid: _userUid,
-          updatedByName: _userName,
-          createdAt: old.createdAt,
-          updatedAt: DateTime.now(),
-        );
-      }
-    }
-    notifyListeners();
   }
 
   Future<void> deleteItem({
@@ -422,13 +443,25 @@ class SupabaseMenuProvider extends ChangeNotifier {
     required String categoryId,
     String? imageUrl,
   }) async {
-    await _svc.deleteItem(id);
-    if (imageUrl != null) await _svc.deleteImage(imageUrl);
+    // Offline-first: Delete locally and enqueue for sync
+    await _repo.deleteMenuItem(
+      itemId: id,
+      businessId: _businessId,
+      categoryId: categoryId,
+      deletedByUid: _userUid,
+      deletedByName: _userName,
+    );
+
     _itemsCache[categoryId]?.removeWhere((i) => i.id == id);
     final catIdx = _categories.indexWhere((c) => c.id == categoryId);
     if (catIdx != -1 && _categories[catIdx].itemCount > 0) {
       _categories[catIdx].itemCount--;
     }
+    _pendingSyncCount++;
+
+    debugPrint(
+      '[MenuProvider] ✅ Menu item deleted locally (pending sync): $id',
+    );
     notifyListeners();
   }
 

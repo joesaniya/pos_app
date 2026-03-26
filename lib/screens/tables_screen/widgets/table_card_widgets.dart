@@ -226,7 +226,8 @@ class TableCard extends StatelessWidget {
         ? sc.withOpacity(0.3)
         : TC.border;
 
-    final borderWidth = (isSoon || isOccupied || isEndingSoon || isLongSeated || isPartial)
+    final borderWidth =
+        (isSoon || isOccupied || isEndingSoon || isLongSeated || isPartial)
         ? 1.5
         : 1.0;
 
@@ -532,6 +533,12 @@ class _StatusContent extends StatelessWidget {
               ),
             ],
 
+            // ✅ SHOW SEAT DETAILS FOR OCCUPIED TABLES (walk-in guests)
+            if (table.seats.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              _SeatOccupancyBadge(table: table),
+            ],
+
             // Order total
             if (table.currentOrderTotal != null) ...[
               const SizedBox(height: 3),
@@ -727,6 +734,71 @@ class _TimeChip extends StatelessWidget {
             fontSize: 11,
             fontWeight: FontWeight.w700,
             color: textColor,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+//  SEAT OCCUPANCY BADGE — Shows available seats in occupied tables
+// ═════════════════════════════════════════════════════════════
+class _SeatOccupancyBadge extends StatelessWidget {
+  final RestaurantTable table;
+  const _SeatOccupancyBadge({required this.table});
+
+  @override
+  Widget build(BuildContext context) {
+    final totalSeats = table.seats.length;
+    final occupiedSeats = table.seats.where((s) => s.isOccupied).length;
+    final availableSeats = totalSeats - occupiedSeats;
+
+    // If no seats available, don't show badge
+    if (availableSeats <= 0) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Color(0xFFEF4444),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          const Text(
+            'No seats free',
+            style: TextStyle(
+              fontSize: 10,
+              color: Color(0xFFEF4444),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Show available seats info
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            color: TC.available,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          '$availableSeats seat${availableSeats != 1 ? 's' : ''} free',
+          style: const TextStyle(
+            fontSize: 10,
+            color: TC.available,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],

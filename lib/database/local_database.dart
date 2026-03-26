@@ -24,7 +24,7 @@ class LocalDatabase {
   bool get isInitialized => _db != null;
 
   static const _dbName = 'pos_app_offline.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
 
   // ── Table names ────────────────────────────────────────────────────────────
   static const tQueue = 'offline_queue';
@@ -33,6 +33,7 @@ class LocalDatabase {
   static const tSeats = 'table_seats';
   static const tReservations = 'local_reservations';
   static const tMenuItems = 'local_menu_items';
+  static const tMenuCategories = 'local_menu_categories';
   static const tInventory = 'local_inventory';
   static const tSuppliers = 'local_suppliers';
   static const tProfile = 'local_profile';
@@ -80,6 +81,7 @@ class LocalDatabase {
     await db.execute(_createTablesTable);
     await db.execute(_createReservationsTable);
     await db.execute(_createMenuItemsTable);
+    await db.execute(_createMenuCategoriesTable);
     await db.execute(_createInventoryTable);
     await db.execute(_createSuppliersTable);
     await db.execute(_createProfileTable);
@@ -98,6 +100,16 @@ class LocalDatabase {
         log('[LocalDB] ✅ Created local_seat_history table during upgrade');
       } catch (e) {
         log('[LocalDB] Note: local_seat_history may already exist: $e');
+      }
+    }
+
+    // v2 → v3: Add local_menu_categories table
+    if (oldVersion < 3) {
+      try {
+        await db.execute(_createMenuCategoriesTable);
+        log('[LocalDB] ✅ Created local_menu_categories table during upgrade');
+      } catch (e) {
+        log('[LocalDB] Note: local_menu_categories may already exist: $e');
       }
     }
 
@@ -173,6 +185,19 @@ class LocalDatabase {
       category     TEXT,
       data         TEXT NOT NULL,
       sync_status  TEXT NOT NULL DEFAULT 'synced',
+      action       TEXT NOT NULL DEFAULT 'create',
+      created_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL
+    )
+  ''';
+
+  static const _createMenuCategoriesTable =
+      '''
+    CREATE TABLE IF NOT EXISTS $tMenuCategories (
+      id           TEXT PRIMARY KEY,
+      business_id  TEXT NOT NULL,
+      data         TEXT NOT NULL,
+      sync_status  TEXT NOT NULL DEFAULT 'pending',
       action       TEXT NOT NULL DEFAULT 'create',
       created_at   TEXT NOT NULL,
       updated_at   TEXT NOT NULL

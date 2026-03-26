@@ -16,6 +16,7 @@ import 'package:pos_app/providers/qr_code_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:pos_app/providers/network_sync_provider.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
 
@@ -28,6 +29,9 @@ class ProviderHelperClass {
   }
 
   List<SingleChildWidget> providerLists = [
+    // ✅ Services (singleton instances)
+    Provider<ConnectivityService>(create: (_) => ConnectivityService.instance),
+
     // ChangeNotifierProvider(create: (context) => SplashProvider(context)),
     ChangeNotifierProvider(create: (_) => SplashProvider()),
     ChangeNotifierProvider(create: (_) => ThemeProvider()),

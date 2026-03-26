@@ -6,8 +6,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
 import 'package:pos_app/screens/utils/app_sizes.dart';
+import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/theme/app_colors.dart';
 import 'package:pos_app/theme/app_theme.dart';
+import 'package:pos_app/widgets/menu_offline_sync_widget.dart';
 
 const List<String> _icons = [
   '🍽️',
@@ -167,6 +169,8 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
 
     try {
       final provider = context.read<SupabaseMenuProvider>();
+      final connectivity = ConnectivityService.instance;
+      final isOnline = connectivity.isOnline;
 
       if (_isEdit) {
         await provider.updateCategory(
@@ -190,7 +194,20 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         );
       }
 
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isOnline
+                  ? '✅ Category saved successfully'
+                  : '📱 Category saved offline (will sync when online)',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

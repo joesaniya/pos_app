@@ -3,6 +3,8 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/menu_category.dart';
 import 'package:pos_app/screens/add_menu_category_screen.dart';
+import 'package:pos_app/services/connectivity_service.dart';
+import 'package:pos_app/widgets/menu_offline_sync_widget.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
 import 'package:pos_app/screens/menu_sub_category_screen.dart';
@@ -99,6 +101,7 @@ class _MenuScreenState extends State<MenuScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            const MenuOfflineStatusBar(),
             _MenuHeader(),
             _SearchBar(
               controller: _searchCtrl,

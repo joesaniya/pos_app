@@ -259,6 +259,9 @@ class OfflineSyncService {
       case EntityType.reservation:
         await _syncReservation(action, payload);
         break;
+      case 'menu_category':
+        await _syncMenuCategory(action, payload);
+        break;
       case EntityType.menuItem:
         await _syncMenuItem(action, payload);
         break;
@@ -449,6 +452,35 @@ class OfflineSyncService {
             .from('table_reservations')
             .update({'status': 'cancelled', 'updated_at': clean['updated_at']})
             .eq('id', id);
+        break;
+    }
+  }
+
+  Future<void> _syncMenuCategory(String action, Map<String, dynamic> p) async {
+    final id = p['id'] as String;
+    final clean = _cleanPayload(p);
+
+    switch (action) {
+      case LocalDatabase.actionCreate:
+        final existing = await _sb
+            .from('menu_categories')
+            .select('id')
+            .eq('id', id)
+            .maybeSingle();
+        if (existing != null) return;
+        await _sb.from('menu_categories').insert(clean);
+        log('[SyncService] ✅ Created menu category: $id');
+        break;
+      case LocalDatabase.actionUpdate:
+        await _sb.from('menu_categories').update(clean).eq('id', id);
+        log('[SyncService] ✅ Updated menu category: $id');
+        break;
+      case LocalDatabase.actionDelete:
+        await _sb
+            .from('menu_categories')
+            .update({'is_active': false})
+            .eq('id', id);
+        log('[SyncService] ✅ Deactivated menu category: $id');
         break;
     }
   }

@@ -1632,6 +1632,53 @@ class AvailableSection extends StatelessWidget {
   }
 
   Future<void> _handleSeatWalkIn(BuildContext context) async {
+    // ✅ Check if table has an active reservation (between check-in and checkout)
+    final res = table.reservation;
+    if (res != null && res.checkIn != null && res.checkOut != null) {
+      final now = nowIST();
+      final isReservationActive =
+          now.isAfter(res.checkIn!) && now.isBefore(res.checkOut!);
+
+      if (isReservationActive) {
+        if (!_isMounted(context)) return;
+        // Show dialog explaining the table is locked during active reservation
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: TC.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              '🔒 Table Locked',
+              style: TextStyle(fontWeight: FontWeight.w800, color: TC.textPri),
+            ),
+            content: Text(
+              'This table has an active reservation.'
+              '\n\nGuest: ${res.customerName}'
+              '\nCheck-out: ${_fmtTime(res.checkOut!)}'
+              '\n\nSeats cannot be selected during active reservations.',
+              style: const TextStyle(color: TC.textSec, height: 1.5),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: TC.accent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
     List<String>? selectedSeats;
     if (table.seats.isNotEmpty) {
       selectedSeats = await showDialog<List<String>>(

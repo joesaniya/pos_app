@@ -22,6 +22,17 @@ class InventoryRepository {
   final _uuid = const Uuid();
   final _connectivity = ConnectivityService.instance;
 
+  // ── FIX: UUID validation helper ───────────────────────────────────────────
+  // Reuses the same regex already in inventory_modal.dart so the rule is
+  // consistent everywhere.  A local copy avoids a cross-file import cycle.
+  bool _isValidUuid(String? id) {
+    if (id == null || id.trim().isEmpty) return false;
+    return RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+      caseSensitive: false,
+    ).hasMatch(id.trim());
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  FETCH
   // ══════════════════════════════════════════════════════════════════════════
@@ -45,8 +56,14 @@ class InventoryRepository {
           .eq('business_id', businessId)
           .eq('is_active', true)
           .order('name');
-      final items = (rows as List).map((r) => r as Map<String, dynamic>).toList();
-      await _local.replaceAll(table: LocalDatabase.tInventory, businessId: businessId, entities: items);
+      final items = (rows as List)
+          .map((r) => r as Map<String, dynamic>)
+          .toList();
+      await _local.replaceAll(
+        table: LocalDatabase.tInventory,
+        businessId: businessId,
+        entities: items,
+      );
       log('[InventoryRepo] Remote refresh: ${items.length} items cached');
     } catch (e) {
       debugPrint('[InventoryRepo] Remote refresh error: $e');
@@ -64,13 +81,18 @@ class InventoryRepository {
     required String userName,
     required String userRole,
   }) async {
-    final now  = DateTime.now().toUtc().toIso8601String();
-    final id   = item.id.isNotEmpty ? item.id : _uuid.v4();
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    // ── FIX: only use item.id if it is already a valid UUID, otherwise
+    //   generate a fresh one.  The old check `item.id.isNotEmpty` passed
+    //   through sentinel strings like "i9667" which Postgres rejects.
+    final id = _isValidUuid(item.id) ? item.id : _uuid.v4();
+
     final data = {
       ...item.toJson(businessId),
-      'id':         id,
+      'id': id,
       'created_at': now,
-      'updated_at': now,
+      'last_updated': now,
     };
 
     // Local first
@@ -79,27 +101,36 @@ class InventoryRepository {
       id: id,
       businessId: businessId,
       data: data,
-      syncStatus: _connectivity.isOnline ? LocalDatabase.syncSynced : LocalDatabase.syncPending,
+      syncStatus: _connectivity.isOnline
+          ? LocalDatabase.syncSynced
+          : LocalDatabase.syncPending,
       action: LocalDatabase.actionCreate,
     );
 
     if (_connectivity.isOnline) {
       try {
-        final inserted = await _sb.from('inventory_items').insert(data).select().single();
+        final inserted = await _sb
+            .from('inventory_items')
+            .insert(data)
+            .select()
+            .single();
         final insertedId = (inserted as Map)['id'] as String;
         // Log initial stock transaction
         await _sb.from('stock_transactions').insert({
-          'item_id':         insertedId,
-          'business_id':     businessId,
+          'item_id': insertedId,
+          'business_id': businessId,
           'transaction_type': 'stock_in',
-          'quantity':        item.currentStock,
-          'stock_before':    0,
-          'stock_after':     item.currentStock,
-          'unit':            item.unit.label,
-          'note':            'Initial stock entry',
-          'updated_by_uid':  userUid,
+          'quantity': item.currentStock,
+          'stock_before': 0,
+          'stock_after': item.currentStock,
+          'unit': item.unit.dbValue,
+          'note': 'Initial stock entry',
+          'updated_by_uid': userUid,
           'updated_by_name': userName,
           'updated_by_role': userRole,
+          'supplier_id': isValidSupplierId(item.supplierId)
+              ? item.supplierId
+              : null,
         });
         return true;
       } catch (e) {
@@ -127,8 +158,8 @@ class InventoryRepository {
     required InventoryItem item,
     required String businessId,
   }) async {
-    final now  = DateTime.now().toUtc().toIso8601String();
-    final data = {...item.toJson(businessId), 'updated_at': now};
+    final now = DateTime.now().toUtc().toIso8601String();
+    final data = {...item.toJson(businessId), 'last_updated': now};
 
     await _local.upsertEntity(
       table: LocalDatabase.tInventory,
@@ -141,7 +172,11 @@ class InventoryRepository {
 
     if (_connectivity.isOnline) {
       try {
-        await _sb.from('inventory_items').update(data).eq('id', item.id).eq('business_id', businessId);
+        await _sb
+            .from('inventory_items')
+            .update(data)
+            .eq('id', item.id)
+            .eq('business_id', businessId);
         return true;
       } catch (e) {
         debugPrint('[InventoryRepo] Online updateItem failed: $e');
@@ -175,7 +210,11 @@ class InventoryRepository {
 
     if (_connectivity.isOnline) {
       try {
-        await _sb.from('inventory_items').update({'is_active': false}).eq('id', id).eq('business_id', businessId);
+        await _sb
+            .from('inventory_items')
+            .update({'is_active': false})
+            .eq('id', id)
+            .eq('business_id', businessId);
         return;
       } catch (_) {}
     }
@@ -208,24 +247,24 @@ class InventoryRepository {
     required String userRole,
     double? costPerUnit,
   }) async {
-    final txId  = _uuid.v4();
-    final now   = DateTime.now().toUtc().toIso8601String();
+    final txId = _uuid.v4();
+    final now = DateTime.now().toUtc().toIso8601String();
     final txMap = {
-      'id':               txId,
-      'item_id':          itemId,
-      'business_id':      businessId,
+      'id': txId,
+      'item_id': itemId,
+      'business_id': businessId,
       'transaction_type': type.dbValue,
-      'quantity':         quantity,
-      'stock_before':     stockBefore,
-      'stock_after':      stockAfter,
-      'unit':             unit.label,
-      'cost_per_unit':    costPerUnit,
-      'total_cost':       costPerUnit != null ? costPerUnit * quantity : null,
-      'note':             note,
-      'updated_by_uid':   userUid,
-      'updated_by_name':  userName,
-      'updated_by_role':  userRole,
-      'created_at':       now,
+      'quantity': quantity,
+      'stock_before': stockBefore,
+      'stock_after': stockAfter,
+      'unit': unit.dbValue,
+      'cost_per_unit': costPerUnit,
+      'total_cost': costPerUnit != null ? costPerUnit * quantity : null,
+      'note': note,
+      'updated_by_uid': userUid,
+      'updated_by_name': userName,
+      'updated_by_role': userRole,
+      'created_at': now,
     };
 
     if (_connectivity.isOnline) {

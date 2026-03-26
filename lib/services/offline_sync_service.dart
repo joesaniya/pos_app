@@ -1,16 +1,6 @@
 // lib/services/offline_sync_service.dart
 // ══════════════════════════════════════════════════════════════════════════════
-//  OFFLINE SYNC SERVICE  (FIXED)
-//
-//  KEY FIXES:
-//  1. _cleanPayload() strips all internal DB fields (_sync_status, _action,
-//     seats, restaurant_tables, etc.) before sending to Supabase so the
-//     insert/update never fails with "unknown column" errors.
-//  2. _syncTable() no longer does a broken updated_at comparison on the raw
-//     payload — it uses the Supabase response directly.
-//  3. All sync functions use _cleanPayload() consistently.
-//  4. Table sync correctly uses the RPC names expected by the DB (fn_seat_guest_v2
-//     etc.) — no raw status overwrites that bypass business logic.
+//  OFFLINE SYNC SERVICE
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
@@ -56,15 +46,25 @@ class EntityType {
 }
 
 // ── Fields that must never be sent to Supabase ────────────────────────────
-// These are local-only fields or computed joins that don't exist in schema
 const _kInternalFields = {
   '_sync_status',
   '_action',
-  'seats', // joined list, not a column
-  'restaurant_tables', // joined object from Supabase queries
-  'reservation_data', // computed field from vw_tables_with_reservation
-  'items', // computed JSON array from vw_orders_with_items
+  'seats',
+  'restaurant_tables',
+  'reservation_data',
+  'items',
 };
+
+// ── UUID validation ────────────────────────────────────────────────────────
+final _uuidRegex = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+  caseSensitive: false,
+);
+
+bool _isValidUuid(String? id) {
+  if (id == null || id.trim().isEmpty) return false;
+  return _uuidRegex.hasMatch(id.trim());
+}
 
 class OfflineSyncService {
   OfflineSyncService._();
@@ -83,6 +83,11 @@ class OfflineSyncService {
 
   // ── Start listening ───────────────────────────────────────────────────────
   void start() {
+    // Purge any legacy queue entries that have non-UUID entity IDs for
+    // inventory items — these were created before the generateId() fix and
+    // will never succeed against a UUID primary-key column.
+    _purgeBadInventoryQueueEntries();
+
     _connectSub = _connectivity.onConnected.listen(
       (_) => processPendingQueue(),
     );
@@ -98,33 +103,93 @@ class OfflineSyncService {
     log('[SyncService] ✅ Started');
   }
 
+  // ── Purge legacy bad-UUID inventory queue entries ─────────────────────────
+  // Runs once at startup (and is a no-op after the first clean run).
+  // Removes offline_queue rows whose payload carries a non-UUID "id" for
+  // entity_type = 'inventory_item'.  Those rows were created by the old
+  // generateId() that returned strings like "i9667".
+  Future<void> _purgeBadInventoryQueueEntries() async {
+    try {
+      final rows = await _db.db.query(
+        LocalDatabase.tQueue,
+        where: 'entity_type = ?',
+        whereArgs: [EntityType.inventoryItem],
+      );
+
+      final badIds = <String>[];
+      for (final row in rows) {
+        final entityId = row['entity_id'] as String? ?? '';
+        if (!_isValidUuid(entityId)) {
+          badIds.add(row['id'] as String);
+        }
+
+        // Also check the payload's "id" field in case entity_id was set
+        // correctly but the payload itself carries the bad id.
+        try {
+          final payload =
+              jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+          final payloadId = payload['id'] as String?;
+          if (!_isValidUuid(payloadId)) {
+            final queueId = row['id'] as String;
+            if (!badIds.contains(queueId)) badIds.add(queueId);
+          }
+        } catch (_) {}
+      }
+
+      if (badIds.isEmpty) return;
+
+      final placeholders = badIds.map((_) => '?').join(',');
+      await _db.db.delete(
+        LocalDatabase.tQueue,
+        where: 'id IN ($placeholders)',
+        whereArgs: badIds,
+      );
+
+      log(
+        '[SyncService] 🧹 Purged ${badIds.length} bad-UUID inventory queue '
+        'entries: $badIds',
+      );
+
+      // Also remove the matching bad-ID rows from local_inventory so the
+      // item doesn't show up as a ghost in the UI.
+      for (final row in rows) {
+        if (!badIds.contains(row['id'] as String)) continue;
+        try {
+          final payload =
+              jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+          final payloadId = payload['id'] as String?;
+          if (payloadId != null && !_isValidUuid(payloadId)) {
+            await _db.db.delete(
+              LocalDatabase.tInventory,
+              where: 'id = ?',
+              whereArgs: [payloadId],
+            );
+            log(
+              '[SyncService] 🧹 Removed ghost local inventory row: $payloadId',
+            );
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[SyncService] _purgeBadInventoryQueueEntries error: $e');
+    }
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  PAYLOAD SANITISATION
-  //  Removes every field that Supabase does not know about before any
-  //  insert / update call.  Always call this before touching the remote DB.
   // ══════════════════════════════════════════════════════════════════════════
 
   Map<String, dynamic> _cleanPayload(Map<String, dynamic> raw) {
     final clean = Map<String, dynamic>.from(raw);
-
-    // Remove internal/computed fields that don't exist in schema
     for (final k in _kInternalFields) {
-      if (clean.containsKey(k)) {
-        clean.remove(k);
-      }
+      clean.remove(k);
     }
-
-    // Also remove null-value keys that Supabase might reject for NOT NULL cols
     clean.removeWhere(
       (key, value) => value == null && _isOptionalNullable(clean, key),
     );
-
     return clean;
   }
 
-  /// Very conservative: only strip explicitly-known nullable extras.
-  /// We do NOT strip all null values because some columns accept null (e.g.
-  /// current_customer_name). Only strip the keys we know cause problems.
   bool _isOptionalNullable(Map<String, dynamic> map, String key) => false;
 
   // ── Process the queue ─────────────────────────────────────────────────────
@@ -162,6 +227,21 @@ class OfflineSyncService {
       final rawPayload =
           jsonDecode(item['payload'] as String) as Map<String, dynamic>;
 
+      // ── Guard: skip inventory items whose payload id is not a valid UUID.
+      // This should not happen after the generateId() fix, but acts as a
+      // safety net for any entries that slipped through before the purge ran.
+      if (entityType == EntityType.inventoryItem) {
+        final payloadId = rawPayload['id'] as String?;
+        if (!_isValidUuid(payloadId)) {
+          log(
+            '[SyncService] 🧹 Skipping bad-UUID inventory queue entry '
+            '$queueId (id=$payloadId) — marking synced to clear it',
+          );
+          await _db.markSynced(queueId);
+          continue;
+        }
+      }
+
       try {
         await _dispatch(entityType, action, rawPayload);
         await _db.markSynced(queueId);
@@ -177,15 +257,9 @@ class OfflineSyncService {
             error.toLowerCase().contains('duplicate key value');
 
         if (isSeatConflict && entityType == EntityType.order) {
-          log(
-            '[SyncService] ⚠ Gave up on conflicting order sync (unique seat constraint): $error',
-          );
-
-          // Treat the queue item as resolved to avoid retry loops.
+          log('[SyncService] ⚠ Gave up on conflicting order sync: $error');
           await _db.markSynced(queueId);
 
-          // If we have a local order row, update it so UI doesn't keep showing
-          // an active order that failed to persist remotely.
           try {
             final localId = rawPayload['id'] as String?;
             if (localId != null) {
@@ -211,9 +285,7 @@ class OfflineSyncService {
                 );
               }
             }
-          } catch (_) {
-            // If local cleanup fails, do not block processing.
-          }
+          } catch (_) {}
 
           continue;
         }
@@ -356,20 +428,6 @@ class OfflineSyncService {
         .eq('id', clean['id'] as String);
   }
 
-  // ── TABLE SYNC (FIXED) ────────────────────────────────────────────────────
-  //
-  //  Previous bug: the payload contained fields like `seats`, `_sync_status`,
-  //  `_action`, `restaurant_tables` that Supabase rejected.  Also, the
-  //  last-write-wins comparison used `p['updated_at']` which was whatever
-  //  the local SQLite row stored — often a stale value that caused the update
-  //  to be silently skipped.
-  //
-  //  Fix: always sanitise with _cleanPayload() first; for updates use a
-  //  simple upsert with conflict-target on `id` — Supabase applies
-  //  last-write-wins via `updated_at` on the server side through the trigger.
-  //  If there is no such trigger, we fall back to a plain update (safe
-  //  because the offline queue serialises operations).
-  //
   Future<void> _syncTable(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String? ?? '';
     if (id.isEmpty) {
@@ -377,15 +435,11 @@ class OfflineSyncService {
       return;
     }
 
-    // Always clean the payload first — this is the primary fix.
     final clean = _cleanPayload(p);
-
-    // Ensure updated_at is always fresh so the server sees our write as newest.
     clean['updated_at'] = DateTime.now().toUtc().toIso8601String();
 
     switch (action) {
       case LocalDatabase.actionCreate:
-        // Check for existing row (idempotent insert)
         final existing = await _sb
             .from('restaurant_tables')
             .select('id')
@@ -393,7 +447,6 @@ class OfflineSyncService {
             .maybeSingle();
 
         if (existing != null) {
-          // Row already on server — treat as update
           log(
             '[SyncService] Table $id already exists on server, updating instead',
           );
@@ -404,7 +457,6 @@ class OfflineSyncService {
         break;
 
       case LocalDatabase.actionUpdate:
-        // Simple update — queue ordering ensures this runs after any create.
         await _sb.from('restaurant_tables').update(clean).eq('id', id);
         break;
 
@@ -422,7 +474,6 @@ class OfflineSyncService {
     }
   }
 
-  // ── RESERVATION SYNC (FIXED) ──────────────────────────────────────────────
   Future<void> _syncReservation(String action, Map<String, dynamic> p) async {
     final id = p['id'] as String? ?? '';
     if (id.isEmpty) return;
@@ -469,18 +520,15 @@ class OfflineSyncService {
             .maybeSingle();
         if (existing != null) return;
         await _sb.from('menu_categories').insert(clean);
-        log('[SyncService] ✅ Created menu category: $id');
         break;
       case LocalDatabase.actionUpdate:
         await _sb.from('menu_categories').update(clean).eq('id', id);
-        log('[SyncService] ✅ Updated menu category: $id');
         break;
       case LocalDatabase.actionDelete:
         await _sb
             .from('menu_categories')
             .update({'is_active': false})
             .eq('id', id);
-        log('[SyncService] ✅ Deactivated menu category: $id');
         break;
     }
   }
@@ -512,17 +560,21 @@ class OfflineSyncService {
     final id = p['id'] as String;
     final clean = _cleanPayload(p);
 
+    if (clean.containsKey('updated_at')) {
+      clean['last_updated'] = clean.remove('updated_at');
+    }
+
     switch (action) {
       case LocalDatabase.actionCreate:
         final existing = await _sb
             .from('inventory_items')
-            .select('id, updated_at')
+            .select('id, last_updated')
             .eq('id', id)
             .maybeSingle();
         if (existing != null) {
           if (_localIsNewer(
-            clean['updated_at'] as String?,
-            existing['updated_at'] as String?,
+            clean['last_updated'] as String?,
+            existing['last_updated'] as String?,
           )) {
             await _sb.from('inventory_items').update(clean).eq('id', id);
           }
@@ -533,12 +585,12 @@ class OfflineSyncService {
       case LocalDatabase.actionUpdate:
         final remote = await _sb
             .from('inventory_items')
-            .select('updated_at')
+            .select('last_updated')
             .eq('id', id)
             .maybeSingle();
         if (_localIsNewer(
-          clean['updated_at'] as String?,
-          remote?['updated_at'] as String?,
+          clean['last_updated'] as String?,
+          remote?['last_updated'] as String?,
         )) {
           await _sb.from('inventory_items').update(clean).eq('id', id);
         } else {
@@ -647,7 +699,7 @@ class OfflineSyncService {
     await _fs.collection('users').doc(uid).update(updates);
   }
 
-  // ── Last-write-wins conflict helper ───────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
   bool _localIsNewer(String? localTs, String? remoteTs) {
     if (localTs == null) return false;
     if (remoteTs == null) return true;

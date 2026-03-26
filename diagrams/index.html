@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS App - System Flowcharts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .info-box {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .sections {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+        
+        .section-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .section-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
+        }
+        
+        .section-card h3 {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            margin: 0;
+            font-size: 1.3em;
+        }
+        
+        .section-card-content {
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .section-card-content p {
+            margin-bottom: 15px;
+            font-size: 0.95em;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            margin-top: 15px;
+            transition: background 0.3s ease;
+            font-weight: 500;
+        }
+        
+        .download-btn:hover {
+            background: #764ba2;
+        }
+        
+        .features {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 30px;
+            margin-top: 40px;
+        }
+        
+        .features h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .feature-list {
+            column-count: 2;
+            column-gap: 30px;
+        }
+        
+        .feature-list li {
+            list-style: none;
+            padding-left: 30px;
+            margin-bottom: 15px;
+            position: relative;
+            color: #555;
+        }
+        
+        .feature-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        footer {
+            text-align: center;
+            color: white;
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            .sections {
+                grid-template-columns: 1fr;
+            }
+            
+            .feature-list {
+                column-count: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🍽️ POS App System Flowcharts</h1>
+            <p class="subtitle">Complete Architecture & Process Flows</p>
+        </header>
+        
+        <div class="info-box">
+            <h2>📊 Flowchart Documentation</h2>
+            <p>
+                This comprehensive flowchart collection represents the entire POS (Point of Sale) Flutter application, 
+                including all modules, features, user interactions, backend communication, state management, and data flows.
+            </p>
+            <p>
+                The diagrams are designed for both technical and non-technical audiences, covering decision points, 
+                error handling scenarios, and system integrations.
+            </p>
+            <div class="download-btn" onclick="window.open('flowchart.svg', '_blank')">
+                📥 Download Full Diagram (SVG)
+            </div>
+        </div>
+        
+        <div class="sections">
+            <div class="section-card">
+                <h3>🚀 1. Application Lifecycle</h3>
+                <div class="section-card-content">
+                    <p>App initialization, Firebase/Supabase setup, system services, and navigation routing.</p>
+                    <p><strong>Covers:</strong> Boot sequence, dependency injection, theme setup, initial navigation</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>🔐 2. Authentication System</h3>
+                <div class="section-card-content">
+                    <p>Email/password, phone OTP, Google OAuth, session validation, and access control.</p>
+                    <p><strong>Covers:</strong> Login flows, credential verification, subscription checks, session tokens</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>👑 3. Role-Based Access Control</h3>
+                <div class="section-card-content">
+                    <p>Owner, Manager, Admin, Staff roles with granular permission mapping.</p>
+                    <p><strong>Covers:</strong> Role hierarchy, feature access gates, permission validation</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📱 4. Main Navigation</h3>
+                <div class="section-card-content">
+                    <p>5+ main modules: Dashboard, Orders, Tables, Menu, Inventory with nested flows.</p>
+                    <p><strong>Covers:</strong> Tab navigation, screen switching, feature access, bottom bar</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📋 5. Orders Module</h3>
+                <div class="section-card-content">
+                    <p>Complete order lifecycle: creation, item selection, status tracking, payment, history.</p>
+                    <p><strong>Covers:</strong> Order creation, filtering, real-time updates, offline sync</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📅 6. Tables & Reservations</h3>
+                <div class="section-card-content">
+                    <p>Floor view, calendar view, reservation management, session lifecycle, auto-expiry.</p>
+                    <p><strong>Covers:</strong> Table status, booking workflow, check-in/out, occupancy tracking</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📦 7. Inventory Management</h3>
+                <div class="section-card-content">
+                    <p>Stock tracking, supplier management, stock transactions, alerts, and reporting.</p>
+                    <p><strong>Covers:</strong> Stock In/Out, reorder levels, supplier orders, waste tracking</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>🗂️ 8. Menu Management</h3>
+                <div class="section-card-content">
+                    <p>Categories, menu items, editing workflows, images, offline caching.</p>
+                    <p><strong>Covers:</strong> CRUD operations, bulk updates, image management, version sync</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📡 9. Offline-First Architecture</h3>
+                <div class="section-card-content">
+                    <p>SQLite local database, sync queue, conflict resolution, and data synchronization.</p>
+                    <p><strong>Covers:</strong> Local caching, pending queue, exponential backoff, UUID validation</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>📊 10. Analytics & Reporting</h3>
+                <div class="section-card-content">
+                    <p>Revenue analytics, top items, staff performance, table analytics, exports.</p>
+                    <p><strong>Covers:</strong> Chart generation, period comparison, PDF/CSV export, dashboards</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>👥 11. Employee Management</h3>
+                <div class="section-card-content">
+                    <p>Staff lifecycle, role assignment, permissions, performance tracking, deactivation.</p>
+                    <p><strong>Covers:</strong> Onboarding, role changes, activity logs, performance metrics</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>⚠️ 12. Error Handling</h3>
+                <div class="section-card-content">
+                    <p>Network errors, validation errors, crash handling, retry mechanisms, user feedback.</p>
+                    <p><strong>Covers:</strong> Error types, recovery strategies, retry logic, logging</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>🔔 13. Notifications</h3>
+                <div class="section-card-content">
+                    <p>Order alerts, reservation reminders, stock notifications, system events.</p>
+                    <p><strong>Covers:</strong> Local notifications, FCM, notification timeline, actions</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>🎯 14. State Management</h3>
+                <div class="section-card-content">
+                    <p>Provider architecture, caching strategies, real-time listeners, lifecycle.</p>
+                    <p><strong>Covers:</strong> Multi-provider setup, Supabase channels, notifyListeners</p>
+                </div>
+            </div>
+            
+            <div class="section-card">
+                <h3>🔀 15. Complete Data Flow</h3>
+                <div class="section-card-content">
+                    <p>End-to-end flow from user interaction through to UI updates and persistence.</p>
+                    <p><strong>Covers:</strong> UI→Provider→DB→Sync→Realtime→UI rebuild cycle</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="features">
+            <h2>✨ Key Architecture Features</h2>
+            <ul class="feature-list">
+                <li>🌐 <strong>Offline-First</strong> - SQLite local cache with automatic sync queue</li>
+                <li>📡 <strong>Real-time Sync</strong> - Supabase channels for instant updates</li>
+                <li>🔐 <strong>Secure Auth</strong> - Firebase authentication with token management</li>
+                <li>💾 <strong>Local Storage</strong> - SQLite for offline operation and caching</li>
+                <li>🔔 <strong>Notifications</strong> - Local & FCM push notifications</li>
+                <li>👑 <strong>Role-Based Access</strong> - 5 user roles with granular permissions</li>
+                <li>📊 <strong>Analytics</strong> - Revenue tracking, staff performance, table occupancy</li>
+                <li>🛡️ <strong>Error Handling</strong> - Comprehensive error recovery and user feedback</li>
+                <li>⚡ <strong>Performance</strong> - Pagination, caching, optimistic updates</li>
+                <li>🔄 <strong>Conflict Resolution</strong> - Smart merge strategies for offline changes</li>
+                <li>🎨 <strong>Theme Support</strong> - Dark/light mode with persistent preferences</li>
+                <li>📱 <strong>Responsive Design</strong> - Mobile-first Flutter implementation</li>
+            </ul>
+        </div>
+        
+        <footer>
+            <p>Generated: March 26, 2026 | Version: 1.0 | Status: ✅ Production Ready</p>
+            <p>For updates and detailed documentation, refer to flowchart.md</p>
+        </footer>
+    </div>
+</body>
+</html>

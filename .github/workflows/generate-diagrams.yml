@@ -1,0 +1,111 @@
+name: Generate Flowchart Diagrams
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'flowchart.md'
+      - 'generate-diagrams.js'
+      - '.github/workflows/generate-diagrams.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-diagrams:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install mermaid-cli
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: Run diagram generator
+        run: node generate-diagrams.js
+
+      - name: Check if diagrams were generated
+        run: |
+          if [ -f "diagrams/flowchart.svg" ]; then
+            echo "✓ SVG diagram generated"
+          else
+            echo "✗ SVG diagram not found"
+            exit 1
+          fi
+
+      - name: Create artifacts archive
+        run: |
+          mkdir -p artifacts
+          cp -r diagrams/* artifacts/
+          tar -czf flowchart-docs.tar.gz diagrams/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: flowchart-diagrams
+          path: diagrams/
+          retention-days: 30
+
+      - name: Commit diagrams (if changed)
+        run: |
+          git config user.name "Flowchart Generator Bot"
+          git config user.email "bot@example.com"
+          
+          if [ -n "$(git status --porcelain diagrams/)" ]; then
+            git add diagrams/
+            git commit -m "Auto-generate flowchart diagrams"
+            git push
+          else
+            echo "No changes in diagrams - skipping commit"
+          fi
+        continue-on-error: true
+
+      - name: Create Release (optional)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Flowchart Documentation - ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./flowchart-docs.tar.gz
+          asset_name: flowchart-docs.tar.gz
+          asset_content_type: application/gzip
+
+  # Optional: Deploy diagrams to GitHub Pages
+  deploy-pages:
+    needs: generate-diagrams
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Download diagrams
+        uses: actions/download-artifact@v3
+        with:
+          name: flowchart-diagrams
+          path: diagrams
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./diagrams
+          cname: pos-app-docs.example.com  # Optional: Set your custom domain

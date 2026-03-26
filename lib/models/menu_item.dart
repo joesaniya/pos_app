@@ -90,11 +90,12 @@ class SupabaseMenuItem {
         v == null ? [] : List<String>.from(v as List);
 
     return SupabaseMenuItem(
-      id: json['id'] as String,
-      categoryId: json['category_id'] as String,
-      name: json['name'] as String,
-      description: json['description'] as String? ?? '',
-      price: (json['price'] as num).toDouble(),
+      // ✅ SAFE CASTING — All required String fields use fallback defaults
+      id: (json['id'] as String?) ?? 'unknown',
+      categoryId: (json['category_id'] as String?) ?? 'unknown',
+      name: (json['name'] as String?) ?? 'Unnamed Item',
+      description: (json['description'] as String?) ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
       discountPrice: json['discount_price'] != null
           ? (json['discount_price'] as num).toDouble()
           : null,
@@ -118,18 +119,22 @@ class SupabaseMenuItem {
       ingredients: list(json['ingredients']),
       rating: json['rating'] != null ? (json['rating'] as num).toDouble() : 4.0,
       sortOrder: json['sort_order'] as int? ?? 0,
-      businessId: json['business_id'] as String,
-      businessName: json['business_name'] as String,
-      createdByUid: json['created_by_uid'] as String,
-      createdByName: json['created_by_name'] as String,
+      businessId: (json['business_id'] as String?) ?? 'unknown',
+      businessName: (json['business_name'] as String?) ?? 'Unknown Business',
+      createdByUid: (json['created_by_uid'] as String?) ?? 'system',
+      createdByName: (json['created_by_name'] as String?) ?? 'System',
       createdByEmail: json['created_by_email'] as String?,
       createdByRole: json['created_by_role'] as String?,
       createdByPhone: json['created_by_phone'] as String?,
       updatedByUid: json['updated_by_uid'] as String?,
       updatedByName: json['updated_by_name'] as String?,
       updatedByRole: json['updated_by_role'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'] as String)
+          : DateTime.now(),
+      updatedAt: json['updated_at'] != null
+          ? DateTime.parse(json['updated_at'] as String)
+          : DateTime.now(),
     );
   }
 
@@ -183,6 +188,46 @@ class SupabaseMenuItem {
     'ingredients': ingredients,
     'rating': rating,
     'sort_order': sortOrder,
+  };
+
+  /// Complete JSON representation with ALL fields including category_id
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'category_id': categoryId,
+    'name': name,
+    'description': description,
+    'price': price,
+    'discount_price': discountPrice,
+    'image_url': imageUrl,
+    'is_available': isAvailable,
+    'is_veg': isVeg,
+    'is_featured': isFeatured,
+    'is_best_seller': isBestSeller,
+    'is_new_arrival': isNewArrival,
+    'is_spicy': isSpicy,
+    'preparation_time': preparationTime,
+    'calories': calories,
+    'protein': protein,
+    'carbs': carbs,
+    'fat': fat,
+    'serving_size': servingSize,
+    'allergens': allergens,
+    'tags': tags,
+    'ingredients': ingredients,
+    'rating': rating,
+    'sort_order': sortOrder,
+    'business_id': businessId,
+    'business_name': businessName,
+    'created_by_uid': createdByUid,
+    'created_by_name': createdByName,
+    'created_by_email': createdByEmail,
+    'created_by_role': createdByRole,
+    'created_by_phone': createdByPhone,
+    'updated_by_uid': updatedByUid,
+    'updated_by_name': updatedByName,
+    'updated_by_role': updatedByRole,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt.toIso8601String(),
   };
 }
 

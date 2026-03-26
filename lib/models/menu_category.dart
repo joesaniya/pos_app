@@ -56,51 +56,55 @@ class SupabaseMenuCategory {
 
   factory SupabaseMenuCategory.fromJson(Map<String, dynamic> json) {
     return SupabaseMenuCategory(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      description: json['description'] as String? ?? '',
+      id: (json['id'] as String?) ?? 'unknown',
+      name: (json['name'] as String?) ?? 'Unnamed Category',
+      description: (json['description'] as String?) ?? '',
       icon: json['icon'] as String? ?? '🍽️',
       colorHex: json['color_hex'] as String? ?? '#D4673A',
       displayOrder: json['display_order'] as int? ?? 0,
       isActive: json['is_active'] as bool? ?? true,
       imageUrl: json['image_url'] as String?,
-      businessId: json['business_id'] as String,
-      businessName: json['business_name'] as String,
-      createdByUid: json['created_by_uid'] as String,
-      createdByName: json['created_by_name'] as String,
+      businessId: (json['business_id'] as String?) ?? 'unknown',
+      businessName: (json['business_name'] as String?) ?? 'Unknown Business',
+      createdByUid: (json['created_by_uid'] as String?) ?? 'system',
+      createdByName: (json['created_by_name'] as String?) ?? 'System',
       createdByEmail: json['created_by_email'] as String?,
       createdByRole: json['created_by_role'] as String?,
       createdByPhone: json['created_by_phone'] as String?,
       updatedByUid: json['updated_by_uid'] as String?,
       updatedByName: json['updated_by_name'] as String?,
       updatedByRole: json['updated_by_role'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'] as String)
+          : DateTime.now(),
+      updatedAt: json['updated_at'] != null
+          ? DateTime.parse(json['updated_at'] as String)
+          : DateTime.now(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'description': description,
-        'icon': icon,
-        'color_hex': colorHex,
-        'display_order': displayOrder,
-        'is_active': isActive,
-        'image_url': imageUrl,
-        'business_id': businessId,
-        'business_name': businessName,
-        'created_by_uid': createdByUid,
-        'created_by_name': createdByName,
-        'created_by_email': createdByEmail,
-        'created_by_role': createdByRole,
-        'created_by_phone': createdByPhone,
-        'updated_by_uid': updatedByUid,
-        'updated_by_name': updatedByName,
-        'updated_by_role': updatedByRole,
-        'created_at': createdAt.toIso8601String(),
-        'updated_at': updatedAt.toIso8601String(),
-      };
+    'id': id,
+    'name': name,
+    'description': description,
+    'icon': icon,
+    'color_hex': colorHex,
+    'display_order': displayOrder,
+    'is_active': isActive,
+    'image_url': imageUrl,
+    'business_id': businessId,
+    'business_name': businessName,
+    'created_by_uid': createdByUid,
+    'created_by_name': createdByName,
+    'created_by_email': createdByEmail,
+    'created_by_role': createdByRole,
+    'created_by_phone': createdByPhone,
+    'updated_by_uid': updatedByUid,
+    'updated_by_name': updatedByName,
+    'updated_by_role': updatedByRole,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt.toIso8601String(),
+  };
 
   SupabaseMenuCategory copyWith({
     String? name,
@@ -137,7 +141,6 @@ class SupabaseMenuCategory {
     );
   }
 }
-
 
 class MenuCategory {
   final String name;

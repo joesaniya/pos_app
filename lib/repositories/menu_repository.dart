@@ -409,6 +409,7 @@ class MenuRepository {
     bool isVeg = true,
     bool isFeatured = false,
     bool isBestSeller = false,
+    bool isNewArrival = false,
     bool isAvailable = true,
     bool isSpicy = false,
     int preparationTime = 15,
@@ -421,6 +422,7 @@ class MenuRepository {
     List<String> tags = const [],
     List<String> ingredients = const [],
     int sortOrder = 0,
+    double rating = 4.0,
   }) async {
     try {
       final itemId = _uuid.v4();
@@ -439,6 +441,7 @@ class MenuRepository {
         isSpicy: isSpicy,
         isFeatured: isFeatured,
         isBestSeller: isBestSeller,
+        isNewArrival: isNewArrival,
         preparationTime: preparationTime,
         calories: calories,
         protein: protein,
@@ -448,6 +451,7 @@ class MenuRepository {
         allergens: allergens,
         tags: tags,
         ingredients: ingredients,
+        rating: rating,
         sortOrder: sortOrder,
         businessId: businessId,
         businessName: businessName,
@@ -460,26 +464,28 @@ class MenuRepository {
         updatedAt: now,
       );
 
-      // Save to local cache
+      // Save to local cache — use toJson() to preserve ALL fields including category_id
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuItems,
         id: itemId,
         businessId: businessId,
-        data: item.toUpdateMap(),
+        data: item.toJson(),
         syncStatus: LocalDatabase.syncPending,
         action: LocalDatabase.actionCreate,
         extraColumns: {'category': categoryId},
       );
 
-      // Enqueue for sync
+      // Enqueue for sync with complete data
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: EntityType.menuItem,
         entityId: itemId,
         action: LocalDatabase.actionCreate,
         payload: {
+          ...item.toJson(),
           'id': itemId,
-          ...item.toUpdateMap(),
+          'category_id':
+              categoryId, // ✅ EXPLICIT — ensure present for constraint
           'business_id': businessId,
         },
         businessId: businessId,
@@ -526,6 +532,8 @@ class MenuRepository {
       final updated = {
         ...itemRow,
         ...updates,
+        'category_id':
+            categoryId, // ✅ EXPLICIT — preserve category_id after merge
         'updated_by_uid': updatedByUid,
         'updated_by_name': updatedByName,
         'updated_by_role': updatedByRole,
@@ -547,13 +555,19 @@ class MenuRepository {
         extraColumns: {'category': categoryId},
       );
 
-      // Enqueue for sync
+      // Enqueue for sync with category_id explicitly included
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: EntityType.menuItem,
         entityId: itemId,
         action: LocalDatabase.actionUpdate,
-        payload: {...updated, 'id': itemId, 'business_id': businessId},
+        payload: {
+          ...updated,
+          'id': itemId,
+          'category_id':
+              categoryId, // ✅ EXPLICIT — ensure never lost in sync payload
+          'business_id': businessId,
+        },
         businessId: businessId,
       );
 

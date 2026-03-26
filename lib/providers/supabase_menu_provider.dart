@@ -373,6 +373,7 @@ class SupabaseMenuProvider extends ChangeNotifier {
       isVeg: isVeg,
       isFeatured: isFeatured,
       isBestSeller: isBestSeller,
+      isNewArrival: isNewArrival,
       isAvailable: isAvailable,
       preparationTime: preparationTime,
       calories: calories,
@@ -382,6 +383,7 @@ class SupabaseMenuProvider extends ChangeNotifier {
       allergens: allergens,
       ingredients: ingredients,
       isSpicy: isSpicy,
+      rating: rating,
     );
 
     _itemsCache.putIfAbsent(categoryId, () => []).add(item);

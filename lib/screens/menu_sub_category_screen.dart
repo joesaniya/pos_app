@@ -906,14 +906,18 @@ class _SupabaseMenuItemCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            '${((item.price - item.discountPrice!) / item.price * 100).round()}% off',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              color: Color(0xFF2ECC71),
-                              fontWeight: FontWeight.w700,
+                          // ✅ Safe discount calculation — guard against division by zero and NaN
+                          if (item.price > 0 &&
+                              item.discountPrice! < item.price &&
+                              item.discountPrice! > 0)
+                            Text(
+                              '${((item.price - item.discountPrice!) / item.price * 100).round()}% off',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: Color(0xFF2ECC71),
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ],

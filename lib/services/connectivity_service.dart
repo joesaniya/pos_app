@@ -40,32 +40,69 @@ class ConnectivityService {
 
   // ── Init ──────────────────────────────────────────────────────────────────
   Future<void> init() async {
-    // Determine initial state
-    _status = await _checkRealConnectivity();
-    log('[Connectivity] Initial status: ${_status.name}');
+    // 1. Use quick platform check to determine initial state
+    final results = await _connectivity.checkConnectivity();
+    final hasInterfaces =
+        results.isNotEmpty && !results.contains(ConnectivityResult.none);
+
+    if (hasInterfaces) {
+      // Platform says we have network interfaces - likely online
+      _status = NetworkStatus.online;
+      log('[Connectivity] ✅ Quick init: Has network interfaces → ONLINE');
+
+      // Verify in background with internet check (don't wait)
+      _verifyConnectivityInBackground();
+    } else {
+      // No interfaces means definitely offline
+      _status = NetworkStatus.offline;
+      log('[Connectivity] ❌ Quick init: No network interfaces → OFFLINE');
+    }
 
     // Listen to platform connectivity changes
     _connectivitySub = _connectivity.onConnectivityChanged.listen(
       _onConnectivityChanged,
     );
 
-    // Start periodic validation to catch stuck states (every 30 seconds)
+    // Start periodic validation to catch stuck states (every 10 seconds instead of 30)
+    // This helps recover quickly if we're incorrectly stuck offline
     _periodicValidationTimer = Timer.periodic(
-      const Duration(seconds: 30),
+      const Duration(seconds: 10),
       (_) => _validateCurrentStatus(),
     );
+
+    log('[Connectivity] Initialization complete. Status: ${_status.name}');
+  }
+
+  // ── Background verification without blocking init ──────────────────────────
+  Future<void> _verifyConnectivityInBackground() async {
+    try {
+      final connected = await _checkRealConnectivityWithRetry(
+        maxRetries: 2, // Fewer retries in background
+      );
+      if (!connected && _status == NetworkStatus.online) {
+        log(
+          '[Connectivity] Background check failed, but we\'ll keep online for now',
+        );
+        // Don't immediately flip to offline - let periodic validation handle it
+      }
+    } catch (e) {
+      log('[Connectivity] Background verification error (ignored): $e');
+    }
   }
 
   // ── Handle connectivity change event ─────────────────────────────────────
   Future<void> _onConnectivityChanged(List<ConnectivityResult> results) async {
+    log('[Connectivity] Platform event: $results');
+
     // If still shows no real interfaces, we're definitely offline
     if (results.isEmpty || results.contains(ConnectivityResult.none)) {
       _updateStatus(NetworkStatus.offline, 'No interfaces available');
       return;
     }
 
-    // Otherwise, verify actual internet access with retries
-    final connected = await _checkRealConnectivityWithRetry();
+    // Has interfaces - check for actual internet access
+    // But use aggressive retry to quickly determine state
+    final connected = await _checkRealConnectivityWithRetry(maxRetries: 2);
     _updateStatus(
       connected ? NetworkStatus.online : NetworkStatus.offline,
       'Connectivity change detected',
@@ -74,40 +111,77 @@ class ConnectivityService {
 
   // ── Periodic validation to catch stuck states ───────────────────────────
   Future<void> _validateCurrentStatus() async {
-    final shouldBeOnline = await _checkRealConnectivityWithRetry();
-    final actualOnline = _status == NetworkStatus.online;
+    try {
+      // Do a quick connectivity check
+      final results = await _connectivity.checkConnectivity();
+      final hasInterfaces =
+          results.isNotEmpty && !results.contains(ConnectivityResult.none);
 
-    if (shouldBeOnline && !actualOnline) {
-      log('[Connectivity] ⚠️ STUCK IN OFFLINE! Correcting to ONLINE');
-      _updateStatus(NetworkStatus.online, 'Stuck state detected and fixed');
-    } else if (!shouldBeOnline && actualOnline) {
-      log('[Connectivity] ⚠️ STUCK IN ONLINE! Correcting to OFFLINE');
-      _updateStatus(NetworkStatus.offline, 'Stuck state detected and fixed');
+      if (!hasInterfaces) {
+        // No interfaces definitely means offline
+        if (_status == NetworkStatus.online) {
+          log(
+            '[Connectivity] ⚠️ STUCK IN ONLINE! Correcting to OFFLINE (no interfaces)',
+          );
+          _updateStatus(NetworkStatus.offline, 'Lost all network interfaces');
+        }
+        return;
+      }
+
+      // Has interfaces - do detailed check
+      final shouldBeOnline = await _checkRealConnectivityWithRetry(
+        maxRetries: 1,
+      );
+      final actualOnline = _status == NetworkStatus.online;
+
+      if (shouldBeOnline && !actualOnline) {
+        log('[Connectivity] ⚠️ STUCK IN OFFLINE! Correcting to ONLINE');
+        _updateStatus(NetworkStatus.online, 'Stuck state detected and fixed');
+        // Sync will be triggered automatically via onConnected stream
+      } else if (!shouldBeOnline && actualOnline) {
+        log('[Connectivity] ⚠️ STUCK IN ONLINE! Correcting to OFFLINE');
+        _updateStatus(NetworkStatus.offline, 'Stuck state detected and fixed');
+      }
+    } catch (e) {
+      log('[Connectivity] Periodic validation error: $e');
     }
   }
 
   // ── Real connectivity check with retry logic ─────────────────────────────
   Future<bool> _checkRealConnectivityWithRetry({
     int maxRetries = 3,
-    Duration delayBetweenRetries = const Duration(milliseconds: 500),
+    Duration delayBetweenRetries = const Duration(milliseconds: 300),
   }) async {
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        final connected = await _checker.hasConnection;
+        // Use a timeout to prevent hanging
+        final connected = await _checker.hasConnection.timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {
+            log('[Connectivity] Attempt $attempt/$maxRetries: TIMEOUT');
+            return false;
+          },
+        );
+
         log('[Connectivity] Attempt $attempt/$maxRetries: $connected');
         if (connected) {
-          return true; // Success on this attempt
+          return true; // Success!
+        }
+
+        // Not connected on this attempt, but will retry
+        if (attempt < maxRetries) {
+          await Future.delayed(delayBetweenRetries);
         }
       } catch (e) {
-        log('[Connectivity] Attempt $attempt/$maxRetries failed: $e');
+        log('[Connectivity] Attempt $attempt/$maxRetries error: $e');
         if (attempt < maxRetries) {
           await Future.delayed(delayBetweenRetries);
         }
       }
     }
 
-    // All retries exhausted, assume offline
-    log('[Connectivity] All $maxRetries retry attempts failed → offline');
+    // All retries exhausted
+    log('[Connectivity] All $maxRetries retry attempts failed');
     return false;
   }
 

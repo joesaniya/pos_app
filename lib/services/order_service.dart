@@ -436,7 +436,7 @@ class OrdersService {
         .eq('id', orderId)
         .single();
     return Order.fromJson(full as Map<String, dynamic>);
-  }
+   }
 
   // ══════════════════════════════════════════════════════════
   //  CONFIRM PAYMENT → auto-completes order via DB trigger

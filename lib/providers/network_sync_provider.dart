@@ -6,51 +6,57 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
+import 'dart:developer';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/services/offline_sync_service.dart';
 
 enum TrackerState {
-  hidden,     // Online, queue empty, no recent sync
-  offline,    // No internet
-  syncing,    // Online, sync in progress
-  pending,    // Online, has pending items, not currently syncing
-  synced,     // Just finished syncing — show confirmation briefly
+  hidden, // Online, queue empty, no recent sync
+  offline, // No internet
+  syncing, // Online, sync in progress
+  pending, // Online, has pending items, not currently syncing
+  synced, // Just finished syncing — show confirmation briefly
 }
 
 class NetworkSyncProvider extends ChangeNotifier {
   // ── Services ────────────────────────────────────────────────────────────────
   final _connectivity = ConnectivityService.instance;
-  final _syncService  = OfflineSyncService.instance;
+  final _syncService = OfflineSyncService.instance;
 
   // ── Internal state ──────────────────────────────────────────────────────────
-  bool _isOnline        = false;
-  SyncPhase _syncPhase  = SyncPhase.idle;
-  int _pendingCount     = 0;
-  bool _showSynced      = false;
+  bool _isOnline = false;
+  SyncPhase _syncPhase = SyncPhase.idle;
+  int _pendingCount = 0;
+  bool _showSynced = false;
   Timer? _syncedTimer;
 
   StreamSubscription<NetworkStatus>? _networkSub;
   VoidCallback? _syncStateListener;
 
   // ── Public getters ──────────────────────────────────────────────────────────
-  bool get isOnline      => _isOnline;
-  int  get pendingCount  => _pendingCount;
+  bool get isOnline => _isOnline;
+  int get pendingCount => _pendingCount;
 
   TrackerState get trackerState {
-    if (!_isOnline)                         return TrackerState.offline;
-    if (_syncPhase == SyncPhase.syncing)    return TrackerState.syncing;
-    if (_pendingCount > 0)                  return TrackerState.pending;
-    if (_showSynced)                        return TrackerState.synced;
+    if (!_isOnline) return TrackerState.offline;
+    if (_syncPhase == SyncPhase.syncing) return TrackerState.syncing;
+    if (_pendingCount > 0) return TrackerState.pending;
+    if (_showSynced) return TrackerState.synced;
     return TrackerState.hidden;
   }
 
   // ── Init ────────────────────────────────────────────────────────────────────
   NetworkSyncProvider() {
     // Seed with current values
-    _isOnline     = _connectivity.isOnline;
-    _syncPhase    = _syncService.syncState.value.phase;
+    _isOnline = _connectivity.isOnline;
+    _syncPhase = _syncService.syncState.value.phase;
     _pendingCount = _syncService.syncState.value.pendingCount;
+
+    log('[NetworkSyncProvider] ✅ Initialized');
+    log(
+      '[NetworkSyncProvider] Initial state: isOnline=$_isOnline, phase=${_syncPhase.name}, pending=$_pendingCount',
+    );
 
     // Listen to connectivity changes
     _networkSub = _connectivity.onStatusChange.listen(_onNetworkChange);
@@ -65,8 +71,14 @@ class NetworkSyncProvider extends ChangeNotifier {
     final wasOffline = !_isOnline;
     _isOnline = status == NetworkStatus.online;
 
+    log('[NetworkSyncProvider] Network status changed: ${status.name}');
+    log(
+      '[NetworkSyncProvider] Was offline: $wasOffline, Is now online: $_isOnline',
+    );
+
     // When back online, kick off a sync if not already syncing
     if (wasOffline && _isOnline) {
+      log('[NetworkSyncProvider] ✅ Back online! Triggering sync...');
       _syncService.processPendingQueue();
     }
 
@@ -74,15 +86,21 @@ class NetworkSyncProvider extends ChangeNotifier {
   }
 
   void _onSyncStateChange() {
-    final state       = _syncService.syncState.value;
-    final wasIdle     = _syncPhase == SyncPhase.idle;
-    final wasSyncing  = _syncPhase == SyncPhase.syncing;
+    final state = _syncService.syncState.value;
+    final wasIdle = _syncPhase == SyncPhase.idle;
+    final wasSyncing = _syncPhase == SyncPhase.syncing;
 
-    _syncPhase    = state.phase;
+    log('[NetworkSyncProvider] Sync state changed');
+    log(
+      '[NetworkSyncProvider] Phase: ${state.phase.name}, Pending: ${state.pendingCount}',
+    );
+
+    _syncPhase = state.phase;
     _pendingCount = state.pendingCount;
 
     // Show "All synced!" confirmation when sync finishes with 0 remaining
     if (wasSyncing && _syncPhase == SyncPhase.idle && _pendingCount == 0) {
+      log('[NetworkSyncProvider] 🎉 All synced! Showing confirmation...');
       _showSynced = true;
       _syncedTimer?.cancel();
       _syncedTimer = Timer(const Duration(seconds: 3), () {

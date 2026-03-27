@@ -10,6 +10,7 @@ class SupabaseMenuItem {
   final String? imageUrl;
 
   final bool isAvailable;
+  final bool isActive;
   final bool isVeg;
   final bool isFeatured;
   final bool isBestSeller;
@@ -55,6 +56,7 @@ class SupabaseMenuItem {
     this.discountPrice,
     this.imageUrl,
     this.isAvailable = true,
+    this.isActive = true,
     this.isVeg = true,
     this.isFeatured = false,
     this.isBestSeller = false,
@@ -101,6 +103,7 @@ class SupabaseMenuItem {
           : null,
       imageUrl: json['image_url'] as String?,
       isAvailable: json['is_available'] as bool? ?? true,
+      isActive: json['is_active'] as bool? ?? true,
       isVeg: json['is_veg'] as bool? ?? true,
       isFeatured: json['is_featured'] as bool? ?? false,
       isBestSeller: json['is_best_seller'] as bool? ?? false,
@@ -172,6 +175,7 @@ class SupabaseMenuItem {
     'price': price,
     'discount_price': discountPrice,
     'is_available': isAvailable,
+    'is_active': isActive,
     'is_veg': isVeg,
     'is_featured': isFeatured,
     'is_best_seller': isBestSeller,
@@ -200,6 +204,7 @@ class SupabaseMenuItem {
     'discount_price': discountPrice,
     'image_url': imageUrl,
     'is_available': isAvailable,
+    'is_active': isActive,
     'is_veg': isVeg,
     'is_featured': isFeatured,
     'is_best_seller': isBestSeller,

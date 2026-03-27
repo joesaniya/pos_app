@@ -161,15 +161,20 @@ class InventoryRepository {
     final now = DateTime.now().toUtc().toIso8601String();
     final data = {...item.toJson(businessId), 'last_updated': now};
 
+    // 1. Save locally with status based on connectivity
     await _local.upsertEntity(
       table: LocalDatabase.tInventory,
       id: item.id,
       businessId: businessId,
       data: data,
-      syncStatus: LocalDatabase.syncPending,
+      syncStatus: _connectivity.isOnline
+          ? LocalDatabase
+                .syncSynced // Will update if API succeeds
+          : LocalDatabase.syncPending, // Will be queued for sync
       action: LocalDatabase.actionUpdate,
     );
 
+    // 2. Try API if online
     if (_connectivity.isOnline) {
       try {
         await _sb
@@ -180,9 +185,19 @@ class InventoryRepository {
         return true;
       } catch (e) {
         debugPrint('[InventoryRepo] Online updateItem failed: $e');
+        // Mark as pending for retry
+        await _local.upsertEntity(
+          table: LocalDatabase.tInventory,
+          id: item.id,
+          businessId: businessId,
+          data: data,
+          syncStatus: LocalDatabase.syncPending,
+          action: LocalDatabase.actionUpdate,
+        );
       }
     }
 
+    // 3. Queue for sync
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.inventoryItem,
@@ -199,15 +214,20 @@ class InventoryRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> deleteItem(String id, String businessId) async {
+    // 1. Mark as deleted locally with status based on connectivity
     await _local.upsertEntity(
       table: LocalDatabase.tInventory,
       id: id,
       businessId: businessId,
       data: {'id': id, 'is_active': false},
-      syncStatus: LocalDatabase.syncPending,
+      syncStatus: _connectivity.isOnline
+          ? LocalDatabase
+                .syncSynced // Will update if API succeeds
+          : LocalDatabase.syncPending, // Will be queued for sync
       action: LocalDatabase.actionDelete,
     );
 
+    // 2. Try API if online
     if (_connectivity.isOnline) {
       try {
         await _sb
@@ -215,10 +235,22 @@ class InventoryRepository {
             .update({'is_active': false})
             .eq('id', id)
             .eq('business_id', businessId);
-        return;
-      } catch (_) {}
+        return; // Success, already marked as synced locally
+      } catch (e) {
+        debugPrint('[InventoryRepo] Online deleteItem failed: $e');
+        // Mark as pending for retry
+        await _local.upsertEntity(
+          table: LocalDatabase.tInventory,
+          id: id,
+          businessId: businessId,
+          data: {'id': id, 'is_active': false},
+          syncStatus: LocalDatabase.syncPending,
+          action: LocalDatabase.actionDelete,
+        );
+      }
     }
 
+    // 3. Queue for sync
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.inventoryItem,

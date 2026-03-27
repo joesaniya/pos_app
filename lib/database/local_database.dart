@@ -24,7 +24,7 @@ class LocalDatabase {
   bool get isInitialized => _db != null;
 
   static const _dbName = 'pos_app_offline.db';
-  static const _dbVersion = 3;
+  static const _dbVersion = 5;
 
   // ── Table names ────────────────────────────────────────────────────────────
   static const tQueue = 'offline_queue';
@@ -37,6 +37,7 @@ class LocalDatabase {
   static const tInventory = 'local_inventory';
   static const tSuppliers = 'local_suppliers';
   static const tProfile = 'local_profile';
+  static const tRecipes = 'local_recipes';
   static const tSyncMeta = 'sync_meta';
   static const tSeatHistory = 'local_seat_history';
 
@@ -85,6 +86,7 @@ class LocalDatabase {
     await db.execute(_createInventoryTable);
     await db.execute(_createSuppliersTable);
     await db.execute(_createProfileTable);
+    await db.execute(_createRecipesTable);
     await db.execute(_createSyncMetaTable);
     await db.execute(_createSeatHistoryTable);
     log('[LocalDB] ✅ All tables created (v$version)');
@@ -110,6 +112,26 @@ class LocalDatabase {
         log('[LocalDB] ✅ Created local_menu_categories table during upgrade');
       } catch (e) {
         log('[LocalDB] Note: local_menu_categories may already exist: $e');
+      }
+    }
+
+    // v3 → v4/v5: Add local_recipes table (critical for recipe sync)
+    if (oldVersion < 4) {
+      try {
+        await db.execute(_createRecipesTable);
+        log('[LocalDB] ✅ Created local_recipes table during upgrade');
+      } catch (e) {
+        log('[LocalDB] Note: local_recipes may already exist: $e');
+      }
+    }
+
+    // v4 → v5: Ensure local_recipes table exists (backward compatibility fix)
+    if (oldVersion < 5) {
+      try {
+        await db.execute(_createRecipesTable);
+        log('[LocalDB] ✅ Verified local_recipes table exists (v5 check)');
+      } catch (e) {
+        log('[LocalDB] Note: local_recipes already verified: $e');
       }
     }
 
@@ -268,6 +290,19 @@ class LocalDatabase {
       created_at        TEXT NOT NULL,
       updated_at        TEXT,
       sync_status       TEXT NOT NULL DEFAULT 'pending'
+    )
+  ''';
+
+  static const _createRecipesTable =
+      '''
+    CREATE TABLE IF NOT EXISTS $tRecipes (
+      id           TEXT PRIMARY KEY,
+      business_id  TEXT NOT NULL,
+      data         TEXT NOT NULL,
+      sync_status  TEXT NOT NULL DEFAULT 'pending',
+      action       TEXT NOT NULL DEFAULT 'create',
+      created_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL
     )
   ''';
 

@@ -113,10 +113,10 @@ class MenuRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  CREATE CATEGORY — OFFLINE + SYNC
+  //  CREATE CATEGORY — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Create a new category locally and enqueue for sync
+  /// Create a new category — tries API first if online, falls back to queue
   Future<SupabaseMenuCategory> createCategory({
     required String businessId,
     required String businessName,
@@ -155,27 +155,61 @@ class MenuRepository {
         updatedAt: now,
       );
 
-      // Save to local cache
+      final categoryJson = category.toJson();
+
+      // 1. Save to local cache (always, for offline safety)
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuCategories,
         id: categoryId,
         businessId: businessId,
-        data: category.toJson(),
-        syncStatus: LocalDatabase.syncPending,
+        data: categoryJson,
+        syncStatus: _connectivity.isOnline
+            ? LocalDatabase
+                  .syncSynced // Will update if API succeeds
+            : LocalDatabase.syncPending, // Will be queued for sync
         action: LocalDatabase.actionCreate,
       );
 
-      // Enqueue for sync
+      // 2. Try API immediately if online
+      if (_connectivity.isOnline) {
+        try {
+          await _supabase.from('menu_categories').insert({
+            ...categoryJson,
+            'business_id': businessId,
+          });
+
+          log('[MenuRepo] ✅ Category created online: $categoryId');
+          // Already marked as synced locally, so we're done
+          return category;
+        } catch (e) {
+          log(
+            '[MenuRepo] ⚠️ Online creation failed: $e, falling back to queue',
+          );
+          // Mark as pending for sync
+          await _localDb.upsertEntity(
+            table: LocalDatabase.tMenuCategories,
+            id: categoryId,
+            businessId: businessId,
+            data: categoryJson,
+            syncStatus: LocalDatabase.syncPending,
+            action: LocalDatabase.actionCreate,
+          );
+        }
+      }
+
+      // 3. Always enqueue for sync as fallback
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: 'menu_category',
         entityId: categoryId,
         action: LocalDatabase.actionCreate,
-        payload: {...category.toJson(), 'business_id': businessId},
+        payload: {...categoryJson, 'business_id': businessId},
         businessId: businessId,
       );
 
-      log('[MenuRepo] ✅ Category created locally: $categoryId (sync pending)');
+      log(
+        '[MenuRepo] ✅ Category created locally: $categoryId (${_connectivity.isOnline ? 'synced' : 'pending'})',
+      );
       return category;
     } catch (e, st) {
       log('[MenuRepo] ❌ createCategory error: $e\n$st');
@@ -184,10 +218,10 @@ class MenuRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  UPDATE CATEGORY — OFFLINE + SYNC
+  //  UPDATE CATEGORY — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Update a category locally and enqueue for sync
+  /// Update a category — tries API first if online, falls back to queue
   Future<void> updateCategory({
     required String categoryId,
     required String businessId,
@@ -212,7 +246,7 @@ class MenuRepository {
         throw Exception('Category not found locally: $categoryId');
       }
 
-      // Merge updates
+      // Merge updates with audit info
       final updated = {
         ...catRow,
         ...updates,
@@ -226,17 +260,17 @@ class MenuRepository {
       updated.remove('_sync_status');
       updated.remove('_action');
 
-      // Save to local cache
+      // ✅ STEP 1: Save to local cache IMMEDIATELY (optimistic)
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuCategories,
         id: categoryId,
         businessId: businessId,
         data: updated,
-        syncStatus: LocalDatabase.syncPending,
+        syncStatus: LocalDatabase.syncSynced, // Optimistic: mark as synced
         action: LocalDatabase.actionUpdate,
       );
 
-      // Enqueue for sync
+      // ✅ STEP 2: Queue for sync (always, as fallback)
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: 'menu_category',
@@ -246,18 +280,48 @@ class MenuRepository {
         businessId: businessId,
       );
 
-      log('[MenuRepo] ✅ Category updated locally: $categoryId (sync pending)');
+      log(
+        '[MenuRepo] ✅ Category updated locally: $categoryId (sync in background)',
+      );
+
+      // ✅ STEP 3: Return IMMEDIATELY
+      // (Provider will handle notifying listeners)
+
+      // ✅ STEP 4: Sync to backend in background
+      if (_connectivity.isOnline) {
+        _syncCategoryUpdateInBackground(categoryId, businessId, updates);
+      }
     } catch (e, st) {
       log('[MenuRepo] ❌ updateCategory error: $e\n$st');
       rethrow;
     }
   }
 
+  /// Sync category update to backend in background (non-blocking)
+  void _syncCategoryUpdateInBackground(
+    String categoryId,
+    String businessId,
+    Map<String, dynamic> updates,
+  ) {
+    Future.microtask(() async {
+      try {
+        await _supabase
+            .from('menu_categories')
+            .update(updates)
+            .eq('id', categoryId)
+            .eq('business_id', businessId);
+        log('[MenuRepo] ✅ Category update synced to backend: $categoryId');
+      } catch (e) {
+        log('[MenuRepo] ⚠️ Background sync failed, will retry from queue: $e');
+      }
+    });
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
-  //  DELETE CATEGORY — SOFT DELETE WITH SYNC
+  //  DELETE CATEGORY — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Soft delete a category (mark as inactive) and enqueue for sync
+  /// Soft delete a category — tries API first if online, falls back to queue
   Future<void> deleteCategory({
     required String categoryId,
     required String businessId,
@@ -265,17 +329,24 @@ class MenuRepository {
     required String deletedByName,
   }) async {
     try {
-      // Mark as deleted in local cache
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      // ✅ STEP 1: Mark as deleted in local cache IMMEDIATELY (optimistic)
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuCategories,
         id: categoryId,
         businessId: businessId,
-        data: {'is_active': false},
-        syncStatus: LocalDatabase.syncPending,
+        data: {
+          'is_active': false,
+          'updated_by_uid': deletedByUid,
+          'updated_by_name': deletedByName,
+          'updated_at': now,
+        },
+        syncStatus: LocalDatabase.syncSynced, // Optimistic
         action: LocalDatabase.actionDelete,
       );
 
-      // Enqueue for sync
+      // ✅ STEP 2: Queue for sync (always, as fallback)
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: 'menu_category',
@@ -291,11 +362,37 @@ class MenuRepository {
         businessId: businessId,
       );
 
-      log('[MenuRepo] ✅ Category deleted locally: $categoryId (sync pending)');
+      log(
+        '[MenuRepo] ✅ Category deleted locally: $categoryId (sync in background)',
+      );
+
+      // ✅ STEP 3: Return IMMEDIATELY
+      // (Provider will handle notifying listeners)
+
+      // ✅ STEP 4: Sync to backend in background
+      if (_connectivity.isOnline) {
+        _syncCategoryDeleteInBackground(categoryId, businessId);
+      }
     } catch (e, st) {
       log('[MenuRepo] ❌ deleteCategory error: $e\n$st');
       rethrow;
     }
+  }
+
+  /// Sync category delete to backend in background (non-blocking)
+  void _syncCategoryDeleteInBackground(String categoryId, String businessId) {
+    Future.microtask(() async {
+      try {
+        await _supabase
+            .from('menu_categories')
+            .update({'is_active': false})
+            .eq('id', categoryId)
+            .eq('business_id', businessId);
+        log('[MenuRepo] ✅ Category delete synced to backend: $categoryId');
+      } catch (e) {
+        log('[MenuRepo] ⚠️ Background sync failed, will retry from queue: $e');
+      }
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -352,19 +449,20 @@ class MenuRepository {
           .select()
           .eq('business_id', businessId)
           .eq('category_id', categoryId)
+          .eq('is_active', true)
           .order('sort_order');
 
       final items = (rows as List)
           .map((e) => SupabaseMenuItem.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Cache locally
+      // Cache locally with complete JSON representation
       for (final item in items) {
         await _localDb.upsertEntity(
           table: LocalDatabase.tMenuItems,
           id: item.id,
           businessId: businessId,
-          data: item.toUpdateMap(),
+          data: item.toJson(),
           syncStatus: LocalDatabase.syncSynced,
           action: LocalDatabase.actionUpdate,
           extraColumns: {'category': categoryId},
@@ -389,7 +487,7 @@ class MenuRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  CREATE MENU ITEM — OFFLINE + SYNC
+  //  CREATE MENU ITEM — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<SupabaseMenuItem> createMenuItem({
@@ -437,6 +535,7 @@ class MenuRepository {
         discountPrice: discountPrice,
         imageUrl: imageUrl,
         isAvailable: isAvailable,
+        isActive: true,
         isVeg: isVeg,
         isSpicy: isSpicy,
         isFeatured: isFeatured,
@@ -464,34 +563,75 @@ class MenuRepository {
         updatedAt: now,
       );
 
-      // Save to local cache — use toJson() to preserve ALL fields including category_id
+      final itemJson = {
+        ...item.toJson(),
+        'id': itemId,
+        'category_id': categoryId,
+        'business_id': businessId,
+      };
+
+      // 1. Save to local cache
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuItems,
         id: itemId,
         businessId: businessId,
         data: item.toJson(),
-        syncStatus: LocalDatabase.syncPending,
+        syncStatus: _connectivity.isOnline
+            ? LocalDatabase
+                  .syncSynced // Will update if API succeeds
+            : LocalDatabase.syncPending, // Will be queued for sync
         action: LocalDatabase.actionCreate,
         extraColumns: {'category': categoryId},
       );
 
-      // Enqueue for sync with complete data
-      await _localDb.enqueue(
-        id: _uuid.v4(),
-        entityType: EntityType.menuItem,
-        entityId: itemId,
-        action: LocalDatabase.actionCreate,
-        payload: {
-          ...item.toJson(),
-          'id': itemId,
-          'category_id':
-              categoryId, // ✅ EXPLICIT — ensure present for constraint
-          'business_id': businessId,
-        },
-        businessId: businessId,
-      );
+      // 2. Try API immediately if online
+      if (_connectivity.isOnline) {
+        try {
+          await _supabase.from('menu_items').insert(itemJson);
 
-      log('[MenuRepo] ✅ Menu item created locally: $itemId (sync pending)');
+          log('[MenuRepo] ✅ Menu item created online: $itemId');
+          // Already marked as synced locally — don't enqueue on success
+          return item;
+        } catch (e) {
+          log(
+            '[MenuRepo] ⚠️ Online creation failed: $e, falling back to queue',
+          );
+          // Mark as pending for sync
+          await _localDb.upsertEntity(
+            table: LocalDatabase.tMenuItems,
+            id: itemId,
+            businessId: businessId,
+            data: item.toJson(),
+            syncStatus: LocalDatabase.syncPending,
+            action: LocalDatabase.actionCreate,
+            extraColumns: {'category': categoryId},
+          );
+          // Enqueue after API failure
+          await _localDb.enqueue(
+            id: _uuid.v4(),
+            entityType: 'menu_item',
+            entityId: itemId,
+            action: LocalDatabase.actionCreate,
+            payload: itemJson,
+            businessId: businessId,
+          );
+          return item; // Return after queueing
+        }
+      } else {
+        // 3. Offline path — enqueue for sync
+        await _localDb.enqueue(
+          id: _uuid.v4(),
+          entityType: 'menu_item',
+          entityId: itemId,
+          action: LocalDatabase.actionCreate,
+          payload: itemJson,
+          businessId: businessId,
+        );
+      }
+
+      log(
+        '[MenuRepo] ✅ Menu item created locally: $itemId (${_connectivity.isOnline ? 'synced' : 'pending'})',
+      );
       return item;
     } catch (e, st) {
       log('[MenuRepo] ❌ createMenuItem error: $e\n$st');
@@ -500,7 +640,7 @@ class MenuRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  //  UPDATE MENU ITEM — OFFLINE + SYNC
+  //  UPDATE MENU ITEM — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> updateMenuItem({
@@ -528,12 +668,11 @@ class MenuRepository {
         throw Exception('Menu item not found locally: $itemId');
       }
 
-      // Merge updates
+      // Merge updates with audit info
       final updated = {
         ...itemRow,
         ...updates,
-        'category_id':
-            categoryId, // ✅ EXPLICIT — preserve category_id after merge
+        'category_id': categoryId,
         'updated_by_uid': updatedByUid,
         'updated_by_name': updatedByName,
         'updated_by_role': updatedByRole,
@@ -544,18 +683,18 @@ class MenuRepository {
       updated.remove('_sync_status');
       updated.remove('_action');
 
-      // Save to local cache
+      // ✅ STEP 1: Save to local cache IMMEDIATELY (optimistic)
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuItems,
         id: itemId,
         businessId: businessId,
         data: updated,
-        syncStatus: LocalDatabase.syncPending,
+        syncStatus: LocalDatabase.syncSynced, // Optimistic
         action: LocalDatabase.actionUpdate,
         extraColumns: {'category': categoryId},
       );
 
-      // Enqueue for sync with category_id explicitly included
+      // ✅ STEP 2: Queue for sync (always, as fallback)
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: EntityType.menuItem,
@@ -564,22 +703,51 @@ class MenuRepository {
         payload: {
           ...updated,
           'id': itemId,
-          'category_id':
-              categoryId, // ✅ EXPLICIT — ensure never lost in sync payload
+          'category_id': categoryId,
           'business_id': businessId,
         },
         businessId: businessId,
       );
 
-      log('[MenuRepo] ✅ Menu item updated locally: $itemId (sync pending)');
+      log(
+        '[MenuRepo] ✅ Menu item updated locally: $itemId (sync in background)',
+      );
+
+      // ✅ STEP 3: Return IMMEDIATELY
+      // (Provider will handle notifying listeners)
+
+      // ✅ STEP 4: Sync to backend in background
+      if (_connectivity.isOnline) {
+        _syncMenuItemUpdateInBackground(itemId, businessId, updates);
+      }
     } catch (e, st) {
       log('[MenuRepo] ❌ updateMenuItem error: $e\n$st');
       rethrow;
     }
   }
 
+  /// Sync menu item update to backend in background (non-blocking)
+  void _syncMenuItemUpdateInBackground(
+    String itemId,
+    String businessId,
+    Map<String, dynamic> updates,
+  ) {
+    Future.microtask(() async {
+      try {
+        await _supabase
+            .from('menu_items')
+            .update(updates)
+            .eq('id', itemId)
+            .eq('business_id', businessId);
+        log('[MenuRepo] ✅ Menu item update synced to backend: $itemId');
+      } catch (e) {
+        log('[MenuRepo] ⚠️ Background sync failed, will retry from queue: $e');
+      }
+    });
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
-  //  DELETE MENU ITEM — SOFT DELETE WITH SYNC
+  //  DELETE MENU ITEM — HYBRID (ONLINE-FIRST + OFFLINE FALLBACK)
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> deleteMenuItem({
@@ -590,18 +758,25 @@ class MenuRepository {
     required String deletedByName,
   }) async {
     try {
-      // Mark as deleted in local cache
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      // ✅ STEP 1: Mark as deleted in local cache IMMEDIATELY (optimistic)
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuItems,
         id: itemId,
         businessId: businessId,
-        data: {'is_available': false},
-        syncStatus: LocalDatabase.syncPending,
+        data: {
+          'is_active': false,
+          'updated_by_uid': deletedByUid,
+          'updated_by_name': deletedByName,
+          'updated_at': now,
+        },
+        syncStatus: LocalDatabase.syncSynced, // Optimistic
         action: LocalDatabase.actionDelete,
         extraColumns: {'category': categoryId},
       );
 
-      // Enqueue for sync
+      // ✅ STEP 2: Queue for sync (always, as fallback)
       await _localDb.enqueue(
         id: _uuid.v4(),
         entityType: EntityType.menuItem,
@@ -610,18 +785,44 @@ class MenuRepository {
         payload: {
           'id': itemId,
           'business_id': businessId,
-          'is_available': false,
+          'is_active': false,
           'updated_by_uid': deletedByUid,
           'updated_by_name': deletedByName,
         },
         businessId: businessId,
       );
 
-      log('[MenuRepo] ✅ Menu item deleted locally: $itemId (sync pending)');
+      log(
+        '[MenuRepo] ✅ Menu item deleted locally: $itemId (sync in background)',
+      );
+
+      // ✅ STEP 3: Return IMMEDIATELY
+      // (Provider will handle notifying listeners)
+
+      // ✅ STEP 4: Sync to backend in background
+      if (_connectivity.isOnline) {
+        _syncMenuItemDeleteInBackground(itemId, businessId);
+      }
     } catch (e, st) {
       log('[MenuRepo] ❌ deleteMenuItem error: $e\n$st');
       rethrow;
     }
+  }
+
+  /// Sync menu item delete to backend in background (non-blocking)
+  void _syncMenuItemDeleteInBackground(String itemId, String businessId) {
+    Future.microtask(() async {
+      try {
+        await _supabase
+            .from('menu_items')
+            .update({'is_active': false})
+            .eq('id', itemId)
+            .eq('business_id', businessId);
+        log('[MenuRepo] ✅ Menu item delete synced to backend: $itemId');
+      } catch (e) {
+        log('[MenuRepo] ⚠️ Background sync failed, will retry from queue: $e');
+      }
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════

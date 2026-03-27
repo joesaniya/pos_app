@@ -118,7 +118,10 @@ class SupplierRepository {
       id: s.id,
       businessId: businessId,
       data: data,
-      syncStatus: LocalDatabase.syncPending,
+      syncStatus: _connectivity.isOnline
+          ? LocalDatabase
+                .syncSynced // Will update if API succeeds
+          : LocalDatabase.syncPending, // Will be queued for sync
       action: LocalDatabase.actionUpdate,
     );
 
@@ -129,9 +132,20 @@ class SupplierRepository {
             .update(data)
             .eq('id', s.id)
             .eq('business_id', businessId);
+        // Mark as synced after successful API call (already done above in setStatus)
+        log('[SupplierRepo] ✅ Supplier updated online: ${s.id}');
         return true;
       } catch (e) {
         debugPrint('[SupplierRepo] Online updateSupplier failed: $e');
+        // Mark as pending for retry
+        await _local.upsertEntity(
+          table: LocalDatabase.tSuppliers,
+          id: s.id,
+          businessId: businessId,
+          data: data,
+          syncStatus: LocalDatabase.syncPending,
+          action: LocalDatabase.actionUpdate,
+        );
       }
     }
 
@@ -151,15 +165,20 @@ class SupplierRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> deleteSupplier(String id, String businessId) async {
+    // 1. Mark as deleted locally
     await _local.upsertEntity(
       table: LocalDatabase.tSuppliers,
       id: id,
       businessId: businessId,
       data: {'id': id, 'is_active': false},
-      syncStatus: LocalDatabase.syncPending,
+      syncStatus: _connectivity.isOnline
+          ? LocalDatabase
+                .syncSynced // Will update if API succeeds
+          : LocalDatabase.syncPending, // Will be queued for sync
       action: LocalDatabase.actionDelete,
     );
 
+    // 2. Try API if online
     if (_connectivity.isOnline) {
       try {
         await _sb
@@ -167,10 +186,23 @@ class SupplierRepository {
             .update({'is_active': false})
             .eq('id', id)
             .eq('business_id', businessId);
-        return;
-      } catch (_) {}
+        log('[SupplierRepo] ✅ Supplier deleted online: $id');
+        return; // Success, already marked as synced locally
+      } catch (e) {
+        debugPrint('[SupplierRepo] Online deleteSupplier failed: $e');
+        // Mark as pending for retry
+        await _local.upsertEntity(
+          table: LocalDatabase.tSuppliers,
+          id: id,
+          businessId: businessId,
+          data: {'id': id, 'is_active': false},
+          syncStatus: LocalDatabase.syncPending,
+          action: LocalDatabase.actionDelete,
+        );
+      }
     }
 
+    // 3. Queue for sync
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.supplier,

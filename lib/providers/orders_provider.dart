@@ -299,6 +299,7 @@ class OrdersProvider extends ChangeNotifier {
       final idx = _orders.indexWhere((o) => o.id == orderId);
       final oldStatus = idx != -1 ? _orders[idx].status : null;
 
+      // Repository returns IMMEDIATELY after local update
       final updated = await OrdersRepository.instance.updateOrderStatus(
         orderId: orderId,
         newStatus: newStatus,
@@ -307,13 +308,17 @@ class OrdersProvider extends ChangeNotifier {
         businessId: _businessId,
       );
 
+      // Update in list and notify UI IMMEDIATELY
       if (idx != -1) {
         _orders[idx] = updated;
-        notifyListeners();
       }
 
+      // ✅ Notify listeners IMMEDIATELY (don't wait for sync)
+      notifyListeners();
+
+      // Send notification (background task)
       if (oldStatus != null) {
-        await OrderNotificationService.instance.notifyStatusChange(
+        OrderNotificationService.instance.notifyStatusChange(
           orderId: orderId,
           orderNumber: updated.orderNumber,
           oldStatus: oldStatus.value,
@@ -326,6 +331,7 @@ class OrdersProvider extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
       notifyListeners();
+      rethrow;
     }
   }
 
@@ -342,6 +348,7 @@ class OrdersProvider extends ChangeNotifier {
     double? discountAmount,
   }) async {
     try {
+      // Repository returns IMMEDIATELY after local update
       final updated = await OrdersRepository.instance.confirmPayment(
         orderId: orderId,
         mode: mode,
@@ -356,8 +363,10 @@ class OrdersProvider extends ChangeNotifier {
       final idx = _orders.indexWhere((o) => o.id == orderId);
       if (idx != -1) {
         _orders[idx] = updated;
-        notifyListeners();
       }
+
+      // ✅ Notify listeners IMMEDIATELY (don't wait for sync)
+      notifyListeners();
 
       return updated;
     } catch (e) {

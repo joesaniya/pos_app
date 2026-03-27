@@ -554,22 +554,10 @@ class OrdersRepository {
     if (newStatus == OrderStatus.ready) payload['ready_at'] = now;
     if (newStatus == OrderStatus.cancelled) payload['cancelled_at'] = now;
 
-    if (_connectivity.isOnline) {
-      try {
-        return await _remote.updateOrderStatus(
-          orderId: orderId,
-          newStatus: newStatus,
-          updatedByUid: updatedByUid,
-          updatedByName: updatedByName,
-          businessId: businessId,
-        );
-      } catch (_) {}
-    }
-
-    // Offline: update local cache
+    // ✅ STEP 1: Update local cache IMMEDIATELY (optimistic)
     await _updateLocalOrderField(orderId, businessId, payload);
 
-    // Queue for sync
+    // ✅ STEP 2: Queue for sync (always, as fallback)
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.orderStatus,
@@ -579,7 +567,51 @@ class OrdersRepository {
       businessId: businessId,
     );
 
-    return _buildOrderFromLocal(orderId, businessId);
+    // ✅ STEP 3: Return IMMEDIATELY with updated order
+    final result = _buildOrderFromLocal(orderId, businessId);
+
+    // ✅ STEP 4: Sync to backend in background (fire-and-forget)
+    if (_connectivity.isOnline) {
+      _syncOrderStatusInBackground(
+        orderId,
+        newStatus,
+        updatedByUid,
+        updatedByName,
+        businessId,
+      );
+    }
+
+    log(
+      '[OrdersRepo] ✅ Status updated locally: $orderId → ${newStatus.value} (sync in background)',
+    );
+    return result; // Return IMMEDIATELY!
+  }
+
+  /// Sync order status change to backend in background (non-blocking)
+  void _syncOrderStatusInBackground(
+    String orderId,
+    OrderStatus newStatus,
+    String updatedByUid,
+    String updatedByName,
+    String businessId,
+  ) {
+    Future.microtask(() async {
+      try {
+        await _remote.updateOrderStatus(
+          orderId: orderId,
+          newStatus: newStatus,
+          updatedByUid: updatedByUid,
+          updatedByName: updatedByName,
+          businessId: businessId,
+        );
+        log('[OrdersRepo] ✅ Status synced to backend: $orderId');
+      } catch (e) {
+        log(
+          '[OrdersRepo] ⚠️ Background sync failed, will retry from queue: $e',
+        );
+        // Will be retried by OfflineSyncService
+      }
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -601,27 +633,11 @@ class OrdersRepository {
     double? tipAmount,
     double? discountAmount,
   }) async {
-    if (_connectivity.isOnline) {
-      try {
-        return await _remote.confirmPayment(
-          orderId: orderId,
-          mode: mode,
-          paidByUid: paidByUid,
-          paidByName: paidByName,
-          businessId: businessId,
-          paymentRef: paymentRef,
-          tipAmount: tipAmount,
-          discountAmount: discountAmount,
-        );
-      } catch (e) {
-        debugPrint(
-          '[OrdersRepo] Online confirmPayment failed: $e, falling back to offline',
-        );
-      }
-    }
+    // ── OPTIMISTIC UPDATE (IMMEDIATE) ──────────────────────────────────────
+    // 1. Update locally right away
+    // 2. Return immediately
+    // 3. Sync in background
 
-    // ── OFFLINE FALLBACK ──────────────────────────────────────────────────────
-    // Mark ONLY this order as paid (no auto-seat-release, no marking other orders)
     final now = DateTime.now().toUtc().toIso8601String();
     final payload = <String, dynamic>{
       'id': orderId,
@@ -636,8 +652,10 @@ class OrdersRepository {
       if (discountAmount != null) 'discount_amount': discountAmount,
     };
 
+    // ✅ STEP 1: Update local cache IMMEDIATELY
     await _updateLocalOrderField(orderId, businessId, payload);
 
+    // ✅ STEP 2: Queue for sync
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.orderPayment,
@@ -647,7 +665,58 @@ class OrdersRepository {
       businessId: businessId,
     );
 
-    return _buildOrderFromLocal(orderId, businessId);
+    // ✅ STEP 3: Return IMMEDIATELY with updated order
+    final result = _buildOrderFromLocal(orderId, businessId);
+
+    // ✅ STEP 4: Sync to backend in background
+    if (_connectivity.isOnline) {
+      _syncConfirmPaymentInBackground(
+        orderId,
+        mode,
+        paidByUid,
+        paidByName,
+        businessId,
+        paymentRef,
+        tipAmount,
+        discountAmount,
+      );
+    }
+
+    log(
+      '[OrdersRepo] ✅ Payment confirmed locally: $orderId (sync in background)',
+    );
+    return result; // Return IMMEDIATELY!
+  }
+
+  /// Sync payment confirmation to backend in background (non-blocking)
+  void _syncConfirmPaymentInBackground(
+    String orderId,
+    OrderPaymentMode mode,
+    String paidByUid,
+    String paidByName,
+    String businessId,
+    String? paymentRef,
+    double? tipAmount,
+    double? discountAmount,
+  ) {
+    Future.microtask(() async {
+      try {
+        await _remote.confirmPayment(
+          orderId: orderId,
+          mode: mode,
+          paidByUid: paidByUid,
+          paidByName: paidByName,
+          businessId: businessId,
+          paymentRef: paymentRef,
+          tipAmount: tipAmount,
+          discountAmount: discountAmount,
+        );
+        log('[OrdersRepo] ✅ Payment synced to backend: $orderId');
+      } catch (e) {
+        log('[OrdersRepo] ⚠️ Payment sync failed, will retry from queue: $e');
+        // Will be retried by OfflineSyncService
+      }
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -88,6 +88,9 @@ class OfflineSyncService {
     // will never succeed against a UUID primary-key column.
     _purgeBadInventoryQueueEntries();
 
+    // ✅ Initialize pending count from database
+    _initializeSyncState();
+
     _connectSub = _connectivity.onConnected.listen(
       (_) => processPendingQueue(),
     );
@@ -101,6 +104,17 @@ class OfflineSyncService {
     });
 
     log('[SyncService] ✅ Started');
+  }
+
+  // ── Initialize sync state from database ────────────────────────────────
+  Future<void> _initializeSyncState() async {
+    try {
+      final count = await _db.pendingCount();
+      _syncState.value = SyncState(phase: SyncPhase.idle, pendingCount: count);
+      log('[SyncService] 📊 Initialized: $count pending items');
+    } catch (e) {
+      log('[SyncService] ⚠️ Error initializing sync state: $e');
+    }
   }
 
   // ── Purge legacy bad-UUID inventory queue entries ─────────────────────────

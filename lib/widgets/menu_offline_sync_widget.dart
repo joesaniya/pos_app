@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/services/connectivity_service.dart';
@@ -81,6 +83,7 @@ class MenuOfflineStatusBar extends StatelessWidget {
 
         // Pending sync
         if (hasOfflineChanges) {
+          log('connetivity:$isOnline==>check:$hasOfflineChanges');
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             color: const Color(0xFFFFF8E1),

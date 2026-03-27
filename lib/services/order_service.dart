@@ -435,8 +435,117 @@ class OrdersService {
         .select()
         .eq('id', orderId)
         .single();
-    return Order.fromJson(full as Map<String, dynamic>);
-   }
+
+    final order = Order.fromJson(full as Map<String, dynamic>);
+
+    // ── INVENTORY DEDUCTION ────────────────────────────────────────────────
+    // Deduct inventory AFTER order is successfully created
+    // This ensures order is committed before inventory changes
+    try {
+      debugPrint('📦 [OrderService] Deducting inventory for order: $orderId');
+      await _deductInventoryForOrder(
+        orderId: orderId,
+        orderNumber: order.orderNumber,
+        businessId: businessId,
+        cartItems: cartItems,
+      );
+      debugPrint('✅ [OrderService] Inventory deducted successfully');
+    } catch (e) {
+      debugPrint(
+        '⚠️  [OrderService] Inventory deduction FAILED (order still created): $e',
+      );
+      // ⚠️ Order is already created. Log this for manual reconciliation.
+      // In production, you may want to notify admins or create a task to reconcile.
+    }
+
+    return order;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  INVENTORY DEDUCTION (called after order creation)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _deductInventoryForOrder({
+    required String orderId,
+    required int orderNumber,
+    required String businessId,
+    required List<CartItem> cartItems,
+  }) async {
+    for (final item in cartItems) {
+      // Get recipe for this menu item
+      final recipe = await _db
+          .from('recipes')
+          .select('id')
+          .eq('menu_item_id', item.menuItemId)
+          .maybeSingle();
+
+      if (recipe == null) {
+        debugPrint(
+          '⚠️  [OrderService] No recipe found for menu item: ${item.menuItemId}',
+        );
+        continue;
+      }
+
+      final recipeId = recipe['id'] as String;
+
+      // Get recipe ingredients
+      final ingredientRows = await _db
+          .from('recipe_ingredients')
+          .select(
+            'ingredient_id, ingredient_name, ingredient_unit, quantity_required',
+          )
+          .eq('recipe_id', recipeId);
+
+      for (final ingredient in ingredientRows as List) {
+        final ingredientId = ingredient['ingredient_id'] as String;
+        final ingredientName = ingredient['ingredient_name'] as String;
+        final ingredientUnit = ingredient['ingredient_unit'] as String;
+        final quantityRequired =
+            double.tryParse(
+              ingredient['quantity_required']?.toString() ?? '0',
+            ) ??
+            0.0;
+
+        final totalToDeduct = item.quantity * quantityRequired;
+
+        // ✓ Record consumption (audit trail)
+        await _db.from('ingredient_consumption').insert({
+          'business_id': businessId,
+          'order_id': orderId,
+          'order_number': orderNumber,
+          'recipe_id': recipeId,
+          'menu_item_id': item.menuItemId,
+          'menu_item_name': item.itemName,
+          'ingredient_id': ingredientId,
+          'ingredient_name': ingredientName,
+          'ingredient_unit': ingredientUnit,
+          'quantity_consumed': totalToDeduct,
+          'transaction_status': 'pending',
+        });
+
+        // ✓ Deduct from inventory
+        final deductResult = await _db.rpc(
+          'deduct_inventory',
+          params: {
+            'p_inventory_item_id': ingredientId,
+            'p_quantity': totalToDeduct,
+            'p_business_id': businessId,
+          },
+        );
+
+        debugPrint(
+          '✅ Deducted $totalToDeduct $ingredientUnit of $ingredientName '
+          'for order #$orderNumber',
+        );
+      }
+    }
+
+    // ✓ Mark all consumptions as completed
+    await _db
+        .from('ingredient_consumption')
+        .update({'transaction_status': 'completed'})
+        .eq('order_id', orderId);
+  }
 
   // ══════════════════════════════════════════════════════════
   //  CONFIRM PAYMENT → auto-completes order via DB trigger
@@ -681,5 +790,134 @@ class OrdersService {
       'completed': (row['completed'] as num? ?? 0).toInt(),
       'cancelled': (row['cancelled'] as num? ?? 0).toInt(),
     };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  RECIPE INVENTORY VALIDATION
+  // ══════════════════════════════════════════════════════════
+
+  /// Validates cart items against recipe ingredient stock
+  ///
+  /// Returns a Map with:
+  /// - can_place (bool): whether order can be placed
+  /// - blocking_items (List): items that are blocked due to insufficient stock
+  Future<Map<String, dynamic>> validateOrderIngredients({
+    required String businessId,
+    required List<CartItem> cartItems,
+  }) async {
+    try {
+      // Convert cart items to JSONB format for RPC
+      final cartItemsJson = cartItems
+          .map(
+            (item) => {
+              'menu_item_id': item.menuItemId,
+              'quantity': item.quantity,
+            },
+          )
+          .toList();
+
+      debugPrint(
+        '[OrdersService] validateOrderIngredients - Cart items: $cartItemsJson',
+      );
+
+      // Call the RPC function
+      final result = await _db.rpc(
+        'fn_validate_order_ingredients',
+        params: {'p_business_id': businessId, 'p_cart_items': cartItemsJson},
+      );
+
+      if (result is List && result.isNotEmpty) {
+        final data = result[0] as Map<String, dynamic>;
+        return {
+          'can_place': data['can_place'] as bool? ?? true,
+          'blocking_items': data['blocking_items'] as List? ?? [],
+        };
+      }
+
+      // If no result, assume order can be placed
+      return {'can_place': true, 'blocking_items': []};
+    } catch (e) {
+      debugPrint('[OrdersService] validateOrderIngredients error: $e');
+      // On error, allow order to proceed (better UX than blocking)
+      return {'can_place': true, 'blocking_items': []};
+    }
+  }
+
+  /// Gets the maximum orderable quantity for a menu item based on recipe stock
+  ///
+  /// Calculates min(available_qty ÷ required_qty) for each ingredient
+  Future<int> getMaxOrderableQuantity({
+    required String businessId,
+    required String menuItemId,
+  }) async {
+    try {
+      // Fetch the recipe for this menu item
+      final recipeData = await _db
+          .from('recipes')
+          .select('id')
+          .eq('menu_item_id', menuItemId)
+          .eq('business_id', businessId)
+          .eq('is_active', true)
+          .maybeSingle();
+
+      if (recipeData == null) {
+        // No recipe, so unlimited quantity
+        return 999;
+      }
+
+      final recipeId = recipeData['id'] as String;
+
+      // Fetch all ingredients for this recipe
+      final ingredients = await _db
+          .from('recipe_ingredients')
+          .select('ingredient_id, quantity_required, is_optional')
+          .eq('recipe_id', recipeId);
+
+      if (ingredients is! List || ingredients.isEmpty) {
+        // No ingredients, so unlimited
+        return 999;
+      }
+
+      // For each ingredient, calculate how many can be made
+      int minOrderable = 999;
+
+      for (final ingredient in ingredients) {
+        final ingredientId = ingredient['ingredient_id'] as String?;
+        final requiredQty =
+            (ingredient['quantity_required'] as num?)?.toDouble() ?? 0;
+        final isOptional = ingredient['is_optional'] as bool? ?? false;
+
+        if (ingredientId == null || requiredQty <= 0) continue;
+
+        // Fetch current stock
+        final stockData = await _db
+            .from('inventory_items')
+            .select('current_stock')
+            .eq('id', ingredientId)
+            .maybeSingle();
+
+        final currentStock =
+            (stockData?['current_stock'] as num?)?.toDouble() ?? 0;
+
+        // Skip optional ingredients
+        if (isOptional) continue;
+
+        // Calculate how many can be made with this ingredient
+        final orderable = (currentStock / requiredQty).floor();
+        minOrderable = minOrderable < orderable ? minOrderable : orderable;
+
+        debugPrint(
+          '[OrdersService] Ingredient $ingredientId: '
+          'stock=$currentStock, required=$requiredQty, orderable=$orderable',
+        );
+      }
+
+      // Return at least 0, at most 999
+      return minOrderable < 0 ? 0 : (minOrderable > 999 ? 999 : minOrderable);
+    } catch (e) {
+      debugPrint('[OrdersService] getMaxOrderableQuantity error: $e');
+      // On error, return 0 (safest option)
+      return 0;
+    }
   }
 }

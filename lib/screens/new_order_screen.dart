@@ -4,6 +4,8 @@
 // 2. Memory leak fixed — mounted checks before every setState after async gaps
 // 3. Removed duplicate commented-out code at bottom
 
+import 'dart:developer';
+
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +16,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/orders_provider.dart';
 import '../../services/connectivity_service.dart';
 import '../../database/local_database.dart';
+import '../../services/inventory_deduction_service.dart';
+import '../../widgets/stock_validation_dialog.dart';
 
 class _C {
   static const bg = Color(0xFFF6F6FB);
@@ -452,25 +456,111 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  CART OPERATIONS
+  //  CART OPERATIONS WITH INVENTORY VALIDATION
   // ══════════════════════════════════════════════════════════
 
-  void _addItem(Map<String, dynamic> item) {
-    if (!(item['is_available'] as bool? ?? true)) return;
+  void _addItem(Map<String, dynamic> item) async {
+    log('add item call:$item');
+    if (!(item['is_available'] as bool? ?? true)) {
+      _snack('❌ Item is not available');
+      return;
+    }
+
     final id = item['id'] as String;
+    final itemName = item['name'] as String;
+    final nextQuantity = _getNextQuantityForItem(id);
+
+    // ✓ STEP 1: Validate stock before adding to cart
+    debugPrint('📦 Validating stock for $itemName (qty: $nextQuantity)...');
+    final inventoryService = InventoryDeductionService();
+    final validation = await inventoryService.validateStock(id, nextQuantity);
+
+    if (!mounted) return;
+
+    if (!validation.isValid) {
+      if (validation.maxAllowedQuantity == 0) {
+        // ✗ NO STOCK AVAILABLE
+        _snack('❌ ${validation.getUserMessage()}');
+        debugPrint('❌ Item out of stock: $itemName');
+        return;
+      }
+
+      // ⚠️ PARTIAL STOCK AVAILABLE — Show adjustment dialog
+      debugPrint(
+        '⚠️ Partial stock for $itemName: can make ${validation.maxAllowedQuantity}',
+      );
+
+      final adjustedQuantity = await _showAdjustmentDialog(
+        itemName: itemName,
+        requestedQuantity: nextQuantity,
+        validationResult: validation,
+      );
+
+      if (!mounted || adjustedQuantity == null || adjustedQuantity <= 0) {
+        debugPrint('ℹ️ User cancelled adjustment');
+        return;
+      }
+
+      // ✓ User adjusted — add with new quantity
+      setState(() {
+        _cart[id] = CartItem(
+          menuItemId: id,
+          itemName: itemName,
+          itemPrice: (item['discount_price'] ?? item['price'] as num)
+              .toDouble(),
+          categoryName: item['category_name'] as String?,
+          isVeg: item['is_veg'] as bool? ?? true,
+          quantity: adjustedQuantity,
+        );
+      });
+
+      _snack('✅ Added $adjustedQuantity $itemName to cart (stock limited)');
+      return;
+    }
+
+    // ✅ STOCK IS SUFFICIENT — Add to cart normally
     setState(() {
       if (_cart.containsKey(id)) {
         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity + 1);
       } else {
         _cart[id] = CartItem(
           menuItemId: id,
-          itemName: item['name'] as String,
+          itemName: itemName,
           itemPrice: (item['discount_price'] ?? item['price'] as num)
               .toDouble(),
           categoryName: item['category_name'] as String?,
           isVeg: item['is_veg'] as bool? ?? true,
         );
       }
+    });
+
+    _snack('✅ Added to cart');
+  }
+
+  int _getNextQuantityForItem(String menuItemId) {
+    return (_cart[menuItemId]?.quantity ?? 0) + 1;
+  }
+
+  /// Show adjustment dialog and return the adjusted quantity (or null if cancelled)
+  Future<int?> _showAdjustmentDialog({
+    required String itemName,
+    required int requestedQuantity,
+    required StockValidationResult validationResult,
+  }) async {
+    return showStockValidationDialog(
+      context,
+      itemName: itemName,
+      requestedQuantity: requestedQuantity,
+      validationResult: validationResult,
+      onAdjusted: () {
+        // Callback when user clicks "Adjust"
+        debugPrint('✅ User accepted adjustment to max quantity');
+      },
+    ).then((accepted) {
+      if (accepted == true) {
+        return validationResult.maxAllowedQuantity;
+      }
+      return null;
     });
   }
 
@@ -676,7 +766,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  PLACE ORDER
+  //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
   // ══════════════════════════════════════════════════════════
 
   Future<void> _placeOrder() async {
@@ -697,8 +787,118 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     if (mounted) setState(() {});
 
     try {
+      // ✓ STEP 1: Final inventory validation before order placement
+      debugPrint('🔐 Validating inventory before order placement...');
+      final inventoryService = InventoryDeductionService();
+      bool hasStockIssue = false;
+      String? stockIssueItem;
+
+      for (final item in cartItems) {
+        final validation = await inventoryService.validateStock(
+          item.menuItemId,
+          item.quantity,
+        );
+
+        if (!validation.isValid) {
+          hasStockIssue = true;
+          stockIssueItem = item.itemName;
+
+          // Show detailed error popup instead of just throwing
+          if (mounted) {
+            final shouldRetry =
+                await showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx) => AlertDialog(
+                    title: const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Stock Changed!'),
+                      ],
+                    ),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'The stock for ${item.itemName} has been updated since you added it to cart.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 16),
+                        if (validation.maxAllowedQuantity > 0)
+                          Text(
+                            'You can prepare a maximum of ${validation.maxAllowedQuantity} items.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange.shade700,
+                                ),
+                          )
+                        else
+                          Text(
+                            'This item is now out of stock.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade700,
+                                ),
+                          ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel Order'),
+                      ),
+                      if (validation.maxAllowedQuantity > 0)
+                        ElevatedButton(
+                          onPressed: () {
+                            // Adjust cart and retry
+                            setState(() {
+                              if (validation.maxAllowedQuantity > 0) {
+                                final cartItem = _cart[item.menuItemId];
+                                if (cartItem != null) {
+                                  _cart[item.menuItemId] = cartItem.copyWith(
+                                    quantity: validation.maxAllowedQuantity,
+                                  );
+                                }
+                              }
+                            });
+                            Navigator.pop(ctx, true);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                          ),
+                          child: Text(
+                            'Adjust to ${validation.maxAllowedQuantity}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ) ??
+                false;
+
+            if (shouldRetry) {
+              // Retry the whole process
+              _placing = false;
+              if (mounted) setState(() {});
+              return _placeOrder();
+            }
+          }
+
+          throw Exception(
+            'Stock validation failed: ${validation.getUserMessage()}',
+          );
+        }
+      }
+
+      if (!mounted) return;
+
+      // ✓ STEP 2: Create order
+      debugPrint('📝 Creating order...');
       final prov = context.read<OrdersProvider>();
-      await prov.createOrder(
+      final order = await prov.createOrder(
         cartItems: cartItems,
         orderType: _orderType,
         tableId: _selectedTableId,
@@ -713,11 +913,48 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         notes: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       );
 
+      if (!mounted) return;
+
+      // ✓ STEP 3: Deduct inventory after successful order creation
+      debugPrint('📦 Deducting inventory for order ${order.id}...');
+      if (_isOnline) {
+        try {
+          await inventoryService.deductInventoryForOrder(
+            order.id,
+            order.orderNumber,
+            _businessId,
+            cartItems
+                .map(
+                  (c) => {
+                    'menu_item_id': c.menuItemId,
+                    'item_name': c.itemName,
+                    'quantity': c.quantity,
+                  },
+                )
+                .toList(),
+          );
+          debugPrint('✅ Inventory deducted successfully for order ${order.id}');
+        } catch (e) {
+          debugPrint(
+            '⚠️  Inventory deduction failed (order still created): $e',
+          );
+          if (mounted) {
+            _snack(
+              '⚠️  Order #${order.orderNumber} created but inventory deduction failed. Will retry when online.',
+            );
+          }
+        }
+      } else {
+        debugPrint(
+          '⚠️  Offline mode: Inventory deduction will be performed when online',
+        );
+      }
+
       if (mounted) {
         if (!_isOnline) {
           _snack('✅ Order created offline. Will sync when online.');
         } else {
-          _snack('✅ Order placed successfully');
+          _snack('✅ Order #${order.orderNumber} placed & inventory updated');
         }
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) Navigator.pop(context);
@@ -727,6 +964,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           ? 'Failed to place order: $e'
           : 'Offline: Could not create order: $e';
       _snack(msg);
+      debugPrint('❌ Order placement error: $e');
     } finally {
       if (mounted) setState(() => _placing = false);
     }
@@ -1427,7 +1665,14 @@ class _MenuTile extends StatelessWidget {
                   ),
                 ),
                 GestureDetector(
-                  onTap: onAdd,
+                  // ✓ Handle async onAdd (don't await, fire-and-forget with error capture)
+                  onTap: () async {
+                    try {
+                      onAdd();
+                    } catch (e) {
+                      debugPrint('❌ Add item error: $e');
+                    }
+                  },
                   child: Container(
                     width: 28,
                     height: 28,

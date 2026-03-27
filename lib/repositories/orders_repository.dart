@@ -23,7 +23,6 @@ import 'package:uuid/uuid.dart';
 
 import 'package:pos_app/database/local_database.dart';
 import 'package:pos_app/models/order_modal.dart';
-import 'package:pos_app/repositories/tables_repository.dart';
 import 'package:pos_app/services/connectivity_service.dart';
 import 'package:pos_app/services/offline_sync_service.dart';
 import 'package:pos_app/services/order_service.dart';

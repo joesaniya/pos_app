@@ -486,16 +486,208 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  TABLE SELECTION MODAL
+  // ══════════════════════════════════════════════════════════
+
+  /// Opens table selection modal for dine-in orders
+  void _showTableSelectionModal() {
+    if (_orderType != OrderType.dineIn) return;
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (ctx) => Container(
+        color: _C.surface,
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Select Table for Dine-In Order',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: _C.textPri,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Please choose a table to proceed',
+              style: TextStyle(fontSize: 13, color: _C.textSec),
+            ),
+            const SizedBox(height: 20),
+            if (_tables.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFDC2626).withOpacity(0.2),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Text('⚠️', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'No tables available',
+                        style: TextStyle(
+                          color: Color(0xFFDC2626),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _tables.map((t) {
+                      final tid = t['id'] as String;
+                      final num = t['table_number'] as int;
+                      final cap = t['capacity'] as int;
+                      final status = t['status'] as String? ?? 'available';
+                      final canSelect = _tableIsSelectable(status);
+                      final sColor = _tableStatusColor(status);
+
+                      return GestureDetector(
+                        onTap: canSelect
+                            ? () {
+                                setState(() {
+                                  _selectedTableId = tid;
+                                  _selectedTableNumber = num;
+                                  _selectedSeatId = null;
+                                });
+                                Navigator.pop(ctx);
+                              }
+                            : null,
+                        child: Container(
+                          width: 90,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: !canSelect
+                                ? const Color(0xFFF5F5F5)
+                                : sColor.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: !canSelect
+                                  ? const Color(0xFFDDDDDD)
+                                  : sColor.withOpacity(0.5),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _tableStatusEmoji(status),
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'T$num',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  color: !canSelect ? _C.textMute : sColor,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '$cap seats',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: !canSelect ? _C.textMute : sColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 16),
+            if (_selectedTableId != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: _C.primary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(ctx),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.white, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Confirm Selection',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: _C.textMute.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Select a table to continue',
+                      style: TextStyle(
+                        color: _C.textMute,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  PLACE ORDER
   // ══════════════════════════════════════════════════════════
 
   Future<void> _placeOrder() async {
     if (_cart.isEmpty) {
-      _snack('Add items to cart first');
+      _snack('🛒 Add items to cart first');
       return;
     }
     if (_orderType == OrderType.dineIn && _selectedTableId == null) {
-      _snack('Please select a table');
+      _snack('📍 Please select a table before placing order');
+      // Show table selection modal
+      _showTableSelectionModal();
       return;
     }
 
@@ -575,14 +767,23 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                         cartTax: cartTax,
                         cartTotal: cartTotal,
                         placing: _placing,
-                        onTypeChanged: (t) => setState(() {
-                          _orderType = t;
-                          if (t != OrderType.dineIn) {
-                            _selectedTableId = null;
-                            _selectedSeatId = null;
-                            _selectedTableNumber = null;
+                        onTypeChanged: (t) {
+                          setState(() {
+                            _orderType = t;
+                            if (t != OrderType.dineIn) {
+                              _selectedTableId = null;
+                              _selectedSeatId = null;
+                              _selectedTableNumber = null;
+                            }
+                          });
+                          // Show table selection modal for dine-in
+                          if (t == OrderType.dineIn) {
+                            Future.delayed(
+                              const Duration(milliseconds: 300),
+                              () => _showTableSelectionModal(),
+                            );
                           }
-                        }),
+                        },
                         onTableSelected: (id, num) => setState(() {
                           if (_selectedTableId != id) {
                             _selectedSeatId = null;
@@ -1879,19 +2080,75 @@ class _CartView extends StatelessWidget {
         ),
         const SizedBox(height: 18),
 
+        // ── TABLE SELECTION WARNING FOR DINE-IN ────────────────────────────────
+        if (orderType == OrderType.dineIn && selectedTableId == null) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFFDC2626).withOpacity(0.3),
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Text('⚠️', style: TextStyle(fontSize: 18)),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Table Selection Required',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFDC2626),
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Please select a table from the list above',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF991B1B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         GestureDetector(
-          onTap: placing ? null : onPlaceOrder,
+          onTap:
+              (placing ||
+                  (orderType == OrderType.dineIn && selectedTableId == null))
+              ? null
+              : onPlaceOrder,
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 17),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: placing
+                colors:
+                    (placing ||
+                        (orderType == OrderType.dineIn &&
+                            selectedTableId == null))
                     ? [Colors.grey, Colors.grey.shade400]
                     : [_C.primary, _C.primaryD],
               ),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: placing
+              boxShadow:
+                  (placing ||
+                      (orderType == OrderType.dineIn &&
+                          selectedTableId == null))
                   ? []
                   : [
                       BoxShadow(
@@ -1916,6 +2173,18 @@ class _CartView extends StatelessWidget {
                   const SizedBox(width: 10),
                   const Text(
                     'Placing Order...',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ] else if (orderType == OrderType.dineIn &&
+                    selectedTableId == null) ...[
+                  const Icon(Icons.info_outline, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Select Table to Continue',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,

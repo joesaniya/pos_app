@@ -86,7 +86,12 @@ class InventoryDeductionService {
 
   final _db = Supabase.instance.client;
 
-  /// Fetch recipe with ingredients and current stock for a menu item
+  /// Fetch recipe with ingredients and LIVE current stock for a menu item
+  ///
+  /// ✨ KEY CHANGE: Fetches LIVE current_stock from inventory_items table
+  ///    instead of static available_quantity from recipe
+  ///
+  /// Single Source of Truth: inventory_items.current_stock
   Future<List<RecipeIngredient>> fetchRecipeIngredients(
     String menuItemId,
   ) async {
@@ -123,26 +128,74 @@ class InventoryDeductionService {
 
       for (final ing in ingredientsArray) {
         try {
+          final inventoryItemId = ing['inventory_item_id'] as String? ?? '';
+          final ingredientName =
+              ing['inventory_item_name'] as String? ?? 'Unknown';
+          final unit = ing['unit'] as String? ?? 'unit';
+
+          // ⚠️  CRITICAL: Detect and ignore stale embedded available_quantity
+          final embeddedAvailableQty = ing['available_quantity'];
+          if (embeddedAvailableQty != null) {
+            debugPrint(
+              '⚠️  SECURITY: Detected stale embedded available_quantity: '
+              '$embeddedAvailableQty (will be IGNORED - fetching LIVE instead)',
+            );
+          }
+
+          // ✨ FETCH LIVE CURRENT_STOCK FROM INVENTORY_ITEMS TABLE
+          double currentStock = 0.0;
+          if (inventoryItemId.isNotEmpty) {
+            try {
+              final invItem = await _db
+                  .from('inventory_items')
+                  .select('current_stock')
+                  .eq('id', inventoryItemId)
+                  .maybeSingle();
+
+              if (invItem != null) {
+                currentStock =
+                    double.tryParse(
+                      invItem['current_stock']?.toString() ?? '0',
+                    ) ??
+                    0.0;
+                debugPrint(
+                  '✅ LIVE stock fetched for $ingredientName: '
+                  '$currentStock$unit (stale embedded was: $embeddedAvailableQty)',
+                );
+              } else {
+                debugPrint(
+                  '⚠️  No inventory item found for ID: $inventoryItemId',
+                );
+                currentStock = 0.0;
+              }
+            } catch (e) {
+              debugPrint(
+                '❌ Failed to fetch live stock for $inventoryItemId: $e',
+              );
+              currentStock = 0.0; // Fallback to 0 if fetch fails
+            }
+          }
+
           final ingredient = RecipeIngredient(
-            ingredientId: ing['inventory_item_id'] as String? ?? '',
-            ingredientName: ing['inventory_item_name'] as String? ?? 'Unknown',
-            ingredientUnit: ing['unit'] as String? ?? 'unit',
+            ingredientId: inventoryItemId,
+            ingredientName: ingredientName,
+            ingredientUnit: unit,
             quantityRequired:
                 double.tryParse(ing['required_quantity']?.toString() ?? '0') ??
                 0.0,
-            availableQuantity:
-                double.tryParse(ing['available_quantity']?.toString() ?? '0') ??
-                0.0,
-            baseUnit: ing['base_unit'] as String? ?? ing['unit'] ?? 'unit',
+            // ✨ ALWAYS USE LIVE CURRENT_STOCK, NEVER embedded available_quantity
+            availableQuantity: currentStock,
+            baseUnit: ing['base_unit'] as String? ?? unit,
           );
           ingredients.add(ingredient);
         } catch (e) {
-          debugPrint('⚠️  Error parsing ingredient from recipe: $e');
+          debugPrint('❌ Error parsing ingredient from recipe: $e');
         }
       }
 
       debugPrint(
-        '✅ Fetched ${ingredients.length} ingredients for menu item: $menuItemId',
+        '✅ Fetched ${ingredients.length} ingredients for menu item: $menuItemId '
+        '(with LIVE stock data)',
       );
       return ingredients;
     } catch (e) {
@@ -187,8 +240,16 @@ class InventoryDeductionService {
       int minAllowed = 999999;
       RecipeIngredient? limitingIngredient;
 
+      debugPrint('📊 Stock validation breakdown:');
       for (final ing in ingredients) {
         final maxFromThisIng = ing.maxItemsAllowed();
+        debugPrint(
+          '  • ${ing.ingredientName}: '
+          'Available=${ing.availableQuantity}${ing.ingredientUnit}, '
+          'Required/item=${ing.quantityRequired}${ing.ingredientUnit}, '
+          'MaxItems=$maxFromThisIng',
+        );
+
         if (maxFromThisIng < minAllowed) {
           minAllowed = maxFromThisIng;
           limitingIngredient = ing;
@@ -198,8 +259,10 @@ class InventoryDeductionService {
       final hasEnoughStock = requestedQuantity <= minAllowed;
 
       debugPrint(
-        '📦 Stock validation for $menuItemId (qty: $requestedQuantity): '
-        'max=$minAllowed, limiting=${limitingIngredient?.ingredientName}',
+        '📦 Stock validation result for $menuItemId: '
+        'requested=$requestedQuantity, max_allowed=$minAllowed, '
+        'limiting=${limitingIngredient?.ingredientName}, '
+        'valid=$hasEnoughStock',
       );
 
       return StockValidationResult(
@@ -257,21 +320,63 @@ class InventoryDeductionService {
         }
 
         // Deduct each ingredient
+        debugPrint(
+          '📝 Processing ${ingredients.length} ingredients for $itemName (qty: $quantity)',
+        );
+
         for (final ing in ingredients) {
           final totalToDeduct = quantity * ing.quantityRequired;
 
+          debugPrint(
+            '🔍 Checking stock for ${ing.ingredientName}: '
+            'need_to_deduct=$totalToDeduct${ing.ingredientUnit}, '
+            'last_known_available=${ing.availableQuantity}${ing.ingredientUnit}',
+          );
+
+          // ⚠️ IMPORTANT: Fetch CURRENT stock from inventory table (not from recipe cache)
+          // Stock may have changed since recipe was fetched
+          double currentStock =
+              ing.availableQuantity; // fallback to recipe value
+          try {
+            final invCheck = await _db
+                .from('inventory_items')
+                .select('current_stock')
+                .eq('id', ing.ingredientId)
+                .maybeSingle();
+
+            if (invCheck != null) {
+              currentStock =
+                  double.tryParse(
+                    invCheck['current_stock']?.toString() ?? '0',
+                  ) ??
+                  0.0;
+              debugPrint(
+                '✅ Fetched current stock for ${ing.ingredientName}: $currentStock${ing.ingredientUnit}',
+              );
+            }
+          } catch (e) {
+            debugPrint(
+              '⚠️  Could not fetch current stock for ${ing.ingredientName}, using cached value: $currentStock${ing.ingredientUnit}',
+            );
+          }
+
           // ✓ Verify sufficient stock before deducting
-          if (totalToDeduct > ing.availableQuantity) {
+          if (totalToDeduct > currentStock) {
             throw Exception(
               'Insufficient stock for $itemName during deduction. '
               'Required: $totalToDeduct ${ing.ingredientUnit}, '
-              'Available: ${ing.availableQuantity} ${ing.ingredientUnit}',
+              'Available: $currentStock ${ing.ingredientUnit}',
             );
           }
 
           // ✓ Create consumption record (for audit trail) — non-blocking
-          // If RLS policy fails, log but continue with deduction
+          // If RLS policy or table issues occur, log but continue with deduction
           try {
+            debugPrint(
+              '📝 Attempting to create consumption record for $itemName: '
+              'qty=$totalToDeduct ${ing.ingredientUnit}',
+            );
+
             await _db.from('ingredient_consumption').insert({
               'business_id': businessId,
               'order_id': orderId,
@@ -284,20 +389,33 @@ class InventoryDeductionService {
               'quantity_consumed': totalToDeduct,
               'transaction_status': 'pending',
             });
+
+            debugPrint(
+              '✅ Consumption record created: $itemName → -$totalToDeduct ${ing.ingredientUnit}',
+            );
           } catch (e) {
             debugPrint(
-              '⚠️  Warning: Could not create consumption record: $e. '
+              '⚠️  Failed to create consumption record: $e\n'
+              'Details: $itemName, qty: $totalToDeduct ${ing.ingredientUnit}\n'
               'Proceeding with inventory deduction anyway.',
             );
+            // Continue — actual deduction is more critical than audit trail
           }
 
           // ✓ Deduct from inventory
+          debugPrint(
+            '💾 Deducting $totalToDeduct ${ing.ingredientUnit} of ${ing.ingredientName} '
+            'from inventory...',
+          );
+
           await _db.rpc(
             'deduct_inventory',
             params: {
               'p_inventory_item_id': ing.ingredientId,
               'p_quantity': totalToDeduct,
               'p_business_id': businessId,
+              'p_order_id': orderId,
+              'p_order_number': orderNumber,
             },
           );
 

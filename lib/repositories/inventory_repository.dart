@@ -301,13 +301,26 @@ class InventoryRepository {
 
     if (_connectivity.isOnline) {
       try {
+        // ✅ Step 1: Insert transaction into history
         await _sb.from('stock_transactions').insert(txMap);
+
+        // ✅ Step 2: Update current_stock in inventory_items
+        await _sb
+            .from('inventory_items')
+            .update({'current_stock': stockAfter, 'last_updated': now})
+            .eq('id', itemId);
+
+        debugPrint(
+          '[InventoryRepo] Transaction recorded & stock updated: '
+          '$itemId ($stockBefore → $stockAfter)',
+        );
         return;
       } catch (e) {
         debugPrint('[InventoryRepo] Online recordTransaction failed: $e');
       }
     }
 
+    // ── Offline: Queue transaction for sync ──────────────────────────────────
     await _local.enqueue(
       id: _uuid.v4(),
       entityType: EntityType.stockTx,
@@ -315,6 +328,16 @@ class InventoryRepository {
       action: LocalDatabase.actionCreate,
       payload: txMap,
       businessId: businessId,
+    );
+
+    // ── Offline: Also update local inventory item ────────────────────────────
+    await _local.upsertEntity(
+      table: LocalDatabase.tInventory,
+      id: itemId,
+      businessId: businessId,
+      data: {'current_stock': stockAfter, 'last_updated': now},
+      syncStatus: LocalDatabase.syncPending,
+      action: LocalDatabase.actionUpdate,
     );
   }
 

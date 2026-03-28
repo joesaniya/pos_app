@@ -293,6 +293,11 @@ class _StatusFilter extends StatelessWidget {
       ),
       (OrderStatus.ready, 'Ready', prov.countByStatus(OrderStatus.ready)),
       (
+        OrderStatus.cancelled,
+        'Cancelled',
+        prov.countByStatus(OrderStatus.cancelled),
+      ),
+      (
         OrderStatus.completed,
         'Done',
         prov.countByStatus(OrderStatus.completed),

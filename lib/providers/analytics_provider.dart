@@ -29,6 +29,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pos_app/services/storage_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pos_app/utils/ist_utils.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  DATA MODELS
@@ -207,59 +208,100 @@ class AnalyticsProvider extends ChangeNotifier {
   Future<void> _fetchPeriod(String period) async {
     try {
       final db = Supabase.instance.client;
-      final now = DateTime.now();
+      final nowLocal = DateTime.now(); // Get local time
 
-      // ── Date ranges ──────────────────────────────────────────────────────
+      // ── Date ranges (calculated in LOCAL timezone, then convert to UTC) ────
       final DateTime curFrom, curTo, prevFrom, prevTo;
 
       switch (period) {
         case 'Monthly':
-          // Current month: 1st of this month → now
-          curFrom = DateTime(now.year, now.month, 1);
-          curTo = DateTime(now.year, now.month + 1, 1); // exclusive
+          // Current month: 1st of this month (00:00 local) → 1st of next month (00:00 local)
+          final firstOfMonth = DateTime(nowLocal.year, nowLocal.month, 1);
+          final firstOfNextMonth = DateTime(
+            nowLocal.year,
+            nowLocal.month + 1,
+            1,
+          );
+
+          curFrom = firstOfMonth;
+          curTo = firstOfNextMonth;
           // Previous month
-          prevFrom = DateTime(now.year, now.month - 1, 1);
-          prevTo = curFrom;
+          final firstOfPrevMonth = DateTime(
+            nowLocal.year,
+            nowLocal.month - 1,
+            1,
+          );
+          prevFrom = firstOfPrevMonth;
+          prevTo = firstOfMonth;
           break;
 
         case 'Yearly':
-          // Current year: Jan 1 → now
-          curFrom = DateTime(now.year, 1, 1);
-          curTo = DateTime(now.year + 1, 1, 1); // exclusive
+          // Current year: Jan 1 (00:00 local) → Jan 1 of next year (00:00 local)
+          final firstOfYear = DateTime(nowLocal.year, 1, 1);
+          final firstOfNextYear = DateTime(nowLocal.year + 1, 1, 1);
+
+          curFrom = firstOfYear;
+          curTo = firstOfNextYear;
           // Previous year
-          prevFrom = DateTime(now.year - 1, 1, 1);
-          prevTo = curFrom;
+          final firstOfPrevYear = DateTime(nowLocal.year - 1, 1, 1);
+          prevFrom = firstOfPrevYear;
+          prevTo = firstOfYear;
           break;
 
         default: // Weekly
-          // ISO week: Monday → Sunday of current week
-          final todayMidnight = DateTime(now.year, now.month, now.day);
+          // ISO week: Monday (00:00 local) → Sunday (00:00 local next day)
           // weekday: 1=Mon … 7=Sun
-          final monday =
-              todayMidnight.subtract(Duration(days: now.weekday - 1));
+          final todayStart = DateTime(
+            nowLocal.year,
+            nowLocal.month,
+            nowLocal.day,
+          );
+          final daysSinceMonday = todayStart.weekday - 1; // 0=Mon, 6=Sun
+          final monday = todayStart.subtract(Duration(days: daysSinceMonday));
+          final nextMonday = monday.add(const Duration(days: 7));
+
           curFrom = monday;
-          curTo = monday.add(const Duration(days: 7)); // exclusive
+          curTo = nextMonday;
           // Previous week
           prevFrom = monday.subtract(const Duration(days: 7));
-          prevTo = curFrom;
+          prevTo = monday;
           break;
       }
 
+      // ──═════════════════════════════════════════════════════════════════════
+      // CRITICAL FIX: Convert LOCAL date boundaries to UTC for database query
+      // This ensures orders in the local timezone are correctly included/excluded
+      // ──═════════════════════════════════════════════════════════════════════
+      final curFromUtc = curFrom.toUtc();
+      final curToUtc = curTo.toUtc();
+      final prevFromUtc = prevFrom.toUtc();
+      final prevToUtc = prevTo.toUtc();
+
+      debugPrint(
+        '📈 $period date ranges:\n'
+        '  Current:  ${curFrom.toIso8601String()} → ${curTo.toIso8601String()}\n'
+        '  UTC:      ${curFromUtc.toIso8601String()} → ${curToUtc.toIso8601String()}',
+      );
+
       // ── Fetch current period orders ──────────────────────────────────────
-      final curRows = await db
-          .from('orders')
-          .select('status, total_amount, created_at')
-          .eq('business_id', _businessId)
-          .gte('created_at', curFrom.toUtc().toIso8601String())
-          .lt('created_at', curTo.toUtc().toIso8601String()) as List;
+      final curRows =
+          await db
+                  .from('orders')
+                  .select('status, payment_status, total_amount, created_at')
+                  .eq('business_id', _businessId)
+                  .gte('created_at', curFromUtc.toIso8601String())
+                  .lt('created_at', curToUtc.toIso8601String())
+              as List;
 
       // ── Fetch previous period orders (for growth rate) ───────────────────
-      final prevRows = await db
-          .from('orders')
-          .select('status, total_amount, created_at')
-          .eq('business_id', _businessId)
-          .gte('created_at', prevFrom.toUtc().toIso8601String())
-          .lt('created_at', prevTo.toUtc().toIso8601String()) as List;
+      final prevRows =
+          await db
+                  .from('orders')
+                  .select('status, payment_status, total_amount, created_at')
+                  .eq('business_id', _businessId)
+                  .gte('created_at', prevFromUtc.toIso8601String())
+                  .lt('created_at', prevToUtc.toIso8601String())
+              as List;
 
       debugPrint(
         '📈 $period fetch: cur=${curRows.length} prev=${prevRows.length}',
@@ -272,7 +314,7 @@ class AnalyticsProvider extends ChangeNotifier {
         prevRows: prevRows,
         curFrom: curFrom,
         curTo: curTo,
-        now: now,
+        now: nowLocal,
       );
 
       // Store result
@@ -322,15 +364,18 @@ class AnalyticsProvider extends ChangeNotifier {
     for (final r in curRows) {
       totalOrders++;
 
-      final amount =
-          r['status'] == 'completed'
-              ? (r['total_amount'] as num? ?? 0).toDouble()
-              : 0.0;
+      // ✅ FIX: Only count completed + PAID orders for revenue
+      final amount = (r['status'] == 'completed')
+          ? (r['total_amount'] as num? ?? 0).toDouble()
+          : 0.0;
 
       DateTime dt;
       try {
-        dt = DateTime.parse(r['created_at'] as String).toLocal();
+        // ✅ FIX: Use IST utility to parse timestamp to LOCAL time
+        final rawCreatedAt = r['created_at'] as String;
+        dt = parseToIST(rawCreatedAt); // Converts to local time
       } catch (_) {
+        debugPrint('📈 Failed to parse timestamp: ${r['created_at']}');
         continue;
       }
 
@@ -347,13 +392,15 @@ class AnalyticsProvider extends ChangeNotifier {
 
     // Average = total ÷ number of buckets that have at least 1 order
     final activeBuckets = buckets.values.where((b) => b.orders > 0).length;
-    final averageRevenue =
-        activeBuckets > 0 ? totalRevenue / activeBuckets : 0.0;
+    final averageRevenue = activeBuckets > 0
+        ? totalRevenue / activeBuckets
+        : 0.0;
 
-    final highestRevenue =
-        revenues.isEmpty ? 0.0 : revenues.reduce((a, b) => a > b ? a : b);
+    final highestRevenue = revenues.isEmpty
+        ? 0.0
+        : revenues.reduce((a, b) => a > b ? a : b);
 
-    // Growth rate vs previous period
+    // ✅ FIX: Growth rate calculation — only count completed orders for both periods
     double prevTotal = 0;
     for (final r in prevRows) {
       if (r['status'] == 'completed') {
@@ -366,12 +413,24 @@ class AnalyticsProvider extends ChangeNotifier {
 
     // ── Build ordered chart points ───────────────────────────────────────
     final List<AnalyticsChartPoint> chartPoints = buckets.entries
-        .map((e) => AnalyticsChartPoint(
-              label: e.key,
-              revenue: e.value.revenue,
-              orders: e.value.orders,
-            ))
+        .map(
+          (e) => AnalyticsChartPoint(
+            label: e.key,
+            revenue: e.value.revenue,
+            orders: e.value.orders,
+          ),
+        )
         .toList();
+
+    debugPrint(
+      '📈 $period stats computed:\n'
+      '  totalRevenue: ₹${totalRevenue.toStringAsFixed(2)}\n'
+      '  averageRevenue: ₹${averageRevenue.toStringAsFixed(2)}\n'
+      '  highestRevenue: ₹${highestRevenue.toStringAsFixed(2)}\n'
+      '  growthRate: ${growthRate.toStringAsFixed(1)}%\n'
+      '  orderCount: $totalOrders\n'
+      '  activeBuckets: $activeBuckets',
+    );
 
     return AnalyticsPeriodStats(
       totalRevenue: totalRevenue,
@@ -411,8 +470,18 @@ class AnalyticsProvider extends ChangeNotifier {
       case 'Yearly':
         // Jan … Dec
         const months = [
-          'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         for (final m in months) {
           buckets[m] = _Bucket();
@@ -431,8 +500,18 @@ class AnalyticsProvider extends ChangeNotifier {
         return dt.day.toString().padLeft(2, '0');
       case 'Yearly':
         const months = [
-          'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
         ];
         return months[dt.month - 1];
       default:

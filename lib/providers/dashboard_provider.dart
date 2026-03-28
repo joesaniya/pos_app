@@ -168,9 +168,10 @@ class DashboardProvider extends ChangeNotifier {
         debugPrint('📊 DashboardProvider: No Firebase user');
         return;
       }
-      
+
       final storedData = await StorageService.instance.getUserData();
-      final String canonicalUid = storedData['uid'] as String? ?? firebaseUser.uid;
+      final String canonicalUid =
+          storedData['uid'] as String? ?? firebaseUser.uid;
       _uid = canonicalUid;
 
       final doc = await FirebaseFirestore.instance
@@ -289,151 +290,153 @@ class DashboardProvider extends ChangeNotifier {
         await _fetchOfflineData(cur.from, cur.to, prev.from, prev.to);
       } else {
         // ── 1. KPI stats — ALWAYS scoped to current user's own orders ──────────
-      //    p_staff_uid is always _uid, never null, for every role.
-      //    This guarantees revenue/orders shown are only what this user handled.
-      final rpcCur =
-          await db.rpc(
-                'fn_revenue_summary',
-                params: {
-                  'p_business_id': _businessId,
-                  'p_from': fromStr,
-                  'p_to': toStr,
-                  'p_staff_uid': _uid, // ← always own uid
-                },
-              )
-              as List;
+        //    p_staff_uid is always _uid, never null, for every role.
+        //    This guarantees revenue/orders shown are only what this user handled.
+        final rpcCur =
+            await db.rpc(
+                  'fn_revenue_summary',
+                  params: {
+                    'p_business_id': _businessId,
+                    'p_from': fromStr,
+                    'p_to': toStr,
+                    'p_staff_uid': _uid, // ← always own uid
+                  },
+                )
+                as List;
 
-      final rpcPrev =
-          await db.rpc(
-                'fn_revenue_summary',
-                params: {
-                  'p_business_id': _businessId,
-                  'p_from': prevFromStr,
-                  'p_to': prevToStr,
-                  'p_staff_uid': _uid, // ← always own uid
-                },
-              )
-              as List;
+        final rpcPrev =
+            await db.rpc(
+                  'fn_revenue_summary',
+                  params: {
+                    'p_business_id': _businessId,
+                    'p_from': prevFromStr,
+                    'p_to': prevToStr,
+                    'p_staff_uid': _uid, // ← always own uid
+                  },
+                )
+                as List;
 
-      final cur0 = rpcCur.isNotEmpty ? rpcCur[0] as Map<String, dynamic> : {};
-      final prev0 = rpcPrev.isNotEmpty
-          ? rpcPrev[0] as Map<String, dynamic>
-          : {};
+        final cur0 = rpcCur.isNotEmpty ? rpcCur[0] as Map<String, dynamic> : {};
+        final prev0 = rpcPrev.isNotEmpty
+            ? rpcPrev[0] as Map<String, dynamic>
+            : {};
 
-      final revenue = (cur0['total_revenue'] as num? ?? 0).toDouble();
-      final orders = (cur0['total_orders'] as num? ?? 0).toInt();
-      final avgOrder = (cur0['avg_order'] as num? ?? 0).toDouble();
-      final completed = (cur0['completed'] as num? ?? 0).toInt();
-      final cancelled = (cur0['cancelled'] as num? ?? 0).toInt();
-      final prevRev = (prev0['total_revenue'] as num? ?? 0).toDouble();
-      final prevOrders = (prev0['total_orders'] as num? ?? 0).toInt();
+        final revenue = (cur0['total_revenue'] as num? ?? 0).toDouble();
+        final orders = (cur0['total_orders'] as num? ?? 0).toInt();
+        final avgOrder = (cur0['avg_order'] as num? ?? 0).toDouble();
+        final completed = (cur0['completed'] as num? ?? 0).toInt();
+        final cancelled = (cur0['cancelled'] as num? ?? 0).toInt();
+        final prevRev = (prev0['total_revenue'] as num? ?? 0).toDouble();
+        final prevOrders = (prev0['total_orders'] as num? ?? 0).toInt();
 
-      debugPrint(
-        '📊 My stats: revenue=$revenue orders=$orders '
-        'completed=$completed cancelled=$cancelled',
-      );
+        // Debug: Show cancellation metrics
+        final cancelRatePct = orders > 0 ? ((cancelled / orders) * 100) : 0;
+        debugPrint(
+          '📊 My stats: revenue=$revenue orders=$orders '
+          'completed=$completed cancelled=$cancelled cancelRate=${cancelRatePct.toStringAsFixed(1)}%',
+        );
 
-      // ── 2. My order rows — for chart building only ─────────────────────────
-      //    Always filtered to _uid regardless of role.
-      final myRows =
-          await db
-                  .from('orders')
-                  .select(
-                    'id, status, total_amount, order_type, table_id, '
-                    'created_at, created_by_uid',
-                  )
-                  .eq('business_id', _businessId)
-                  .eq('created_by_uid', _uid) // ← always own uid
-                  .gte('created_at', fromStr)
-                  .lt('created_at', toStr)
-              as List;
+        // ── 2. My order rows — for chart building only ─────────────────────────
+        //    Always filtered to _uid regardless of role.
+        final myRows =
+            await db
+                    .from('orders')
+                    .select(
+                      'id, status, total_amount, order_type, table_id, '
+                      'created_at, created_by_uid',
+                    )
+                    .eq('business_id', _businessId)
+                    .eq('created_by_uid', _uid) // ← always own uid
+                    .gte('created_at', fromStr)
+                    .lt('created_at', toStr)
+                as List;
 
-      debugPrint('📊 My order rows: ${myRows.length}');
+        debugPrint('📊 My order rows: ${myRows.length}');
 
-      // Build chart from my own rows only
-      _buildChart(myRows, cur.to.difference(cur.from));
+        // Build chart from my own rows only
+        _buildChart(myRows, cur.to.difference(cur.from));
 
-      // ── 3. Top items — company-wide (best-sellers for the whole business) ──
-      //    All roles see the same top-sellers.  This is intentional and separate
-      //    from the personal revenue numbers above.
-      final allCompletedRows =
-          await db
-                  .from('orders')
-                  .select('id')
-                  .eq('business_id', _businessId)
-                  .eq('status', 'completed')
-                  .gte('created_at', fromStr)
-                  .lt('created_at', toStr)
-              as List;
+        // ── 3. Top items — company-wide (best-sellers for the whole business) ──
+        //    All roles see the same top-sellers.  This is intentional and separate
+        //    from the personal revenue numbers above.
+        final allCompletedRows =
+            await db
+                    .from('orders')
+                    .select('id')
+                    .eq('business_id', _businessId)
+                    .eq('status', 'completed')
+                    .gte('created_at', fromStr)
+                    .lt('created_at', toStr)
+                as List;
 
-      final completedIds = allCompletedRows
-          .map((r) => r['id'] as String)
-          .toList();
-      await _buildTopItems(db, completedIds);
+        final completedIds = allCompletedRows
+            .map((r) => r['id'] as String)
+            .toList();
+        await _buildTopItems(db, completedIds);
 
-      // ── 4. Staff performance — admin/manager/owner only ────────────────────
-      //    Uses a SEPARATE query with NO uid filter so that every staff member
-      //    who handled at least one order for this business in this period is
-      //    captured.  This is independent of the personal stats above.
-      if (isAdminLevel) {
-        await _fetchAllStaffStats(db, fromStr, toStr);
-      } else {
-        _employees = [];
-      }
-
-      // ── 5. Table stats — admin/manager/owner only ──────────────────────────
-      int totalTables = 0, activeTables = 0, servedToday = 0;
-      if (isAdminLevel) {
-        try {
-          final tRows =
-              await db
-                      .from('restaurant_tables')
-                      .select('status')
-                      .eq('business_id', _businessId)
-                      .eq('is_active', true)
-                  as List;
-
-          totalTables = tRows.length;
-          activeTables = tRows.where((r) => r['status'] == 'occupied').length;
-
-          // Served today = distinct tables that had at least one completed
-          // order today (uses all company orders, not just mine)
-          final todayStart = DateTime.now().toUtc().copyWith(
-            hour: 0,
-            minute: 0,
-            second: 0,
-          );
-          final completedTableRows =
-              await db
-                      .from('orders')
-                      .select('table_id')
-                      .eq('business_id', _businessId)
-                      .eq('status', 'completed')
-                      .not('table_id', 'is', null)
-                      .gte('created_at', todayStart.toIso8601String())
-                  as List;
-
-          servedToday = completedTableRows
-              .map((r) => r['table_id'] as String)
-              .toSet()
-              .length;
-        } catch (e) {
-          debugPrint('📊 Table stats error: $e');
+        // ── 4. Staff performance — admin/manager/owner only ────────────────────
+        //    Uses a SEPARATE query with NO uid filter so that every staff member
+        //    who handled at least one order for this business in this period is
+        //    captured.  This is independent of the personal stats above.
+        if (isAdminLevel) {
+          await _fetchAllStaffStats(db, fromStr, toStr);
+        } else {
+          _employees = [];
         }
-      }
 
-      _stats = DashboardStats(
-        revenue: revenue,
-        prevRevenue: prevRev,
-        ordersCount: orders,
-        prevOrdersCount: prevOrders,
-        averageOrder: avgOrder,
-        completedOrders: completed,
-        cancelledOrders: cancelled,
-        activeTables: activeTables,
-        totalTables: totalTables,
-        servedTablesToday: servedToday,
-      );
+        // ── 5. Table stats — admin/manager/owner only ──────────────────────────
+        int totalTables = 0, activeTables = 0, servedToday = 0;
+        if (isAdminLevel) {
+          try {
+            final tRows =
+                await db
+                        .from('restaurant_tables')
+                        .select('status')
+                        .eq('business_id', _businessId)
+                        .eq('is_active', true)
+                    as List;
+
+            totalTables = tRows.length;
+            activeTables = tRows.where((r) => r['status'] == 'occupied').length;
+
+            // Served today = distinct tables that had at least one completed
+            // order today (uses all company orders, not just mine)
+            final todayStart = DateTime.now().toUtc().copyWith(
+              hour: 0,
+              minute: 0,
+              second: 0,
+            );
+            final completedTableRows =
+                await db
+                        .from('orders')
+                        .select('table_id')
+                        .eq('business_id', _businessId)
+                        .eq('status', 'completed')
+                        .not('table_id', 'is', null)
+                        .gte('created_at', todayStart.toIso8601String())
+                    as List;
+
+            servedToday = completedTableRows
+                .map((r) => r['table_id'] as String)
+                .toSet()
+                .length;
+          } catch (e) {
+            debugPrint('📊 Table stats error: $e');
+          }
+        }
+
+        _stats = DashboardStats(
+          revenue: revenue,
+          prevRevenue: prevRev,
+          ordersCount: orders,
+          prevOrdersCount: prevOrders,
+          averageOrder: avgOrder,
+          completedOrders: completed,
+          cancelledOrders: cancelled,
+          activeTables: activeTables,
+          totalTables: totalTables,
+          servedTablesToday: servedToday,
+        );
       } // End of online block
     } finally {
       _isLoading = false;
@@ -443,7 +446,12 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   // ── Offline Fallback Data Fetch ───────────────────────────────────────────
-  Future<void> _fetchOfflineData(DateTime curFrom, DateTime curTo, DateTime prevFrom, DateTime prevTo) async {
+  Future<void> _fetchOfflineData(
+    DateTime curFrom,
+    DateTime curTo,
+    DateTime prevFrom,
+    DateTime prevTo,
+  ) async {
     try {
       final local = LocalDatabase.instance;
       final rows = await local.getEntities(
@@ -499,11 +507,14 @@ class DashboardProvider extends ChangeNotifier {
           if (isAdminLevel) {
             final u = createdBy ?? 'unknown';
             if (u != 'unknown' && u.isNotEmpty) {
-              empAgg.putIfAbsent(u, () => _EmpAgg(
-                uid: u,
-                name: j['created_by_name'] as String? ?? 'Unknown',
-                role: j['created_by_role'] as String? ?? 'staff'
-              ));
+              empAgg.putIfAbsent(
+                u,
+                () => _EmpAgg(
+                  uid: u,
+                  name: j['created_by_name'] as String? ?? 'Unknown',
+                  role: j['created_by_role'] as String? ?? 'staff',
+                ),
+              );
               empAgg[u]!.orders++;
               if (status == 'completed') empAgg[u]!.revenue += amount;
               if (status == 'cancelled') empAgg[u]!.cancelled++;
@@ -519,44 +530,95 @@ class DashboardProvider extends ChangeNotifier {
       final Map<String, _ItemAgg> itemAgg = {};
       for (final r in rows) {
         if (!allCompletedForTopItems.contains(r['id'])) continue;
-        final itemsList = r['items'] as List<dynamic>? ?? r['order_items'] as List<dynamic>? ?? [];
+        final itemsList =
+            r['items'] as List<dynamic>? ??
+            r['order_items'] as List<dynamic>? ??
+            [];
         for (final itemRaw in itemsList) {
           final ir = itemRaw as Map<String, dynamic>;
           final name = ir['item_name'] as String? ?? 'Unknown';
-          itemAgg.putIfAbsent(name, () => _ItemAgg(name: name, category: ir['category_name'] as String? ?? ''));
+          itemAgg.putIfAbsent(
+            name,
+            () => _ItemAgg(
+              name: name,
+              category: ir['category_name'] as String? ?? '',
+            ),
+          );
           itemAgg[name]!.quantity += (ir['quantity'] as num? ?? 0).toInt();
           itemAgg[name]!.revenue += (ir['subtotal'] as num? ?? 0).toDouble();
         }
       }
-      _topItems = (itemAgg.values.toList()..sort((a, b) => b.quantity.compareTo(a.quantity)))
-          .take(8).map((a) => TopItem(name: a.name, categoryName: a.category, quantity: a.quantity, revenue: a.revenue)).toList();
+      _topItems =
+          (itemAgg.values.toList()
+                ..sort((a, b) => b.quantity.compareTo(a.quantity)))
+              .take(8)
+              .map(
+                (a) => TopItem(
+                  name: a.name,
+                  categoryName: a.category,
+                  quantity: a.quantity,
+                  revenue: a.revenue,
+                ),
+              )
+              .toList();
 
       if (isAdminLevel) {
-        final sorted = empAgg.values.toList()..sort((a, b) => b.revenue.compareTo(a.revenue));
-        _employees = sorted.map((e) => EmployeeStat(
-          uid: e.uid, name: e.name, role: e.role, orders: e.orders, cancelledOrders: e.cancelled, revenue: e.revenue
-        )).toList();
+        final sorted = empAgg.values.toList()
+          ..sort((a, b) => b.revenue.compareTo(a.revenue));
+        _employees = sorted
+            .map(
+              (e) => EmployeeStat(
+                uid: e.uid,
+                name: e.name,
+                role: e.role,
+                orders: e.orders,
+                cancelledOrders: e.cancelled,
+                revenue: e.revenue,
+              ),
+            )
+            .toList();
       } else {
         _employees = [];
       }
 
       int totalTables = 0, activeTables = 0, servedToday = 0;
       if (isAdminLevel) {
-        final tRows = await local.getEntities(table: LocalDatabase.tTables, businessId: _businessId);
+        final tRows = await local.getEntities(
+          table: LocalDatabase.tTables,
+          businessId: _businessId,
+        );
         totalTables = tRows.length;
         activeTables = tRows.where((r) => r['status'] == 'occupied').length;
-        final todayStart = DateTime.now().toUtc().copyWith(hour: 0, minute: 0, second: 0);
+        final todayStart = DateTime.now().toUtc().copyWith(
+          hour: 0,
+          minute: 0,
+          second: 0,
+        );
         servedToday = rows
-            .where((r) => r['status'] == 'completed' && r['table_id'] != null && parseToIST(r['created_at'] as String).toUtc().isAfter(todayStart))
+            .where(
+              (r) =>
+                  r['status'] == 'completed' &&
+                  r['table_id'] != null &&
+                  parseToIST(
+                    r['created_at'] as String,
+                  ).toUtc().isAfter(todayStart),
+            )
             .map((r) => r['table_id'] as String)
             .toSet()
             .length;
       }
 
       _stats = DashboardStats(
-        revenue: revenue, prevRevenue: prevRev, ordersCount: orders, prevOrdersCount: prevOrders,
-        averageOrder: avgOrder, completedOrders: completed, cancelledOrders: cancelled,
-        activeTables: activeTables, totalTables: totalTables, servedTablesToday: servedToday,
+        revenue: revenue,
+        prevRevenue: prevRev,
+        ordersCount: orders,
+        prevOrdersCount: prevOrders,
+        averageOrder: avgOrder,
+        completedOrders: completed,
+        cancelledOrders: cancelled,
+        activeTables: activeTables,
+        totalTables: totalTables,
+        servedTablesToday: servedToday,
       );
     } catch (e) {
       debugPrint('📊 Offline fetch error: $e');
@@ -769,5 +831,3 @@ class _EmpAgg {
   double revenue = 0;
   _EmpAgg({required this.uid, required this.name, required this.role});
 }
-
-

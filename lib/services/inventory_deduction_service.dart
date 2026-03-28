@@ -295,10 +295,37 @@ class InventoryDeductionService {
     String businessId,
     List<Map<String, dynamic>> orderItems,
   ) async {
+    // ✅ NEW: Declare at method level so it's accessible in both try and catch blocks
+    bool orderExistsInDb = false;
+
     try {
       debugPrint(
         '🔄 Starting inventory deduction for order: $orderId (#$orderNumber)',
       );
+
+      // ✅ NEW: Verify order exists in database before creating consumption records
+      // This prevents FK constraint violations for offline orders not yet synced
+      try {
+        final orderExists = await _db
+            .from('orders')
+            .select('id')
+            .eq('id', orderId)
+            .maybeSingle();
+        orderExistsInDb = orderExists != null;
+
+        if (!orderExistsInDb) {
+          debugPrint(
+            '⚠️  Order $orderId not found in database (offline order?). '
+            'Will deduct inventory but skip consumption records. '
+            'Records will be created when order syncs.',
+          );
+        }
+      } catch (e) {
+        debugPrint(
+          '⚠️  Could not verify order existence: $e. '
+          'Will proceed with deduction without consumption records.',
+        );
+      }
 
       for (final item in orderItems) {
         final menuItemId = item['menu_item_id'] as String?;
@@ -371,35 +398,43 @@ class InventoryDeductionService {
 
           // ✓ Create consumption record (for audit trail) — non-blocking
           // If RLS policy or table issues occur, log but continue with deduction
-          try {
+          // ✅ NEW: Skip consumption record if order doesn't exist in DB (offline case)
+          if (!orderExistsInDb) {
             debugPrint(
-              '📝 Attempting to create consumption record for $itemName: '
-              'qty=$totalToDeduct ${ing.ingredientUnit}',
+              '⏭️  Skipping consumption record for $itemName (order not in DB yet). '
+              'Will be created on sync.',
             );
+          } else {
+            try {
+              debugPrint(
+                '📝 Attempting to create consumption record for $itemName: '
+                'qty=$totalToDeduct ${ing.ingredientUnit}',
+              );
 
-            await _db.from('ingredient_consumption').insert({
-              'business_id': businessId,
-              'order_id': orderId,
-              'order_number': orderNumber,
-              'menu_item_id': menuItemId,
-              'menu_item_name': itemName,
-              'ingredient_id': ing.ingredientId,
-              'ingredient_name': ing.ingredientName,
-              'ingredient_unit': ing.ingredientUnit,
-              'quantity_consumed': totalToDeduct,
-              'transaction_status': 'pending',
-            });
+              await _db.from('ingredient_consumption').insert({
+                'business_id': businessId,
+                'order_id': orderId,
+                'order_number': orderNumber,
+                'menu_item_id': menuItemId,
+                'menu_item_name': itemName,
+                'ingredient_id': ing.ingredientId,
+                'ingredient_name': ing.ingredientName,
+                'ingredient_unit': ing.ingredientUnit,
+                'quantity_consumed': totalToDeduct,
+                'transaction_status': 'pending',
+              });
 
-            debugPrint(
-              '✅ Consumption record created: $itemName → -$totalToDeduct ${ing.ingredientUnit}',
-            );
-          } catch (e) {
-            debugPrint(
-              '⚠️  Failed to create consumption record: $e\n'
-              'Details: $itemName, qty: $totalToDeduct ${ing.ingredientUnit}\n'
-              'Proceeding with inventory deduction anyway.',
-            );
-            // Continue — actual deduction is more critical than audit trail
+              debugPrint(
+                '✅ Consumption record created: $itemName → -$totalToDeduct ${ing.ingredientUnit}',
+              );
+            } catch (e) {
+              debugPrint(
+                '⚠️  Failed to create consumption record: $e\n'
+                'Details: $itemName, qty: $totalToDeduct ${ing.ingredientUnit}\n'
+                'Proceeding with inventory deduction anyway.',
+              );
+              // Continue — actual deduction is more critical than audit trail
+            }
           }
 
           // ✓ Deduct from inventory
@@ -427,28 +462,34 @@ class InventoryDeductionService {
       }
 
       // ✓ Mark consumption as completed — non-blocking
-      try {
-        await _db
-            .from('ingredient_consumption')
-            .update({'transaction_status': 'completed'})
-            .eq('order_id', orderId);
-      } catch (e) {
-        debugPrint(
-          '⚠️  Warning: Could not update consumption status: $e. '
-          'Inventory deduction completed anyway.',
-        );
+      // ✅ NEW: Skip if order doesn't exist in DB (offline case)
+      if (orderExistsInDb) {
+        try {
+          await _db
+              .from('ingredient_consumption')
+              .update({'transaction_status': 'completed'})
+              .eq('order_id', orderId);
+        } catch (e) {
+          debugPrint(
+            '⚠️  Warning: Could not update consumption status: $e. '
+            'Inventory deduction completed anyway.',
+          );
+        }
       }
 
       debugPrint('✅ Inventory deduction completed for order: $orderId');
     } catch (e) {
       debugPrint('❌ Inventory deduction error for order $orderId: $e');
       // Mark consumption as failed for rollback — non-blocking
-      try {
-        await _db
-            .from('ingredient_consumption')
-            .update({'transaction_status': 'failed'})
-            .eq('order_id', orderId);
-      } catch (_) {}
+      // ✅ NEW: Skip if order doesn't exist in DB (offline case)
+      if (orderExistsInDb) {
+        try {
+          await _db
+              .from('ingredient_consumption')
+              .update({'transaction_status': 'failed'})
+              .eq('order_id', orderId);
+        } catch (_) {}
+      }
       rethrow;
     }
   }

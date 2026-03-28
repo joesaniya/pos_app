@@ -604,7 +604,11 @@ class Order {
           : orderType.label;
     }
     final table = 'T${tableNumber.toString().padLeft(2, '0')}';
-    if (seatLabel != null && seatLabel!.isNotEmpty) {
+    // ✅ FIX: Only show seat if table is PARTIAL (specific seat assigned)
+    // - Partial table: tableSeatId is set → Show "T01 - Seat A"
+    // - Full table: tableSeatId is null → Show only "T01"
+    final isPartialTable = tableSeatId != null && tableSeatId!.isNotEmpty;
+    if (isPartialTable && seatLabel != null && seatLabel!.isNotEmpty) {
       return '$table - Seat ${seatLabel!}';
     }
     return table;

@@ -3,6 +3,7 @@
 // Completed orders show "View Bill" button.
 
 import 'package:flutter/material.dart';
+import 'package:pos_app/screens/new_orders_work.dart';
 import 'package:pos_app/screens/orders_bill_preview_screen.dart';
 import 'package:pos_app/screens/sheet/payment_sheet.dart';
 import 'package:provider/provider.dart';
@@ -959,7 +960,15 @@ class _OrderMeta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasTable = order.tableNumber != null && order.tableNumber! > 0;
-    final hasSeat = order.seatLabel != null && order.seatLabel!.isNotEmpty;
+    // ✅ FIX: Only show seat if table is PARTIAL (specific seat assigned)
+    // - Partial table: tableSeatId is set (some seats booked, not full) → Show seat
+    // - Full table: tableSeatId is null/empty (entire table booked) → No seat shown
+    final isPartialTable =
+        order.tableSeatId != null && order.tableSeatId!.isNotEmpty;
+    final hasSeat =
+        isPartialTable &&
+        order.seatLabel != null &&
+        order.seatLabel!.isNotEmpty;
     final hasCustomer =
         order.customerName != null && order.customerName!.isNotEmpty;
 
@@ -999,6 +1008,7 @@ class _OrderMeta extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    // ✅ Only show seat for PARTIAL tables
                     if (hasSeat) ...[
                       const Text(
                         ' - ',

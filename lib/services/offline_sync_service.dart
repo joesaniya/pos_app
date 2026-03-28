@@ -271,37 +271,26 @@ class OfflineSyncService {
             error.toLowerCase().contains('duplicate key value');
 
         if (isSeatConflict && entityType == EntityType.order) {
-          log('[SyncService] ⚠ Gave up on conflicting order sync: $error');
-          await _db.markSynced(queueId);
+          log(
+            '[SyncService] ⚠ Seat conflict detected during order sync: $error',
+          );
 
-          try {
-            final localId = rawPayload['id'] as String?;
-            if (localId != null) {
-              final cachedOrders = await _db.getEntities(
-                table: LocalDatabase.tOrders,
-                businessId: rawPayload['business_id'] as String,
-              );
-              final localOrder = cachedOrders.firstWhere(
-                (o) => o['id'] == localId,
-                orElse: () => {},
-              );
-              if (localOrder.isNotEmpty) {
-                localOrder['status'] = 'cancelled';
-                localOrder['notes'] =
-                    'Auto-cancelled due to duplicate active seat order conflict';
-                await _db.upsertEntity(
-                  table: LocalDatabase.tOrders,
-                  id: localId,
-                  businessId: rawPayload['business_id'] as String,
-                  data: localOrder,
-                  syncStatus: LocalDatabase.syncSynced,
-                  action: LocalDatabase.actionUpdate,
-                );
-              }
-            }
-          } catch (_) {}
-
-          continue;
+          // ✅ NEW: Only auto-handle if this was a CREATE action
+          // For CREATE, the pre-sync merge should have prevented this, but if we still
+          // get here, it means items were added to an existing active order (success case)
+          if (action == LocalDatabase.actionCreate) {
+            log(
+              '[SyncService] ℹ Marking conflicting CREATE as synced '
+              '(items likely merged into existing active order)',
+            );
+            await _db.markSynced(queueId);
+            continue;
+          } else {
+            // ❌ For UPDATE/DELETE actions, this is a real error - retry
+            log(
+              '[SyncService] ❌ Seat conflict on $action action (not auto-recoverable)',
+            );
+          }
         }
 
         final backoffSeconds = _backoff(attempts);
@@ -390,6 +379,85 @@ class OfflineSyncService {
             .eq('id', id)
             .maybeSingle();
         if (existing != null) return;
+
+        // ✅ NEW: Before inserting, check if an active order exists for this seat
+        // If yes, merge items into that order instead of creating duplicate
+        // ⚠️ IMPORTANT: Check by SEAT, not just table (uq_active_seat_order is per-seat)
+        final tableId = clean['table_id'] as String?;
+        final seatId = clean['table_seat_id'] as String?;
+        final status = clean['status'] as String?;
+
+        if (status == 'active' && tableId != null && tableId.isNotEmpty) {
+          // Query for any active order on this table (both seat and whole-table orders)
+          var query = _sb
+              .from('orders')
+              .select('id, table_seat_id')
+              .eq('table_id', tableId) // ✅ tableId is guaranteed non-null now
+              .eq('status', 'active')
+              .eq('business_id', clean['business_id'] as String);
+
+          final activeOrders = await query;
+
+          // Find matching order based on seat
+          Map<String, dynamic>? matchingOrder;
+          final ordersList =
+              (activeOrders as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+              [];
+          if (ordersList.isNotEmpty) {
+            if (seatId != null && seatId.isNotEmpty) {
+              // Looking for seat-specific order
+              try {
+                matchingOrder = ordersList.firstWhere(
+                  (order) => order['table_seat_id'] == seatId,
+                );
+              } catch (_) {
+                matchingOrder = null;
+              }
+              log(
+                '[SyncService] 🔍 Checking for active order on SEAT: $seatId',
+              );
+            } else {
+              // Looking for whole-table order (table_seat_id is null)
+              try {
+                matchingOrder = ordersList.firstWhere(
+                  (order) => order['table_seat_id'] == null,
+                );
+              } catch (_) {
+                matchingOrder = null;
+              }
+              log(
+                '[SyncService] 🔍 Checking for active WHOLE-TABLE order on TABLE: $tableId',
+              );
+            }
+          }
+
+          if (matchingOrder != null && matchingOrder['id'] != id) {
+            // ✅ Order exists for this seat/table - merge items into it
+            final existingOrderId =
+                matchingOrder['id']
+                    as String; // ✅ Extract ID to avoid null checks in closure
+            log(
+              '[SyncService] ℹ Merging offline order items into existing order $existingOrderId',
+            );
+            final items =
+                (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+            if (items.isNotEmpty) {
+              final cleanItems = items
+                  .map(
+                    (item) => {
+                      ..._cleanPayload(item),
+                      'order_id':
+                          existingOrderId, // ✅ Use extracted ID (non-null)
+                    },
+                  )
+                  .toList();
+              await _sb.from('order_items').insert(cleanItems);
+            }
+            return; // Mark as synced (merged into existing order)
+          }
+        }
+
+        // ✅ No conflict - proceed with normal insert
         final orderData = Map<String, dynamic>.from(clean)..remove('items');
         await _sb.from('orders').insert(orderData);
         final items = (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];

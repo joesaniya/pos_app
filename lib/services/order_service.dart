@@ -269,16 +269,22 @@ class OrdersService {
     }
 
     // ── SEAT LABEL LOOKUP ───────────────────────────────────────────────────
-    String? seatLabel;
-    if (tableSeatId != null && tableSeatId.isNotEmpty) {
+    // ✅ FIX: Use provided seatLabel if available, otherwise look up from table_seats
+    var resolvedSeatLabel = seatLabel; // Use provided value first
+    if ((resolvedSeatLabel == null || resolvedSeatLabel.isEmpty) &&
+        tableSeatId != null &&
+        tableSeatId.isNotEmpty) {
       try {
         final seatRow = await _db
             .from('table_seats')
             .select('seat_label')
             .eq('id', tableSeatId)
             .maybeSingle();
-        seatLabel = seatRow?['seat_label'] as String?;
-      } catch (_) {}
+        resolvedSeatLabel = seatRow?['seat_label'] as String?;
+        debugPrint('✅ Fetched seat_label for $tableSeatId: $resolvedSeatLabel');
+      } catch (e) {
+        debugPrint('⚠️ Failed to fetch seat_label: $e');
+      }
     }
 
     // ── GET CURRENT SESSION ID ──────────────────────────────────────────────
@@ -314,7 +320,7 @@ class OrdersService {
               'table_id': tableId,
               'table_number': tableNumber,
               'table_seat_id': tableSeatId,
-              'seat_label': seatLabel,
+              'seat_label': resolvedSeatLabel, // ✅ Use resolved seat label
               'session_id': sessionId,
               'customer_name': customerName,
               'customer_phone': customerPhone,
@@ -434,7 +440,27 @@ class OrdersService {
         .from('vw_orders_with_items')
         .select()
         .eq('id', orderId)
-        .single();
+        .maybeSingle();
+
+    if (full == null) {
+      // ❌ Order not in view after creation - likely timing issue
+      debugPrint(
+        '⚠️  Order $orderId not found in view immediately after creation. '
+        'View might need refresh. Retrying from orders table...',
+      );
+      final fallback = await _db
+          .from('orders')
+          .select('*, order_items(*)')
+          .eq('id', orderId)
+          .maybeSingle();
+      if (fallback == null) {
+        throw Exception(
+          'Order creation query failed - order not found after INSERT',
+        );
+      }
+      final order = Order.fromJson(fallback as Map<String, dynamic>);
+      return order;
+    }
 
     final order = Order.fromJson(full as Map<String, dynamic>);
 
@@ -581,11 +607,35 @@ class OrdersService {
 
     await _db.from('orders').update(updateMap).eq('id', orderId);
 
+    // ✅ FIX: Use maybeSingle() instead of single() to handle PGRST116
+    // (order might not exist in view, be soft-deleted, or view might exclude cancelled)
     final data = await _db
         .from('vw_orders_with_items')
         .select()
         .eq('id', orderId)
-        .single();
+        .maybeSingle();
+
+    if (data == null) {
+      // Order not in view - could be cancelled/deleted. Fetch directly from orders table
+      debugPrint(
+        '⚠️  Order $orderId not in view after update. Fetching from orders table directly.',
+      );
+      try {
+        // ✅ Include order_items in fallback query to match view structure
+        final directData = await _db
+            .from('orders')
+            .select('*, order_items(*)')
+            .eq('id', orderId)
+            .maybeSingle();
+        if (directData != null) {
+          return Order.fromJson(directData as Map<String, dynamic>);
+        }
+      } catch (_) {}
+      throw Exception(
+        'Order $orderId not found after update (possible deletion or soft-delete)',
+      );
+    }
+
     return Order.fromJson(data as Map<String, dynamic>);
   }
 
@@ -628,11 +678,38 @@ class OrdersService {
 
     await _db.from('orders').update(updateMap).eq('id', orderId);
 
+    // ✅ FIX: Use maybeSingle() instead of single() to handle PGRST116
+    // (order might not exist in view, be soft-deleted, or view might exclude cancelled)
     final data = await _db
         .from('vw_orders_with_items')
         .select()
         .eq('id', orderId)
-        .single();
+        .maybeSingle();
+
+    if (data == null) {
+      // Order not in view - could be cancelled/deleted. Fetch directly from orders table
+      debugPrint(
+        '⚠️  Order $orderId not in view after status update to ${newStatus.value}. '
+        'Fetching from orders table directly.',
+      );
+      try {
+        // ✅ Include order_items in fallback query to match view structure
+        final directData = await _db
+            .from('orders')
+            .select('*, order_items(*)')
+            .eq('id', orderId)
+            .maybeSingle();
+        if (directData != null) {
+          return Order.fromJson(directData as Map<String, dynamic>);
+        }
+      } catch (e) {
+        debugPrint('❌ Fallback orders table query failed: $e');
+      }
+      throw Exception(
+        'Order $orderId not found after status update (possible deletion or soft-delete)',
+      );
+    }
+
     return Order.fromJson(data as Map<String, dynamic>);
   }
 

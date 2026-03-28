@@ -39,6 +39,18 @@ class _C {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  WORKFLOW STEPS — STRICT SEQUENTIAL ORDER (TABLE-FIRST DESIGN)
+// ══════════════════════════════════════════════════════════════
+enum OrderWorkflowStep {
+  tableSelection, // Step 1: Select table (mandatory for dine-in, enforced entry point)
+  seatConfirmation, // Step 2: Auto-select seats based on table occupancy & confirm
+  menuSelection, // Step 3: Build cart from menu (only after table/seat confirmation)
+  deliveryTiming, // Step 4: Select delivery/order timing
+  orderPreview, // Step 5: Preview order with table, items, customer details
+  orderPlacement, // Step 6: Place/process order
+}
+
+// ══════════════════════════════════════════════════════════════
 //  NEW ORDER SCREEN
 // ══════════════════════════════════════════════════════════════
 class NewOrderScreen extends StatefulWidget {
@@ -56,6 +68,9 @@ class NewOrderScreen extends StatefulWidget {
 }
 
 class _NewOrderScreenState extends State<NewOrderScreen> {
+  // ── Workflow control ──────────────────────────────────────
+  OrderWorkflowStep _currentStep = OrderWorkflowStep.tableSelection;
+
   // ── User context (from Firebase) ──────────────────────────
   String _businessId = '';
   String _businessName = '';
@@ -88,6 +103,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   String _searchQuery = '';
   bool _showCart = false;
   bool _placing = false;
+
+  // ── Seat & Delivery Selection ─────────────────────────────
+  bool _tableAutoSelectedSeats = false;
+  String? _selectedDeliveryTiming;
 
   // ── Computed ──────────────────────────────────────────────
   List<CartItem> get cartItems => _cart.values.toList();
@@ -128,6 +147,12 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     super.initState();
     _selectedTableId = widget.preselectedTableId;
     _selectedTableNumber = widget.preselectedTableNumber;
+
+    // If table is pre-selected, move to seat confirmation step
+    if (_selectedTableId != null) {
+      _currentStep = OrderWorkflowStep.seatConfirmation;
+    }
+
     _setupConnectivityListener();
     _load();
   }
@@ -770,6 +795,12 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
   // ══════════════════════════════════════════════════════════
 
+
+
+  // ══════════════════════════════════════════════════════════
+  //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
+  // ══════════════════════════════════════════════════════════
+
   Future<void> _placeOrder() async {
     if (_cart.isEmpty) {
       _snack('🛒 Add items to cart first');
@@ -777,8 +808,6 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     }
     if (_orderType == OrderType.dineIn && _selectedTableId == null) {
       _snack('📍 Please select a table before placing order');
-      // Show table selection modal
-      _showTableSelectionModal();
       return;
     }
 
@@ -991,86 +1020,982 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  BUILD
+  //  BUILD — MAIN ENTRY POINT — ENFORCES WORKFLOW SEQUENCE
   // ══════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _C.bg,
-      body: SafeArea(
+    return WillPopScope(
+      onWillPop: () async {
+        // Only allow back if at first step (table selection)
+        if (_currentStep == OrderWorkflowStep.tableSelection) {
+          return true; // Allow exit
+        }
+        // Otherwise, go back one step
+        _stepBack();
+        return false;
+      },
+      child: Scaffold(
+        backgroundColor: _C.bg,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // ── Header with back button and cart toggle ──────────────────
+              _buildHeader(),
+
+              // ── Main content area — changes based on workflow step ────────
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: _buildStepContent(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Control: Back button behavior based on workflow step
+  void _stepBack() {
+    setState(() {
+      switch (_currentStep) {
+        case OrderWorkflowStep.seatConfirmation:
+          // Go back to table selection
+          _currentStep = OrderWorkflowStep.tableSelection;
+          _selectedTableId = null;
+          _selectedTableNumber = null;
+          _selectedSeatId = null;
+          _tableAutoSelectedSeats = false;
+          break;
+        case OrderWorkflowStep.menuSelection:
+          // Go back to seat confirmation
+          _currentStep = OrderWorkflowStep.seatConfirmation;
+          _cart.clear();
+          break;
+        case OrderWorkflowStep.deliveryTiming:
+          // Go back to menu selection
+          _currentStep = OrderWorkflowStep.menuSelection;
+          _showCart = false;
+          break;
+        case OrderWorkflowStep.orderPreview:
+          // Go back to delivery timing
+          _currentStep = OrderWorkflowStep.deliveryTiming;
+          _showCart = false;
+          break;
+        case OrderWorkflowStep.orderPlacement:
+          // Go back to order preview
+          _currentStep = OrderWorkflowStep.orderPreview;
+          break;
+        case OrderWorkflowStep.tableSelection:
+          // Already at first step — exit handled by WillPopScope
+          break;
+      }
+    });
+  }
+
+  /// Build content based on current workflow step
+  Widget _buildStepContent() {
+    switch (_currentStep) {
+      case OrderWorkflowStep.tableSelection:
+        return _buildTableSelectionStep();
+
+      case OrderWorkflowStep.seatConfirmation:
+        return _buildSeatConfirmationStep();
+
+      case OrderWorkflowStep.menuSelection:
+        return _buildMenuSelectionStep();
+
+      case OrderWorkflowStep.deliveryTiming:
+        return _buildDeliveryTimingStep();
+
+      case OrderWorkflowStep.orderPreview:
+        return _buildOrderPreviewStep();
+
+      case OrderWorkflowStep.orderPlacement:
+        // This is usually not shown as a separate screen — orders are placed
+        // and flow exits. But keep it for safety.
+        return const Center(
+          child: CircularProgressIndicator(color: _C.primary),
+        );
+    }
+  }
+
+  /// STEP 1: Table Selection (mandatory entry point, no menu shown)
+  Widget _buildTableSelectionStep() {
+    return Column(
+      children: [
+        Container(
+          color: _C.surface,
+          padding: const EdgeInsets.all(16),
+          child: const Row(
+            children: [
+              Text(
+                '📍 Step 1: Select Table',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              Spacer(),
+              Chip(
+                label: Text('Mandatory', style: TextStyle(fontSize: 11)),
+                backgroundColor: Color(0xFFDC2626),
+                labelStyle: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _buildTableSelectionFooter(),
+        ),
+      ],
+    );
+  }
+
+  /// STEP 2: Seat Confirmation (after table auto-selection)
+  Widget _buildSeatConfirmationStep() {
+    if (_selectedTableId == null) {
+      return Center(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _buildHeader(),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: _showCart
-                    ? _CartView(
-                        key: const ValueKey('cart'),
-                        cartItems: cartItems,
-                        orderType: _orderType,
-                        tables: _tables,
-                        selectedTableId: _selectedTableId,
-                        selectedSeatId: _selectedSeatId,
-                        customerCtrl: _customerCtrl,
-                        phoneCtrl: _phoneCtrl,
-                        noteCtrl: _noteCtrl,
-                        cartSubtotal: cartSubtotal,
-                        cartTax: cartTax,
-                        cartTotal: cartTotal,
-                        placing: _placing,
-                        onTypeChanged: (t) {
-                          setState(() {
-                            _orderType = t;
-                            if (t != OrderType.dineIn) {
-                              _selectedTableId = null;
-                              _selectedSeatId = null;
-                              _selectedTableNumber = null;
-                            }
-                          });
-                          // Show table selection modal for dine-in
-                          if (t == OrderType.dineIn) {
-                            Future.delayed(
-                              const Duration(milliseconds: 300),
-                              () => _showTableSelectionModal(),
-                            );
-                          }
-                        },
-                        onTableSelected: (id, num) => setState(() {
-                          if (_selectedTableId != id) {
-                            _selectedSeatId = null;
-                          }
-                          _selectedTableId = id;
-                          _selectedTableNumber = num;
-                        }),
-                        onSeatSelected: (id) => setState(() {
-                          _selectedSeatId = id;
-                        }),
-                        onAdd: _addItem,
-                        onRemove: (id) => _removeItem(id),
-                        onPlaceOrder: _placeOrder,
-                      )
-                    : _MenuView(
-                        key: const ValueKey('menu'),
-                        categories: _categories,
-                        items: filteredItems,
-                        selectedCategory: _selectedCategory,
-                        searchCtrl: _searchCtrl,
-                        cart: _cart,
-                        loading: _menuLoading,
-                        onCategoryChanged: (c) =>
-                            setState(() => _selectedCategory = c),
-                        onSearchChanged: (q) =>
-                            setState(() => _searchQuery = q),
-                        onAdd: _addItem,
-                        onRemove: (id) => _removeItem(id),
-                      ),
+            const Icon(Icons.error_outline, size: 52, color: _C.textMute),
+            const SizedBox(height: 16),
+            const Text(
+              'Table not selected',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _C.textPri),
+            ),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _stepBack(),
+              child: const Text(
+                'Go back and select a table',
+                style: TextStyle(fontSize: 13, color: _C.primary),
               ),
             ),
           ],
         ),
+      );
+    }
+
+    final table = _tables.firstWhere(
+      (t) => t['id'] == _selectedTableId,
+      orElse: () => {},
+    );
+    final tableNumber = _selectedTableNumber ?? 0;
+    final seats = (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final occupiedSeats = seats.where((s) => s['status'] == 'occupied').toList();
+    final isFullyOccupied = seats.isNotEmpty && occupiedSeats.length == seats.length;
+    final isPartiallyOccupied = occupiedSeats.isNotEmpty && occupiedSeats.length < seats.length;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _C.primaryL,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _C.primary, width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    '🪑',
+                    style: TextStyle(fontSize: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Step 2: Confirm Seat Selection',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _C.textPri,
+                        ),
+                      ),
+                      Text(
+                        'Table T$tableNumber',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: _C.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (isFullyOccupied)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, color: _C.primary, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Table is fully occupied. New order will be for the entire table.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _C.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (isPartiallyOccupied)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, color: _C.partial, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Table is partially occupied. Auto-selected first occupied seat.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _C.partial,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, color: _C.available, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Table is available. You can book the entire table or individual seats.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _C.available,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Seat Selection
+        if (seats.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _C.primaryL,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _C.primary.withOpacity(0.3)),
+            ),
+            child: const Row(
+              children: [
+                Text('ℹ️', style: TextStyle(fontSize: 16)),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No individual seats defined. Entire table is reserved for this order.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _C.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Selected Seat(s)',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  if (_selectedSeatId == null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _C.primary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _C.primary),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.white, size: 16),
+                          SizedBox(width: 6),
+                          Text(
+                            'Whole Table',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ...seats.map((seat) {
+                      final seatId = seat['id'] as String;
+                      final seatLabel = seat['seat_label'] as String? ?? 'Unknown';
+                      final seatStatus = seat['status'] as String? ?? 'available';
+                      final isSelected = _selectedSeatId == seatId;
+
+                      return GestureDetector(
+                        onTap: () => setState(() => _selectedSeatId = seatId),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSelected ? _C.primary : _C.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? _C.primary : _C.border,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isSelected)
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 6),
+                                  child: Icon(Icons.check_circle, color: Colors.white, size: 16),
+                                ),
+                              Text(
+                                'Seat $seatLabel',
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : _C.textPri,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                seatStatus == 'occupied' ? '🍽️' : '✅',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                ],
+              ),
+            ],
+          ),
+        const SizedBox(height: 20),
+
+        // Edit Selection Option
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _C.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _C.border),
+          ),
+          child: GestureDetector(
+            onTap: () => setState(() => _currentStep = OrderWorkflowStep.tableSelection),
+            child: const Row(
+              children: [
+                Icon(Icons.edit_outlined, color: _C.textSec, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'Change table selection',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _C.textSec,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Confirm Button
+        GestureDetector(
+          onTap: _proceedToMenuSelection,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: _C.primary,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Confirm & Browse Menu',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// STEP 4: Delivery/Order Timing Selection
+  Widget _buildDeliveryTimingStep() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        Container(
+          color: _C.surface,
+          padding: const EdgeInsets.all(16),
+          child: const Row(
+            children: [
+              Text(
+                '⏰ Step 4: Order Timing',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              Spacer(),
+              Chip(
+                label: Text('Select', style: TextStyle(fontSize: 11)),
+                backgroundColor: Color(0xFF059669),
+                labelStyle: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'When should this order be prepared?',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: _C.textPri,
+          ),
+        ),
+        const SizedBox(height: 14),
+        GestureDetector(
+          onTap: () => setState(() => _selectedDeliveryTiming = 'now'),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _selectedDeliveryTiming == 'now' ? _C.primaryL : _C.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.border,
+                width: _selectedDeliveryTiming == 'now' ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.flash_on,
+                  color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textSec,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Prepare Now',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textPri,
+                        ),
+                      ),
+                      Text(
+                        'Immediate preparation',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textSec,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_selectedDeliveryTiming == 'now')
+                  Icon(
+                    Icons.check_circle,
+                    color: _C.primary,
+                    size: 20,
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Proceed to Preview Button
+        GestureDetector(
+          onTap: () {
+            if (_selectedDeliveryTiming == null) {
+              _snack('⏰ Please select order timing');
+              return;
+            }
+            _proceedToOrderPreview();
+          },
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: _selectedDeliveryTiming != null ? _C.primary : _C.textMute.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  color: _selectedDeliveryTiming != null ? Colors.white : _C.textMute,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Review Order',
+                  style: TextStyle(
+                    color: _selectedDeliveryTiming != null ? Colors.white : _C.textMute,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Table selection footer — shows available tables
+  Widget _buildTableSelectionFooter() {
+    return Container(
+      color: _C.surface,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Divider(color: _C.border),
+          const SizedBox(height: 12),
+          const Text(
+            'Select a Table to Begin',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: _C.textPri,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Choose a table to start a new order',
+            style: TextStyle(fontSize: 13, color: _C.textSec),
+          ),
+          const SizedBox(height: 16),
+          if (_tables.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFDC2626).withOpacity(0.2),
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Text('⚠️', style: TextStyle(fontSize: 16)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No tables available',
+                      style: TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _tables.map((t) {
+                  final tid = t['id'] as String;
+                  final num = t['table_number'] as int;
+                  final cap = t['capacity'] as int;
+                  final status = t['status'] as String? ?? 'available';
+                  final canSelect = _tableIsSelectable(status);
+                  final sColor = _tableStatusColor(status);
+                  final isSelected = _selectedTableId == tid;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: GestureDetector(
+                      onTap: canSelect ? () => _selectTable(tid, num) : null,
+                      child: Container(
+                        width: 100,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: !canSelect
+                              ? const Color(0xFFF5F5F5)
+                              : isSelected
+                              ? _C.primaryL
+                              : sColor.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: !canSelect
+                                ? const Color(0xFFDDDDDD)
+                                : isSelected
+                                ? _C.primary
+                                : sColor.withOpacity(0.5),
+                            width: isSelected ? 2.5 : 1.5,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _tableStatusEmoji(status),
+                              style: const TextStyle(fontSize: 20),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'T$num',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: !canSelect
+                                    ? _C.textMute
+                                    : isSelected
+                                    ? _C.primary
+                                    : sColor,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$cap seats',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: !canSelect ? _C.textMute : sColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          const SizedBox(height: 16),
+          if (_selectedTableId != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: _C.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: GestureDetector(
+                onTap: () => _proceedToSeatConfirmation(),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Confirm & Select Seats',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: _C.textMute.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Select a table to continue',
+                    style: TextStyle(
+                      color: _C.textMute,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
+    );
+  }
+
+  /// Select table and enable confirmation
+  void _selectTable(String tableId, int tableNumber) {
+    setState(() {
+      _selectedTableId = tableId;
+      _selectedTableNumber = tableNumber;
+      _selectedSeatId = null;
+    });
+  }
+
+  /// Proceed from table selection to seat confirmation
+  void _proceedToSeatConfirmation() {
+    setState(() {
+      _currentStep = OrderWorkflowStep.seatConfirmation;
+      _showCart = false;
+      // Auto-select seats based on table occupancy
+      _autoSelectSeatsForTable();
+    });
+  }
+
+  /// Auto-select seats based on table occupancy status
+  void _autoSelectSeatsForTable() {
+    if (_selectedTableId == null) return;
+
+    final table = _tables.firstWhere(
+      (t) => t['id'] == _selectedTableId,
+      orElse: () => {},
+    );
+
+    if (table.isEmpty) return;
+
+    final seats = (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+    if (seats.isEmpty) {
+      // No seats defined — set to null (whole table)
+      _selectedSeatId = null;
+      _tableAutoSelectedSeats = true;
+      return;
+    }
+
+    // Check occupancy: count occupied seats
+    final occupiedSeats = seats.where((s) => s['status'] == 'occupied').toList();
+    final totalSeats = seats.length;
+    final isFullyOccupied = occupiedSeats.length == totalSeats;
+    final isPartiallyOccupied = occupiedSeats.isNotEmpty && occupiedSeats.length < totalSeats;
+
+    if (isFullyOccupied) {
+      // Fully occupied: entire table is the order destination
+      _selectedSeatId = null;
+      _tableAutoSelectedSeats = true;
+    } else if (isPartiallyOccupied) {
+      // Partially occupied: auto-select first occupied seat for placing additional order
+      final firstOccupiedSeat = occupiedSeats.first;
+      _selectedSeatId = firstOccupiedSeat['id'] as String?;
+      _tableAutoSelectedSeats = true;
+    } else {
+      // Available table: no auto-selection needed
+      _selectedSeatId = null;
+      _tableAutoSelectedSeats = false;
+    }
+  }
+
+  /// Proceed from seat confirmation to menu selection
+  void _proceedToMenuSelection() {
+    setState(() {
+      _currentStep = OrderWorkflowStep.menuSelection;
+      _showCart = false;
+    });
+  }
+
+  /// Proceed from menu selection to delivery timing
+  void _proceedToDeliveryTiming() {
+    if (_cart.isEmpty) {
+      _snack('🛒 Add items to cart first');
+      return;
+    }
+    setState(() {
+      _currentStep = OrderWorkflowStep.deliveryTiming;
+      _showCart = false;
+    });
+  }
+
+  /// Proceed from delivery timing to order preview
+  void _proceedToOrderPreview() {
+    setState(() {
+      _currentStep = OrderWorkflowStep.orderPreview;
+    });
+  }
+
+  /// STEP 2: Menu Selection & Cart Building
+  Widget _buildMenuSelectionStep() {
+    return Column(
+      children: [
+        Container(
+          color: _C.surface,
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Text(
+                '🍽️ Step 3: Browse Menu',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              Spacer(),
+              if (_selectedTableNumber != null)
+                Chip(
+                  label: Text(
+                    'Table T${_selectedTableNumber}${_selectedSeatId != null ? ' • Seat' : ''}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  backgroundColor: _C.primary,
+                  labelStyle: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _showCart
+              ? _CartView(
+                  key: const ValueKey('cart_in_menu_step'),
+                  cartItems: cartItems,
+                  orderType: _orderType,
+                  tables: _tables,
+                  selectedTableId: _selectedTableId,
+                  selectedSeatId: _selectedSeatId,
+                  customerCtrl: _customerCtrl,
+                  phoneCtrl: _phoneCtrl,
+                  noteCtrl: _noteCtrl,
+                  cartSubtotal: cartSubtotal,
+                  cartTax: cartTax,
+                  cartTotal: cartTotal,
+                  placing: _placing,
+                  onTypeChanged: (t) {
+                    setState(() => _orderType = t);
+                  },
+                  onTableSelected: (id, num) => setState(() {
+                    if (_selectedTableId != id) {
+                      _selectedSeatId = null;
+                    }
+                    _selectedTableId = id;
+                    _selectedTableNumber = num;
+                  }),
+                  onSeatSelected: (id) => setState(() {
+                    _selectedSeatId = id;
+                  }),
+                  onAdd: _addItem,
+                  onRemove: (id) => _removeItem(id),
+                  onPlaceOrder: _proceedToDeliveryTiming,
+                  showBackButton: true,
+                  onBack: () => setState(() => _showCart = false),
+                )
+              : _MenuView(
+                  key: const ValueKey('menu_in_menu_step'),
+                  categories: _categories,
+                  items: filteredItems,
+                  selectedCategory: _selectedCategory,
+                  searchCtrl: _searchCtrl,
+                  cart: _cart,
+                  loading: _menuLoading,
+                  onCategoryChanged: (c) =>
+                      setState(() => _selectedCategory = c),
+                  onSearchChanged: (q) => setState(() => _searchQuery = q),
+                  onAdd: _addItem,
+                  onRemove: (id) => _removeItem(id),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// STEP 5: Order Preview with all details
+  Widget _buildOrderPreviewStep() {
+    return _OrderPreviewView(
+      key: const ValueKey('order_preview'),
+      selectedTableId: _selectedTableId,
+      selectedTableNumber: _selectedTableNumber,
+      tables: _tables,
+      cartItems: cartItems,
+      cartSubtotal: cartSubtotal,
+      cartTax: cartTax,
+      cartTotal: cartTotal,
+      orderType: _orderType,
+      customerCtrl: _customerCtrl,
+      phoneCtrl: _phoneCtrl,
+      noteCtrl: _noteCtrl,
+      placing: _placing,
+      onTypeChanged: (t) => setState(() => _orderType = t),
+      onPlaceOrder: _placeOrder,
+      onBack: () =>
+          setState(() => _currentStep = OrderWorkflowStep.deliveryTiming),
     );
   }
 
@@ -1258,6 +2183,7 @@ class _MenuView extends StatelessWidget {
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<Map<String, dynamic>> onAdd;
   final ValueChanged<String> onRemove;
+  final Widget? footerWidget;
 
   const _MenuView({
     Key? key,
@@ -1271,6 +2197,7 @@ class _MenuView extends StatelessWidget {
     required this.onSearchChanged,
     required this.onAdd,
     required this.onRemove,
+    this.footerWidget,
   }) : super(key: key);
 
   @override
@@ -1411,6 +2338,8 @@ class _MenuView extends StatelessWidget {
                   },
                 ),
         ),
+        // ── Footer widget for table selection or other actions ────
+        if (footerWidget != null) footerWidget!,
       ],
     );
   }
@@ -1724,6 +2653,8 @@ class _CartView extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>> onAdd;
   final ValueChanged<String> onRemove;
   final VoidCallback onPlaceOrder;
+  final bool showBackButton;
+  final VoidCallback? onBack;
 
   const _CartView({
     Key? key,
@@ -1745,6 +2676,8 @@ class _CartView extends StatelessWidget {
     required this.onAdd,
     required this.onRemove,
     required this.onPlaceOrder,
+    this.showBackButton = false,
+    this.onBack,
   }) : super(key: key);
 
   @override
@@ -2473,6 +3406,420 @@ class _CartView extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ORDER PREVIEW VIEW — STEP 3 (Final review before placing)
+// ══════════════════════════════════════════════════════════════
+class _OrderPreviewView extends StatelessWidget {
+  final String? selectedTableId;
+  final int? selectedTableNumber;
+  final List<Map<String, dynamic>> tables;
+  final List<CartItem> cartItems;
+  final double cartSubtotal, cartTax, cartTotal;
+  final OrderType orderType;
+  final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
+  final bool placing;
+  final ValueChanged<OrderType> onTypeChanged;
+  final VoidCallback onPlaceOrder;
+  final VoidCallback onBack;
+
+  const _OrderPreviewView({
+    Key? key,
+    required this.selectedTableId,
+    required this.selectedTableNumber,
+    required this.tables,
+    required this.cartItems,
+    required this.cartSubtotal,
+    required this.cartTax,
+    required this.cartTotal,
+    required this.orderType,
+    required this.customerCtrl,
+    required this.phoneCtrl,
+    required this.noteCtrl,
+    required this.placing,
+    required this.onTypeChanged,
+    required this.onPlaceOrder,
+    required this.onBack,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedTable = selectedTableId != null
+        ? tables.firstWhere(
+            (t) => t['id'] == selectedTableId,
+            orElse: () => <String, dynamic>{},
+          )
+        : null;
+
+    return Column(
+      children: [
+        Container(
+          color: _C.surface,
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Text(
+                '✅ Step 3: Confirm Order',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: onBack,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _C.primaryL,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.edit, color: _C.primary, size: 18),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // ── Table Details (if dine-in) ────────────────────────────
+              if (orderType == OrderType.dineIn && selectedTable != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _C.primaryL,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _C.primary, width: 1.5),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('📍', style: TextStyle(fontSize: 20)),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Dine-In Order',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _C.textSec,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Table T${selectedTableNumber} (${selectedTable['capacity']} seats)',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: _C.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // ── Order Type Selection ──────────────────────────────────
+              _SectionLabel('Order Type'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                children: OrderType.values.map((type) {
+                  final isSelected = orderType == type;
+                  return GestureDetector(
+                    onTap: () => onTypeChanged(type),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected ? _C.primary : _C.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected ? _C.primary : _C.border,
+                          width: isSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _orderTypeEmoji(type),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _orderTypeLabel(type),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isSelected ? Colors.white : _C.textPri,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Items Summary ─────────────────────────────────────────
+              _SectionLabel('Order Items (${cartItems.length})'),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _C.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _C.border),
+                ),
+                child: Column(
+                  children: List.generate(cartItems.length, (i) {
+                    final item = cartItems[i];
+                    return Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.itemName,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: _C.textPri,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '₹${item.itemPrice.toStringAsFixed(0)} × ${item.quantity}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: _C.textSec,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              '₹${item.subtotal.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: _C.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (i < cartItems.length - 1)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10),
+                            child: Divider(height: 1, color: _C.border),
+                          ),
+                      ],
+                    );
+                  }),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Customer Details ──────────────────────────────────────
+              _SectionLabel('Customer Details (Optional)'),
+              const SizedBox(height: 10),
+              _Field(
+                label: 'Customer Name',
+                hint: 'Enter name...',
+                ctrl: customerCtrl,
+              ),
+              const SizedBox(height: 12),
+              _Field(
+                label: 'Phone Number',
+                hint: 'Enter phone...',
+                ctrl: phoneCtrl,
+              ),
+              const SizedBox(height: 12),
+              _Field(
+                label: 'Order Notes',
+                hint: 'Special instructions...',
+                ctrl: noteCtrl,
+              ),
+              const SizedBox(height: 24),
+
+              // ── Bill Summary ──────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _C.primaryL,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _C.primary, width: 1),
+                ),
+                child: Column(
+                  children: [
+                    _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
+                    const SizedBox(height: 8),
+                    _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+                    const Divider(color: _C.border, height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Total Payable',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            color: _C.primary,
+                          ),
+                        ),
+                        Text(
+                          '₹${cartTotal.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            color: _C.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // ── Place Order Button ────────────────────────────────────
+              GestureDetector(
+                onTap: placing ? null : onPlaceOrder,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: placing
+                          ? [Colors.grey, Colors.grey.shade400]
+                          : [_C.primary, _C.primaryD],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: placing
+                        ? []
+                        : [
+                            BoxShadow(
+                              color: _C.primary.withOpacity(0.35),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (placing) ...[
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Placing Order...',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ] else ...[
+                        const Icon(
+                          Icons.check_circle,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Confirm & Place Order',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Back Button ──────────────────────────────────────────
+              GestureDetector(
+                onTap: placing ? null : onBack,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _C.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _C.border),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.arrow_back, color: _C.textSec, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Back to Menu',
+                        style: TextStyle(
+                          color: _C.textSec,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _orderTypeEmoji(OrderType type) {
+    switch (type) {
+      case OrderType.dineIn:
+        return '🍽️';
+      case OrderType.delivery:
+        return '🚚';
+      case OrderType.takeaway:
+        return '🛍️';
+    }
+  }
+
+  String _orderTypeLabel(OrderType type) {
+    switch (type) {
+      case OrderType.dineIn:
+        return 'Dine-In';
+      case OrderType.delivery:
+        return 'Delivery';
+      case OrderType.takeaway:
+        return 'Takeaway';
+    }
   }
 }
 

@@ -1,0 +1,5941 @@
+// // lib/screens/orders/new_order_screen.dart
+// // FIXES:
+// // 1. businessId loaded from Firebase Firestore (not SharedPreferences which was always empty)
+// // 2. Memory leak fixed — mounted checks before every setState after async gaps
+// // 3. Removed duplicate commented-out code at bottom
+
+// import 'dart:developer';
+
+// import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+// import 'package:firebase_auth/firebase_auth.dart';
+// import 'package:flutter/material.dart';
+// import 'package:pos_app/models/order_modal.dart';
+// import 'package:pos_app/utils/ist_utils.dart';
+// import 'package:provider/provider.dart';
+// import 'package:supabase_flutter/supabase_flutter.dart';
+// import '../../providers/orders_provider.dart';
+// import '../../providers/inventory_provider.dart';
+// import '../../services/connectivity_service.dart';
+// import '../../database/local_database.dart';
+// import '../../services/inventory_deduction_service.dart';
+// import '../../widgets/stock_validation_dialog.dart';
+
+// class _C {
+//   static const bg = Color(0xFFF6F6FB);
+//   static const surface = Color(0xFFFFFFFF);
+//   static const surfaceAlt = Color(0xFFF2F2F8);
+//   static const border = Color(0xFFEAEAF4);
+//   static const primary = Color(0xFF5A3FD6);
+//   static const primaryL = Color(0xFFEDE9FF);
+//   static const primaryD = Color(0xFF3D2AA0);
+//   static const textPri = Color(0xFF1A1A2E);
+//   static const textSec = Color(0xFF6B6B86);
+//   static const textMute = Color(0xFFAAABBB);
+//   static const occupied = Color(0xFFDC2626);
+//   static const reserved = Color(0xFF7C3AED);
+//   static const available = Color(0xFF059669);
+//   static const cleaning = Color(0xFFD97706);
+//   static const partial = Color(0xFFE8860A);
+// }
+
+// // ══════════════════════════════════════════════════════════════
+// //  NEW ORDER SCREEN
+// // ══════════════════════════════════════════════════════════════
+// class NewOrderScreen extends StatefulWidget {
+//   final String? preselectedTableId;
+//   final int? preselectedTableNumber;
+
+//   const NewOrderScreen({
+//     Key? key,
+//     this.preselectedTableId,
+//     this.preselectedTableNumber,
+//   }) : super(key: key);
+
+//   @override
+//   State<NewOrderScreen> createState() => _NewOrderScreenState();
+// }
+
+// class _NewOrderScreenState extends State<NewOrderScreen> {
+//   // ── User context (from Firebase) ──────────────────────────
+//   String _businessId = '';
+//   String _businessName = '';
+//   String _uid = '';
+//   String _userName = '';
+//   String _userRole = '';
+
+//   // ── Menu & tables ─────────────────────────────────────────
+//   List<Map<String, dynamic>> _categories = [];
+//   List<Map<String, dynamic>> _allMenuItems = [];
+//   List<Map<String, dynamic>> _tables = [];
+//   bool _menuLoading = true;
+//   bool _isOnline = true;
+//   bool _isLoadingOfflineData = false;
+
+//   // ── Cart ──────────────────────────────────────────────────
+//   final Map<String, CartItem> _cart = {};
+
+//   // ── Order options ─────────────────────────────────────────
+//   OrderType _orderType = OrderType.dineIn;
+//   String? _selectedTableId;
+//   int? _selectedTableNumber;
+//   String? _selectedSeatId;
+//   final _customerCtrl = TextEditingController();
+//   final _phoneCtrl = TextEditingController();
+//   final _noteCtrl = TextEditingController();
+//   final _searchCtrl = TextEditingController();
+
+//   String _selectedCategory = 'All';
+//   String _searchQuery = '';
+//   bool _showCart = false;
+//   bool _placing = false;
+
+//   // ── Computed ──────────────────────────────────────────────
+//   List<CartItem> get cartItems => _cart.values.toList();
+//   double get cartSubtotal => cartItems.fold(0.0, (s, i) => s + i.subtotal);
+//   double get cartTax => cartSubtotal * 0.05;
+//   double get cartTotal => cartSubtotal + cartTax;
+//   int get cartCount => cartItems.fold(0, (s, i) => s + i.quantity);
+
+//   List<Map<String, dynamic>> get filteredItems {
+//     List<Map<String, dynamic>> items = _selectedCategory == 'All'
+//         ? _allMenuItems
+//         : _allMenuItems
+//               .where((i) => i['category_name'] == _selectedCategory)
+//               .toList();
+
+//     if (_searchQuery.isNotEmpty) {
+//       final q = _searchQuery.toLowerCase();
+//       items = items
+//           .where((i) => (i['name'] as String).toLowerCase().contains(q))
+//           .toList();
+//     }
+
+//     items.sort((a, b) {
+//       final aA = a['is_available'] as bool? ?? true;
+//       final bA = b['is_available'] as bool? ?? true;
+//       if (aA == bA) return 0;
+//       return aA ? -1 : 1;
+//     });
+//     return items;
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  LIFECYCLE
+//   // ══════════════════════════════════════════════════════════
+
+//   @override
+//   void initState() {
+//     super.initState();
+//     _selectedTableId = widget.preselectedTableId;
+//     _selectedTableNumber = widget.preselectedTableNumber;
+//     _setupConnectivityListener();
+//     _load();
+//   }
+
+//   void _setupConnectivityListener() {
+//     final connectivity = ConnectivityService.instance;
+//     _isOnline = connectivity.isOnline;
+
+//     connectivity.onStatusChange.listen((status) {
+//       if (!mounted) return;
+//       final wasOffline = !_isOnline;
+//       _isOnline = status == NetworkStatus.online;
+
+//       if (wasOffline && _isOnline) {
+//         // Just came online — reload fresh data from Supabase
+//         debugPrint('🛒 Came online, refreshing menu and tables');
+//         if (mounted) {
+//           setState(() => _menuLoading = true);
+//           Future.wait([_loadMenu(), _loadTables()]);
+//         }
+//       }
+
+//       if (mounted) setState(() {});
+//     });
+//   }
+
+//   @override
+//   void dispose() {
+//     _customerCtrl.dispose();
+//     _phoneCtrl.dispose();
+//     _noteCtrl.dispose();
+//     _searchCtrl.dispose();
+//     super.dispose();
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  LOAD — Firebase first, then Supabase
+//   // ══════════════════════════════════════════════════════════
+
+//   Future<void> _load() async {
+//     // Step 1: Load user profile from Firebase Firestore
+//     await _loadUserFromFirestore();
+
+//     // Step 2: Guard — don't fetch Supabase data if widget gone
+//     if (!mounted) return;
+
+//     if (_businessId.isEmpty) {
+//       debugPrint('🛒 NewOrderScreen: businessId empty after Firestore load');
+//       if (mounted) setState(() => _menuLoading = false);
+//       return;
+//     }
+
+//     // Step 3: Load menu + tables in parallel
+//     await Future.wait([_loadMenu(), _loadTables()]);
+//   }
+
+//   /// Load businessId, name, role from Firestore 'users' collection
+//   Future<void> _loadUserFromFirestore() async {
+//     try {
+//       final firebaseUser = FirebaseAuth.instance.currentUser;
+//       if (firebaseUser == null) {
+//         debugPrint('🛒 No Firebase user logged in');
+//         return;
+//       }
+
+//       _uid = firebaseUser.uid;
+//       debugPrint('🛒 _loadUserFromFirestore: uid=$_uid');
+
+//       final doc = await FirebaseFirestore.instance
+//           .collection('users')
+//           .doc(_uid)
+//           .get();
+
+//       if (!doc.exists) {
+//         debugPrint('🛒 No Firestore profile for uid=$_uid');
+//         return;
+//       }
+
+//       final data = doc.data()!;
+//       // Don't call setState here — just update fields, widget not built yet
+//       _businessId = data['businessId'] as String? ?? '';
+//       _businessName = data['businessName'] as String? ?? '';
+//       _userName = data['name'] as String? ?? '';
+//       _userRole = data['role'] as String? ?? 'staff';
+
+//       debugPrint(
+//         '🛒 Firestore loaded: biz=$_businessId name=$_userName role=$_userRole',
+//       );
+//     } catch (e) {
+//       debugPrint('🛒 _loadUserFromFirestore ERROR: $e');
+//     }
+//   }
+
+//   Future<void> _loadMenu() async {
+//     if (_businessId.isEmpty) return;
+
+//     if (_isOnline) {
+//       // ── ONLINE: Load from Supabase ────────────────────────────────────────
+//       try {
+//         final cats = await Supabase.instance.client
+//             .from('menu_categories')
+//             .select('id, name, icon, color_hex')
+//             .eq('business_id', _businessId)
+//             .eq('is_active', true)
+//             .order('display_order');
+
+//         final items = await Supabase.instance.client
+//             .from('menu_items')
+//             .select(
+//               'id, name, description, price, discount_price, is_veg, is_available, '
+//               'is_featured, is_best_seller, preparation_time, category_id, '
+//               'menu_categories!inner(name, icon, color_hex)',
+//             )
+//             .eq('business_id', _businessId)
+//             .order('sort_order');
+
+//         // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+//         if (!mounted) return;
+
+//         // ── CACHE TO LOCAL DATABASE for offline use ────────────────────────────
+//         final processedItems = (items as List).map((item) {
+//           final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
+//           return {
+//             ...Map<String, dynamic>.from(item as Map),
+//             'category_name': cat['name'] ?? '',
+//             'category_icon': cat['icon'] ?? '🍽️',
+//             'category_color': cat['color_hex'] ?? '#D4673A',
+//           };
+//         }).toList();
+
+//         // Save to local DB in background (don't wait for it)
+//         _cacheMenuItemsLocally(processedItems);
+
+//         setState(() {
+//           _categories = (cats as List).cast<Map<String, dynamic>>();
+//           _allMenuItems = processedItems;
+//           _menuLoading = false;
+//         });
+//       } catch (e) {
+//         debugPrint('🛒 _loadMenu ERROR (Online): $e');
+//         // Fall back to offline
+//         await _loadMenuOffline();
+//       }
+//     } else {
+//       // ── OFFLINE: Load from LocalDatabase ──────────────────────────────────
+//       await _loadMenuOffline();
+//     }
+//   }
+
+//   /// Cache menu items to local database for offline use
+//   Future<void> _cacheMenuItemsLocally(List<Map<String, dynamic>> items) async {
+//     try {
+//       final localDb = LocalDatabase.instance;
+//       if (!localDb.isInitialized) await localDb.init();
+
+//       for (final item in items) {
+//         final itemId = item['id'] as String? ?? '';
+//         if (itemId.isEmpty) continue;
+
+//         // Store the full item data with category info for offline access
+//         await localDb.upsertEntity(
+//           table: LocalDatabase.tMenuItems,
+//           id: itemId,
+//           businessId: _businessId,
+//           data: {
+//             'id': item['id'],
+//             'name': item['name'],
+//             'description': item['description'],
+//             'price': item['price'],
+//             'discount_price': item['discount_price'],
+//             'is_veg': item['is_veg'],
+//             'is_available': item['is_available'],
+//             'is_featured': item['is_featured'],
+//             'is_best_seller': item['is_best_seller'],
+//             'preparation_time': item['preparation_time'],
+//             'category_id': item['category_id'],
+//             'category_name': item['category_name'],
+//             'category_icon': item['category_icon'],
+//             'category_color': item['category_color'],
+//           },
+//           syncStatus: LocalDatabase.syncSynced,
+//           action: LocalDatabase.actionUpdate,
+//         );
+//       }
+//       debugPrint(
+//         '🛒 Cached ${items.length} menu items to local DB for offline use',
+//       );
+//     } catch (e) {
+//       debugPrint('🛒 _cacheMenuItemsLocally ERROR: $e');
+//     }
+//   }
+
+//   Future<void> _loadMenuOffline() async {
+//     if (_businessId.isEmpty) return;
+//     try {
+//       if (!mounted) setState(() => _isLoadingOfflineData = true);
+
+//       final localDb = LocalDatabase.instance;
+//       if (!localDb.isInitialized) await localDb.init();
+
+//       // Load menu items from local database
+//       final localItems = await localDb.getEntities(
+//         table: LocalDatabase.tMenuItems,
+//         businessId: _businessId,
+//         whereExtra: 'action != ?',
+//         whereExtraArgs: [LocalDatabase.actionDelete],
+//       );
+
+//       if (!mounted) return;
+
+//       if (localItems.isEmpty) {
+//         // No cached data available
+//         debugPrint('⚠️ No cached menu items found for offline mode');
+//         setState(() {
+//           _categories = [];
+//           _allMenuItems = [];
+//           _menuLoading = false;
+//           _isLoadingOfflineData = false;
+//         });
+//         return;
+//       }
+
+//       // Build categories and items from local cached data
+//       final categoriesSet = <String, Map<String, dynamic>>{};
+//       final processedItems = <Map<String, dynamic>>[];
+
+//       for (final item in localItems) {
+//         // Each item already has category_name, category_icon, category_color
+//         // from when it was cached online
+//         final categoryName = item['category_name'] as String? ?? 'Other';
+//         final categoryIcon = item['category_icon'] as String? ?? '🍽️';
+//         final categoryColor = item['category_color'] as String? ?? '#D4673A';
+
+//         // Store category for later
+//         if (!categoriesSet.containsKey(categoryName)) {
+//           categoriesSet[categoryName] = {
+//             'name': categoryName,
+//             'id': categoryName.toLowerCase().replaceAll(' ', '_'),
+//             'icon': categoryIcon,
+//             'color_hex': categoryColor,
+//           };
+//         }
+
+//         // Ensure all required fields exist for display
+//         processedItems.add({
+//           ...item,
+//           'category_name': categoryName,
+//           'category_icon': categoryIcon,
+//           'category_color': categoryColor,
+//         });
+//       }
+
+//       // Convert categories map to list
+//       final localCats = categoriesSet.values.toList();
+
+//       if (!mounted) return;
+
+//       setState(() {
+//         _categories = localCats;
+//         _allMenuItems = processedItems;
+//         _menuLoading = false;
+//         _isLoadingOfflineData = false;
+//       });
+
+//       debugPrint(
+//         '✅ Menu loaded offline: ${localItems.length} items, ${localCats.length} categories',
+//       );
+//     } catch (e) {
+//       debugPrint('🛒 _loadMenuOffline ERROR: $e');
+//       if (!mounted) return;
+//       setState(() {
+//         _menuLoading = false;
+//         _isLoadingOfflineData = false;
+//       });
+//     }
+//   }
+
+//   Future<void> _loadTables() async {
+//     if (_businessId.isEmpty) return;
+
+//     if (_isOnline) {
+//       // ── ONLINE: Load from Supabase ────────────────────────────────────────
+//       try {
+//         final data = await Supabase.instance.client
+//             .from('restaurant_tables')
+//             .select(
+//               'id, table_number, capacity, status, section, current_customer_name, table_seats(id, seat_label, status), table_reservations(id, customer_name, check_in, check_out, status)',
+//             )
+//             .eq('business_id', _businessId)
+//             .eq('is_active', true)
+//             .order('table_number');
+
+//         // ── MEMORY LEAK FIX: check mounted before setState ────────────────────
+//         if (!mounted) return;
+//         setState(() => _tables = (data as List).cast<Map<String, dynamic>>());
+//       } catch (e) {
+//         debugPrint('🛒 _loadTables ERROR (Online): $e');
+//         // Fall back to offline
+//         await _loadTablesOffline();
+//       }
+//     } else {
+//       // ── OFFLINE: Load from LocalDatabase ──────────────────────────────────
+//       await _loadTablesOffline();
+//     }
+//   }
+
+//   Future<void> _loadTablesOffline() async {
+//     if (_businessId.isEmpty) return;
+//     try {
+//       final localDb = LocalDatabase.instance;
+
+//       // Load tables from local database
+//       final localTables = await localDb.getEntities(
+//         table: LocalDatabase.tTables,
+//         businessId: _businessId,
+//         whereExtra: 'action != ?',
+//         whereExtraArgs: [LocalDatabase.actionDelete],
+//       );
+
+//       if (!mounted) return;
+
+//       setState(() => _tables = localTables);
+//       debugPrint('🛒 Tables loaded offline: ${localTables.length} tables');
+//     } catch (e) {
+//       debugPrint('🛒 _loadTablesOffline ERROR: $e');
+//     }
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  CART OPERATIONS WITH INVENTORY VALIDATION
+//   // ══════════════════════════════════════════════════════════
+
+//   void _addItem(Map<String, dynamic> item) async {
+//     log('add item call:$item');
+//     if (!(item['is_available'] as bool? ?? true)) {
+//       _snack('❌ Item is not available');
+//       return;
+//     }
+
+//     final id = item['id'] as String;
+//     final itemName = item['name'] as String;
+//     final nextQuantity = _getNextQuantityForItem(id);
+
+//     // ✓ STEP 1: Validate stock before adding to cart
+//     debugPrint('📦 Validating stock for $itemName (qty: $nextQuantity)...');
+//     final inventoryService = InventoryDeductionService();
+//     final validation = await inventoryService.validateStock(id, nextQuantity);
+
+//     if (!mounted) return;
+
+//     if (!validation.isValid) {
+//       if (validation.maxAllowedQuantity == 0) {
+//         // ✗ NO STOCK AVAILABLE
+//         _snack('❌ ${validation.getUserMessage()}');
+//         debugPrint('❌ Item out of stock: $itemName');
+//         return;
+//       }
+
+//       // ⚠️ PARTIAL STOCK AVAILABLE — Show adjustment dialog
+//       debugPrint(
+//         '⚠️ Partial stock for $itemName: can make ${validation.maxAllowedQuantity}',
+//       );
+
+//       final adjustedQuantity = await _showAdjustmentDialog(
+//         itemName: itemName,
+//         requestedQuantity: nextQuantity,
+//         validationResult: validation,
+//       );
+
+//       if (!mounted || adjustedQuantity == null || adjustedQuantity <= 0) {
+//         debugPrint('ℹ️ User cancelled adjustment');
+//         return;
+//       }
+
+//       // ✓ User adjusted — add with new quantity
+//       setState(() {
+//         _cart[id] = CartItem(
+//           menuItemId: id,
+//           itemName: itemName,
+//           itemPrice: (item['discount_price'] ?? item['price'] as num)
+//               .toDouble(),
+//           categoryName: item['category_name'] as String?,
+//           isVeg: item['is_veg'] as bool? ?? true,
+//           quantity: adjustedQuantity,
+//         );
+//       });
+
+//       _snack('✅ Added $adjustedQuantity $itemName to cart (stock limited)');
+//       return;
+//     }
+
+//     // ✅ STOCK IS SUFFICIENT — Add to cart normally
+//     setState(() {
+//       if (_cart.containsKey(id)) {
+//         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity + 1);
+//       } else {
+//         _cart[id] = CartItem(
+//           menuItemId: id,
+//           itemName: itemName,
+//           itemPrice: (item['discount_price'] ?? item['price'] as num)
+//               .toDouble(),
+//           categoryName: item['category_name'] as String?,
+//           isVeg: item['is_veg'] as bool? ?? true,
+//         );
+//       }
+//     });
+
+//     _snack('✅ Added to cart');
+//   }
+
+//   int _getNextQuantityForItem(String menuItemId) {
+//     return (_cart[menuItemId]?.quantity ?? 0) + 1;
+//   }
+
+//   /// Show adjustment dialog and return the adjusted quantity (or null if cancelled)
+//   Future<int?> _showAdjustmentDialog({
+//     required String itemName,
+//     required int requestedQuantity,
+//     required StockValidationResult validationResult,
+//   }) async {
+//     return showStockValidationDialog(
+//       context,
+//       itemName: itemName,
+//       requestedQuantity: requestedQuantity,
+//       validationResult: validationResult,
+//       onAdjusted: () {
+//         // Callback when user clicks "Adjust"
+//         debugPrint('✅ User accepted adjustment to max quantity');
+//       },
+//     ).then((accepted) {
+//       if (accepted == true) {
+//         return validationResult.maxAllowedQuantity;
+//       }
+//       return null;
+//     });
+//   }
+
+//   void _removeItem(String id) {
+//     setState(() {
+//       if (!_cart.containsKey(id)) return;
+//       if (_cart[id]!.quantity <= 1) {
+//         _cart.remove(id);
+//       } else {
+//         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity - 1);
+//       }
+//     });
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  TABLE SELECTION MODAL
+//   // ══════════════════════════════════════════════════════════
+
+//   /// Opens table selection modal for dine-in orders
+//   void _showTableSelectionModal() {
+//     if (_orderType != OrderType.dineIn) return;
+
+//     showModalBottomSheet(
+//       context: context,
+//       isDismissible: false,
+//       enableDrag: false,
+//       builder: (ctx) => Container(
+//         color: _C.surface,
+//         padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+//         child: Column(
+//           crossAxisAlignment: CrossAxisAlignment.start,
+//           mainAxisSize: MainAxisSize.min,
+//           children: [
+//             const Text(
+//               'Select Table for Dine-In Order',
+//               style: TextStyle(
+//                 fontSize: 18,
+//                 fontWeight: FontWeight.w900,
+//                 color: _C.textPri,
+//               ),
+//             ),
+//             const SizedBox(height: 4),
+//             const Text(
+//               'Please choose a table to proceed',
+//               style: TextStyle(fontSize: 13, color: _C.textSec),
+//             ),
+//             const SizedBox(height: 20),
+//             if (_tables.isEmpty)
+//               Container(
+//                 padding: const EdgeInsets.all(14),
+//                 decoration: BoxDecoration(
+//                   color: const Color(0xFFFEF2F2),
+//                   borderRadius: BorderRadius.circular(12),
+//                   border: Border.all(
+//                     color: const Color(0xFFDC2626).withOpacity(0.2),
+//                   ),
+//                 ),
+//                 child: const Row(
+//                   children: [
+//                     Text('⚠️', style: TextStyle(fontSize: 16)),
+//                     SizedBox(width: 8),
+//                     Expanded(
+//                       child: Text(
+//                         'No tables available',
+//                         style: TextStyle(
+//                           color: Color(0xFFDC2626),
+//                           fontSize: 13,
+//                         ),
+//                       ),
+//                     ),
+//                   ],
+//                 ),
+//               )
+//             else
+//               Expanded(
+//                 child: SingleChildScrollView(
+//                   child: Wrap(
+//                     spacing: 10,
+//                     runSpacing: 10,
+//                     children: _tables.map((t) {
+//                       final tid = t['id'] as String;
+//                       final num = t['table_number'] as int;
+//                       final cap = t['capacity'] as int;
+//                       final status = t['status'] as String? ?? 'available';
+//                       final canSelect = _tableIsSelectable(status);
+//                       final sColor = _tableStatusColor(status);
+
+//                       return GestureDetector(
+//                         onTap: canSelect
+//                             ? () {
+//                                 setState(() {
+//                                   _selectedTableId = tid;
+//                                   _selectedTableNumber = num;
+//                                   _selectedSeatId = null;
+//                                 });
+//                                 Navigator.pop(ctx);
+//                               }
+//                             : null,
+//                         child: Container(
+//                           width: 90,
+//                           padding: const EdgeInsets.symmetric(
+//                             horizontal: 8,
+//                             vertical: 12,
+//                           ),
+//                           decoration: BoxDecoration(
+//                             color: !canSelect
+//                                 ? const Color(0xFFF5F5F5)
+//                                 : sColor.withOpacity(0.08),
+//                             borderRadius: BorderRadius.circular(12),
+//                             border: Border.all(
+//                               color: !canSelect
+//                                   ? const Color(0xFFDDDDDD)
+//                                   : sColor.withOpacity(0.5),
+//                               width: 1.5,
+//                             ),
+//                           ),
+//                           child: Column(
+//                             mainAxisSize: MainAxisSize.min,
+//                             children: [
+//                               Text(
+//                                 _tableStatusEmoji(status),
+//                                 style: const TextStyle(fontSize: 16),
+//                               ),
+//                               const SizedBox(height: 4),
+//                               Text(
+//                                 'T$num',
+//                                 style: TextStyle(
+//                                   fontSize: 16,
+//                                   fontWeight: FontWeight.w900,
+//                                   color: !canSelect ? _C.textMute : sColor,
+//                                 ),
+//                               ),
+//                               const SizedBox(height: 2),
+//                               Text(
+//                                 '$cap seats',
+//                                 style: TextStyle(
+//                                   fontSize: 10,
+//                                   color: !canSelect ? _C.textMute : sColor,
+//                                 ),
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//                       );
+//                     }).toList(),
+//                   ),
+//                 ),
+//               ),
+//             const SizedBox(height: 16),
+//             if (_selectedTableId != null)
+//               Container(
+//                 width: double.infinity,
+//                 padding: const EdgeInsets.symmetric(vertical: 12),
+//                 decoration: BoxDecoration(
+//                   color: _C.primary,
+//                   borderRadius: BorderRadius.circular(12),
+//                 ),
+//                 child: GestureDetector(
+//                   onTap: () => Navigator.pop(ctx),
+//                   child: const Row(
+//                     mainAxisAlignment: MainAxisAlignment.center,
+//                     children: [
+//                       Icon(Icons.check_circle, color: Colors.white, size: 20),
+//                       SizedBox(width: 8),
+//                       Text(
+//                         'Confirm Selection',
+//                         style: TextStyle(
+//                           color: Colors.white,
+//                           fontSize: 14,
+//                           fontWeight: FontWeight.w700,
+//                         ),
+//                       ),
+//                     ],
+//                   ),
+//                 ),
+//               )
+//             else
+//               Container(
+//                 width: double.infinity,
+//                 padding: const EdgeInsets.symmetric(vertical: 12),
+//                 decoration: BoxDecoration(
+//                   color: _C.textMute.withOpacity(0.3),
+//                   borderRadius: BorderRadius.circular(12),
+//                 ),
+//                 child: const Row(
+//                   mainAxisAlignment: MainAxisAlignment.center,
+//                   children: [
+//                     Text(
+//                       'Select a table to continue',
+//                       style: TextStyle(
+//                         color: _C.textMute,
+//                         fontSize: 14,
+//                         fontWeight: FontWeight.w700,
+//                       ),
+//                     ),
+//                   ],
+//                 ),
+//               ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
+//   // ══════════════════════════════════════════════════════════
+
+//   Future<void> _placeOrder() async {
+//     if (_cart.isEmpty) {
+//       _snack('🛒 Add items to cart first');
+//       return;
+//     }
+//     if (_orderType == OrderType.dineIn && _selectedTableId == null) {
+//       _snack('📍 Please select a table before placing order');
+//       // Show table selection modal
+//       _showTableSelectionModal();
+//       return;
+//     }
+
+//     // Synchronous guard — must be set BEFORE any await to prevent double-fire
+//     if (_placing) return;
+//     _placing = true;
+//     if (mounted) setState(() {});
+
+//     try {
+//       // ✓ STEP 1: Final inventory validation before order placement
+//       debugPrint('🔐 Validating inventory before order placement...');
+//       final inventoryService = InventoryDeductionService();
+//       bool hasStockIssue = false;
+//       String? stockIssueItem;
+
+//       for (final item in cartItems) {
+//         final validation = await inventoryService.validateStock(
+//           item.menuItemId,
+//           item.quantity,
+//         );
+
+//         if (!validation.isValid) {
+//           hasStockIssue = true;
+//           stockIssueItem = item.itemName;
+
+//           // Show detailed error popup instead of just throwing
+//           if (mounted) {
+//             final shouldRetry =
+//                 await showDialog<bool>(
+//                   context: context,
+//                   barrierDismissible: false,
+//                   builder: (ctx) => AlertDialog(
+//                     title: const Row(
+//                       children: [
+//                         Icon(Icons.warning_amber_rounded, color: Colors.red),
+//                         SizedBox(width: 8),
+//                         Text('Stock Changed!'),
+//                       ],
+//                     ),
+//                     content: Column(
+//                       mainAxisSize: MainAxisSize.min,
+//                       crossAxisAlignment: CrossAxisAlignment.start,
+//                       children: [
+//                         Text(
+//                           'The stock for ${item.itemName} has been updated since you added it to cart.',
+//                           style: Theme.of(context).textTheme.bodyMedium,
+//                         ),
+//                         const SizedBox(height: 16),
+//                         if (validation.maxAllowedQuantity > 0)
+//                           Text(
+//                             'You can prepare a maximum of ${validation.maxAllowedQuantity} items.',
+//                             style: Theme.of(context).textTheme.bodySmall
+//                                 ?.copyWith(
+//                                   fontWeight: FontWeight.bold,
+//                                   color: Colors.orange.shade700,
+//                                 ),
+//                           )
+//                         else
+//                           Text(
+//                             'This item is now out of stock.',
+//                             style: Theme.of(context).textTheme.bodySmall
+//                                 ?.copyWith(
+//                                   fontWeight: FontWeight.bold,
+//                                   color: Colors.red.shade700,
+//                                 ),
+//                           ),
+//                       ],
+//                     ),
+//                     actions: [
+//                       TextButton(
+//                         onPressed: () => Navigator.pop(ctx, false),
+//                         child: const Text('Cancel Order'),
+//                       ),
+//                       if (validation.maxAllowedQuantity > 0)
+//                         ElevatedButton(
+//                           onPressed: () {
+//                             // Adjust cart and retry
+//                             setState(() {
+//                               if (validation.maxAllowedQuantity > 0) {
+//                                 final cartItem = _cart[item.menuItemId];
+//                                 if (cartItem != null) {
+//                                   _cart[item.menuItemId] = cartItem.copyWith(
+//                                     quantity: validation.maxAllowedQuantity,
+//                                   );
+//                                 }
+//                               }
+//                             });
+//                             Navigator.pop(ctx, true);
+//                           },
+//                           style: ElevatedButton.styleFrom(
+//                             backgroundColor: Colors.orange,
+//                           ),
+//                           child: Text(
+//                             'Adjust to ${validation.maxAllowedQuantity}',
+//                           ),
+//                         ),
+//                     ],
+//                   ),
+//                 ) ??
+//                 false;
+
+//             if (shouldRetry) {
+//               // Retry the whole process
+//               _placing = false;
+//               if (mounted) setState(() {});
+//               return _placeOrder();
+//             }
+//           }
+
+//           throw Exception(
+//             'Stock validation failed: ${validation.getUserMessage()}',
+//           );
+//         }
+//       }
+
+//       if (!mounted) return;
+
+//       // ✓ STEP 2: Create order
+//       debugPrint('📝 Creating order...');
+//       final prov = context.read<OrdersProvider>();
+//       final order = await prov.createOrder(
+//         cartItems: cartItems,
+//         orderType: _orderType,
+//         tableId: _selectedTableId,
+//         tableNumber: _selectedTableNumber,
+//         tableSeatId: _selectedSeatId,
+//         customerName: _customerCtrl.text.trim().isEmpty
+//             ? null
+//             : _customerCtrl.text.trim(),
+//         customerPhone: _phoneCtrl.text.trim().isEmpty
+//             ? null
+//             : _phoneCtrl.text.trim(),
+//         notes: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+//       );
+
+//       if (!mounted) return;
+
+//       // ✓ STEP 3: Deduct inventory after successful order creation
+//       debugPrint('📦 Deducting inventory for order ${order.id}...');
+//       if (_isOnline) {
+//         try {
+//           await inventoryService.deductInventoryForOrder(
+//             order.id,
+//             order.orderNumber,
+//             _businessId,
+//             cartItems
+//                 .map(
+//                   (c) => {
+//                     'menu_item_id': c.menuItemId,
+//                     'item_name': c.itemName,
+//                     'quantity': c.quantity,
+//                   },
+//                 )
+//                 .toList(),
+//           );
+//           debugPrint('✅ Inventory deducted successfully for order ${order.id}');
+//         } catch (e) {
+//           debugPrint(
+//             '⚠️  Inventory deduction failed (order still created): $e',
+//           );
+//           if (mounted) {
+//             _snack(
+//               '⚠️  Order #${order.orderNumber} created but inventory deduction failed. Will retry when online.',
+//             );
+//           }
+//         }
+//       } else {
+//         debugPrint(
+//           '⚠️  Offline mode: Inventory deduction will be performed when online',
+//         );
+//       }
+
+//       // ✓ STEP 4: Refresh InventoryProvider to show updated quantities immediately
+//       if (mounted && _isOnline) {
+//         try {
+//           final inventoryProv = context.read<InventoryProvider>();
+//           await inventoryProv.fetchItems();
+//           debugPrint(
+//             '✅ InventoryProvider refreshed — UI will show updated quantities',
+//           );
+//         } catch (e) {
+//           debugPrint('⚠️  Failed to refresh InventoryProvider UI: $e');
+//           // Failure is non-critical — real-time listeners will catch updates
+//         }
+//       }
+
+//       if (mounted) {
+//         if (!_isOnline) {
+//           _snack('✅ Order created offline. Will sync when online.');
+//         } else {
+//           _snack('✅ Order #${order.orderNumber} placed & inventory updated');
+//         }
+//         await Future.delayed(const Duration(milliseconds: 500));
+//         if (mounted) Navigator.pop(context);
+//       }
+//     } catch (e) {
+//       final msg = _isOnline
+//           ? 'Failed to place order: $e'
+//           : 'Offline: Could not create order: $e';
+//       _snack(msg);
+//       debugPrint('❌ Order placement error: $e');
+//     } finally {
+//       if (mounted) setState(() => _placing = false);
+//     }
+//   }
+
+//   void _snack(String msg) {
+//     if (!mounted) return;
+//     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+//   }
+
+//   // ══════════════════════════════════════════════════════════
+//   //  BUILD
+//   // ══════════════════════════════════════════════════════════
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       backgroundColor: _C.bg,
+//       body: SafeArea(
+//         child: Column(
+//           children: [
+//             _buildHeader(),
+//             Expanded(
+//               child: AnimatedSwitcher(
+//                 duration: const Duration(milliseconds: 250),
+//                 child: _showCart
+//                     ? _CartView(
+//                         key: const ValueKey('cart'),
+//                         cartItems: cartItems,
+//                         orderType: _orderType,
+//                         tables: _tables,
+//                         selectedTableId: _selectedTableId,
+//                         selectedSeatId: _selectedSeatId,
+//                         customerCtrl: _customerCtrl,
+//                         phoneCtrl: _phoneCtrl,
+//                         noteCtrl: _noteCtrl,
+//                         cartSubtotal: cartSubtotal,
+//                         cartTax: cartTax,
+//                         cartTotal: cartTotal,
+//                         placing: _placing,
+//                         onTypeChanged: (t) {
+//                           setState(() {
+//                             _orderType = t;
+//                             if (t != OrderType.dineIn) {
+//                               _selectedTableId = null;
+//                               _selectedSeatId = null;
+//                               _selectedTableNumber = null;
+//                             }
+//                           });
+//                           // Show table selection modal for dine-in
+//                           if (t == OrderType.dineIn) {
+//                             Future.delayed(
+//                               const Duration(milliseconds: 300),
+//                               () => _showTableSelectionModal(),
+//                             );
+//                           }
+//                         },
+//                         onTableSelected: (id, num) => setState(() {
+//                           if (_selectedTableId != id) {
+//                             _selectedSeatId = null;
+//                           }
+//                           _selectedTableId = id;
+//                           _selectedTableNumber = num;
+//                         }),
+//                         onSeatSelected: (id) => setState(() {
+//                           _selectedSeatId = id;
+//                         }),
+//                         onAdd: _addItem,
+//                         onRemove: (id) => _removeItem(id),
+//                         onPlaceOrder: _placeOrder,
+//                       )
+//                     : _MenuView(
+//                         key: const ValueKey('menu'),
+//                         categories: _categories,
+//                         items: filteredItems,
+//                         selectedCategory: _selectedCategory,
+//                         searchCtrl: _searchCtrl,
+//                         cart: _cart,
+//                         loading: _menuLoading,
+//                         onCategoryChanged: (c) =>
+//                             setState(() => _selectedCategory = c),
+//                         onSearchChanged: (q) =>
+//                             setState(() => _searchQuery = q),
+//                         onAdd: _addItem,
+//                         onRemove: (id) => _removeItem(id),
+//                       ),
+//               ),
+//             ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+
+//   Widget _buildHeader() {
+//     return Container(
+//       color: _C.surface,
+//       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+//       child: Column(
+//         children: [
+//           if (!_isOnline)
+//             Container(
+//               width: double.infinity,
+//               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+//               margin: const EdgeInsets.only(bottom: 8),
+//               decoration: BoxDecoration(
+//                 color: const Color(0xFFFEF3C7),
+//                 borderRadius: BorderRadius.circular(8),
+//                 border: Border.all(color: const Color(0xFFF59E0B), width: 1),
+//               ),
+//               child: const Row(
+//                 children: [
+//                   Icon(Icons.cloud_off, color: Color(0xFFD97706), size: 16),
+//                   SizedBox(width: 8),
+//                   Text(
+//                     '📵 You are offline. Orders will sync when online.',
+//                     style: TextStyle(
+//                       fontSize: 12,
+//                       color: Color(0xFFD97706),
+//                       fontWeight: FontWeight.w600,
+//                     ),
+//                   ),
+//                 ],
+//               ),
+//             ),
+//           Row(
+//             children: [
+//               GestureDetector(
+//                 onTap: () => Navigator.pop(context),
+//                 child: Container(
+//                   padding: const EdgeInsets.all(10),
+//                   decoration: BoxDecoration(
+//                     color: _C.surfaceAlt,
+//                     borderRadius: BorderRadius.circular(12),
+//                     border: Border.all(color: _C.border),
+//                   ),
+//                   child: const Icon(
+//                     Icons.arrow_back_ios_new,
+//                     size: 16,
+//                     color: _C.textPri,
+//                   ),
+//                 ),
+//               ),
+//               const SizedBox(width: 14),
+//               Expanded(
+//                 child: Column(
+//                   crossAxisAlignment: CrossAxisAlignment.start,
+//                   children: [
+//                     Text(
+//                       'New Order',
+//                       style: TextStyle(
+//                         fontSize: 20,
+//                         fontWeight: FontWeight.w900,
+//                         color: _C.textPri,
+//                       ),
+//                     ),
+//                     Text(
+//                       _isLoadingOfflineData
+//                           ? 'Loading offline menu...'
+//                           : _isOnline
+//                           ? 'Select items from menu'
+//                           : 'Offline mode - locked data',
+//                       style: const TextStyle(fontSize: 11, color: _C.textSec),
+//                     ),
+//                   ],
+//                 ),
+//               ),
+//               GestureDetector(
+//                 onTap: () => setState(() => _showCart = !_showCart),
+//                 child: AnimatedContainer(
+//                   duration: const Duration(milliseconds: 180),
+//                   padding: const EdgeInsets.symmetric(
+//                     horizontal: 14,
+//                     vertical: 9,
+//                   ),
+//                   decoration: BoxDecoration(
+//                     color: _showCart ? _C.primaryL : _C.primary,
+//                     borderRadius: BorderRadius.circular(14),
+//                   ),
+//                   child: Row(
+//                     children: [
+//                       Icon(
+//                         _showCart
+//                             ? Icons.menu_book_rounded
+//                             : Icons.shopping_cart_outlined,
+//                         color: _showCart ? _C.primary : Colors.white,
+//                         size: 18,
+//                       ),
+//                       const SizedBox(width: 6),
+//                       Text(
+//                         _showCart ? 'Menu' : 'Cart ($cartCount)',
+//                         style: TextStyle(
+//                           color: _showCart ? _C.primary : Colors.white,
+//                           fontSize: 13,
+//                           fontWeight: FontWeight.w800,
+//                         ),
+//                       ),
+//                       if (!_showCart && cartTotal > 0) ...[
+//                         const SizedBox(width: 6),
+//                         Text(
+//                           '₹${cartTotal.toStringAsFixed(0)}',
+//                           style: const TextStyle(
+//                             color: Colors.white70,
+//                             fontSize: 11,
+//                           ),
+//                         ),
+//                       ],
+//                     ],
+//                   ),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ],
+//       ),
+//     );
+//   }
+// }
+
+// // ── Table status helpers ──────────────────────────────────────────
+
+// Color _tableStatusColor(String status) {
+//   switch (status) {
+//     case 'occupied':
+//       return _C.occupied;
+//     case 'reserved':
+//       return _C.reserved;
+//     case 'cleaning':
+//       return _C.cleaning;
+//     default:
+//       return _C.available;
+//   }
+// }
+
+// String _tableStatusEmoji(String status) {
+//   switch (status) {
+//     case 'occupied':
+//       return '🍽️';
+//     case 'reserved':
+//       return '📅';
+//     case 'cleaning':
+//       return '🧹';
+//     default:
+//       return '✅';
+//   }
+// }
+
+// String _statusLabel(String status) {
+//   switch (status) {
+//     case 'occupied':
+//       return 'Occupied';
+//     case 'reserved':
+//       return 'Reserved';
+//     case 'cleaning':
+//       return 'Cleaning';
+//     default:
+//       return 'Free';
+//   }
+// }
+
+// // available, occupied, reserved → can take order
+// // cleaning → cannot
+// bool _tableIsSelectable(String status) => status != 'cleaning';
+
+// // ══════════════════════════════════════════════════════════════
+// //  MENU VIEW
+// // ══════════════════════════════════════════════════════════════
+// class _MenuView extends StatelessWidget {
+//   final List<Map<String, dynamic>> categories;
+//   final List<Map<String, dynamic>> items;
+//   final String selectedCategory;
+//   final TextEditingController searchCtrl;
+//   final Map<String, CartItem> cart;
+//   final bool loading;
+//   final ValueChanged<String> onCategoryChanged;
+//   final ValueChanged<String> onSearchChanged;
+//   final ValueChanged<Map<String, dynamic>> onAdd;
+//   final ValueChanged<String> onRemove;
+
+//   const _MenuView({
+//     Key? key,
+//     required this.categories,
+//     required this.items,
+//     required this.selectedCategory,
+//     required this.searchCtrl,
+//     required this.cart,
+//     required this.loading,
+//     required this.onCategoryChanged,
+//     required this.onSearchChanged,
+//     required this.onAdd,
+//     required this.onRemove,
+//   }) : super(key: key);
+
+//   @override
+//   Widget build(BuildContext context) {
+//     if (loading)
+//       return const Center(child: CircularProgressIndicator(color: _C.primary));
+
+//     final unavailableCount = items
+//         .where((i) => !(i['is_available'] as bool? ?? true))
+//         .length;
+
+//     return Column(
+//       children: [
+//         Padding(
+//           padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+//           child: SizedBox(
+//             height: 42,
+//             child: TextField(
+//               controller: searchCtrl,
+//               onChanged: onSearchChanged,
+//               style: const TextStyle(fontSize: 14, color: _C.textPri),
+//               decoration: InputDecoration(
+//                 hintText: 'Search dishes...',
+//                 hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+//                 prefixIcon: const Icon(
+//                   Icons.search_rounded,
+//                   color: _C.textMute,
+//                   size: 19,
+//                 ),
+//                 suffixIcon: searchCtrl.text.isNotEmpty
+//                     ? GestureDetector(
+//                         onTap: () {
+//                           searchCtrl.clear();
+//                           onSearchChanged('');
+//                         },
+//                         child: const Icon(
+//                           Icons.close_rounded,
+//                           size: 16,
+//                           color: _C.textMute,
+//                         ),
+//                       )
+//                     : null,
+//                 filled: true,
+//                 fillColor: _C.surface,
+//                 contentPadding: EdgeInsets.zero,
+//                 border: OutlineInputBorder(
+//                   borderRadius: BorderRadius.circular(12),
+//                   borderSide: const BorderSide(color: _C.border),
+//                 ),
+//                 enabledBorder: OutlineInputBorder(
+//                   borderRadius: BorderRadius.circular(12),
+//                   borderSide: const BorderSide(color: _C.border),
+//                 ),
+//                 focusedBorder: OutlineInputBorder(
+//                   borderRadius: BorderRadius.circular(12),
+//                   borderSide: const BorderSide(color: _C.primary, width: 1.5),
+//                 ),
+//               ),
+//             ),
+//           ),
+//         ),
+//         SizedBox(
+//           height: 40,
+//           child: ListView(
+//             scrollDirection: Axis.horizontal,
+//             padding: const EdgeInsets.only(left: 16, right: 8),
+//             children: [
+//               _CatChip(
+//                 label: 'All',
+//                 isSelected: selectedCategory == 'All',
+//                 onTap: () => onCategoryChanged('All'),
+//               ),
+//               ...categories.map(
+//                 (c) => _CatChip(
+//                   label: '${c['icon'] ?? '🍽️'} ${c['name']}',
+//                   isSelected: selectedCategory == c['name'],
+//                   onTap: () => onCategoryChanged(c['name'] as String),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//         if (unavailableCount > 0)
+//           Container(
+//             margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+//             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+//             decoration: BoxDecoration(
+//               color: const Color(0xFFFFF4E0),
+//               borderRadius: BorderRadius.circular(10),
+//               border: Border.all(
+//                 color: const Color(0xFFD97706).withOpacity(0.4),
+//               ),
+//             ),
+//             child: Row(
+//               children: [
+//                 const Text('⚠️', style: TextStyle(fontSize: 13)),
+//                 const SizedBox(width: 8),
+//                 Text(
+//                   '$unavailableCount item${unavailableCount > 1 ? 's' : ''} currently unavailable',
+//                   style: const TextStyle(
+//                     fontSize: 11,
+//                     color: Color(0xFFB45309),
+//                     fontWeight: FontWeight.w600,
+//                   ),
+//                 ),
+//               ],
+//             ),
+//           ),
+//         const SizedBox(height: 6),
+//         Expanded(
+//           child: items.isEmpty
+//               ? const Center(
+//                   child: Column(
+//                     mainAxisSize: MainAxisSize.min,
+//                     children: [
+//                       Text('🍽️', style: TextStyle(fontSize: 44)),
+//                       SizedBox(height: 12),
+//                       Text(
+//                         'No items found',
+//                         style: TextStyle(color: _C.textSec),
+//                       ),
+//                     ],
+//                   ),
+//                 )
+//               : ListView.separated(
+//                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+//                   itemCount: items.length,
+//                   separatorBuilder: (_, __) => const SizedBox(height: 8),
+//                   itemBuilder: (_, i) {
+//                     final item = items[i];
+//                     final id = item['id'] as String;
+//                     return _MenuTile(
+//                       item: item,
+//                       quantity: cart[id]?.quantity ?? 0,
+//                       onAdd: () => onAdd(item),
+//                       onRemove: () => onRemove(id),
+//                     );
+//                   },
+//                 ),
+//         ),
+//       ],
+//     );
+//   }
+// }
+
+// class _CatChip extends StatelessWidget {
+//   final String label;
+//   final bool isSelected;
+//   final VoidCallback onTap;
+//   const _CatChip({
+//     required this.label,
+//     required this.isSelected,
+//     required this.onTap,
+//   });
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Padding(
+//       padding: const EdgeInsets.only(right: 8),
+//       child: GestureDetector(
+//         onTap: onTap,
+//         child: AnimatedContainer(
+//           duration: const Duration(milliseconds: 150),
+//           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+//           decoration: BoxDecoration(
+//             color: isSelected ? _C.primary : _C.surface,
+//             borderRadius: BorderRadius.circular(20),
+//             border: Border.all(color: isSelected ? _C.primary : _C.border),
+//           ),
+//           child: Text(
+//             label,
+//             style: TextStyle(
+//               fontSize: 12,
+//               fontWeight: FontWeight.w700,
+//               color: isSelected ? Colors.white : _C.textSec,
+//             ),
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
+
+// class _MenuTile extends StatelessWidget {
+//   final Map<String, dynamic> item;
+//   final int quantity;
+//   final VoidCallback onAdd;
+//   final VoidCallback onRemove;
+//   const _MenuTile({
+//     required this.item,
+//     required this.quantity,
+//     required this.onAdd,
+//     required this.onRemove,
+//   });
+
+//   @override
+//   Widget build(BuildContext context) {
+//     final isAvailable = item['is_available'] as bool? ?? true;
+//     final inCart = quantity > 0;
+//     final isVeg = item['is_veg'] as bool? ?? true;
+//     final vegColor = isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+//     final price = (item['discount_price'] ?? item['price'] as num).toDouble();
+//     final isBest = item['is_best_seller'] as bool? ?? false;
+
+//     return AnimatedContainer(
+//       duration: const Duration(milliseconds: 150),
+//       padding: const EdgeInsets.all(12),
+//       decoration: BoxDecoration(
+//         color: isAvailable ? _C.surface : const Color(0xFFF8F8F8),
+//         borderRadius: BorderRadius.circular(14),
+//         border: Border.all(
+//           color: !isAvailable
+//               ? const Color(0xFFE5E5E5)
+//               : inCart
+//               ? _C.primary.withOpacity(0.4)
+//               : _C.border,
+//           width: inCart ? 1.5 : 1,
+//         ),
+//         boxShadow: (inCart && isAvailable)
+//             ? [
+//                 BoxShadow(
+//                   color: _C.primary.withOpacity(0.08),
+//                   blurRadius: 8,
+//                   offset: const Offset(0, 3),
+//                 ),
+//               ]
+//             : [],
+//       ),
+//       child: Row(
+//         children: [
+//           Opacity(
+//             opacity: isAvailable ? 1.0 : 0.4,
+//             child: Container(
+//               width: 14,
+//               height: 14,
+//               decoration: BoxDecoration(
+//                 borderRadius: BorderRadius.circular(3),
+//                 border: Border.all(color: vegColor, width: 1.5),
+//               ),
+//               alignment: Alignment.center,
+//               child: Container(
+//                 width: 7,
+//                 height: 7,
+//                 decoration: BoxDecoration(
+//                   color: vegColor,
+//                   shape: BoxShape.circle,
+//                 ),
+//               ),
+//             ),
+//           ),
+//           const SizedBox(width: 10),
+//           Expanded(
+//             child: Opacity(
+//               opacity: isAvailable ? 1.0 : 0.5,
+//               child: Column(
+//                 crossAxisAlignment: CrossAxisAlignment.start,
+//                 children: [
+//                   Row(
+//                     children: [
+//                       Expanded(
+//                         child: Text(
+//                           item['name'] as String,
+//                           style: TextStyle(
+//                             fontSize: 14,
+//                             fontWeight: FontWeight.w700,
+//                             color: isAvailable ? _C.textPri : _C.textMute,
+//                           ),
+//                         ),
+//                       ),
+//                       if (!isAvailable)
+//                         Container(
+//                           padding: const EdgeInsets.symmetric(
+//                             horizontal: 6,
+//                             vertical: 2,
+//                           ),
+//                           decoration: BoxDecoration(
+//                             color: const Color(0xFFDC2626).withOpacity(0.1),
+//                             borderRadius: BorderRadius.circular(6),
+//                           ),
+//                           child: const Text(
+//                             'Unavailable',
+//                             style: TextStyle(
+//                               fontSize: 9,
+//                               fontWeight: FontWeight.w700,
+//                               color: Color(0xFFDC2626),
+//                             ),
+//                           ),
+//                         )
+//                       else if (isBest)
+//                         Container(
+//                           padding: const EdgeInsets.symmetric(
+//                             horizontal: 6,
+//                             vertical: 2,
+//                           ),
+//                           decoration: BoxDecoration(
+//                             color: const Color(0xFFFF6B35).withOpacity(0.1),
+//                             borderRadius: BorderRadius.circular(6),
+//                           ),
+//                           child: const Text(
+//                             '🔥 Best',
+//                             style: TextStyle(
+//                               fontSize: 9,
+//                               fontWeight: FontWeight.w700,
+//                               color: Color(0xFFFF6B35),
+//                             ),
+//                           ),
+//                         ),
+//                     ],
+//                   ),
+//                   if ((item['description'] as String? ?? '').isNotEmpty)
+//                     Text(
+//                       item['description'] as String,
+//                       style: const TextStyle(fontSize: 11, color: _C.textMute),
+//                       maxLines: 1,
+//                       overflow: TextOverflow.ellipsis,
+//                     ),
+//                   Text(
+//                     item['category_name'] as String? ?? '',
+//                     style: const TextStyle(fontSize: 10, color: _C.textMute),
+//                   ),
+//                 ],
+//               ),
+//             ),
+//           ),
+//           Opacity(
+//             opacity: isAvailable ? 1.0 : 0.4,
+//             child: Column(
+//               crossAxisAlignment: CrossAxisAlignment.end,
+//               children: [
+//                 if (item['discount_price'] != null)
+//                   Text(
+//                     '₹${(item['price'] as num).toStringAsFixed(0)}',
+//                     style: const TextStyle(
+//                       fontSize: 11,
+//                       color: _C.textMute,
+//                       decoration: TextDecoration.lineThrough,
+//                     ),
+//                   ),
+//                 Text(
+//                   '₹${price.toStringAsFixed(0)}',
+//                   style: TextStyle(
+//                     fontSize: 14,
+//                     fontWeight: FontWeight.w800,
+//                     color: isAvailable ? _C.textPri : _C.textMute,
+//                   ),
+//                 ),
+//               ],
+//             ),
+//           ),
+//           const SizedBox(width: 12),
+//           if (!isAvailable)
+//             Container(
+//               width: 32,
+//               height: 32,
+//               decoration: BoxDecoration(
+//                 color: const Color(0xFFE5E5E5),
+//                 borderRadius: BorderRadius.circular(9),
+//               ),
+//               child: const Icon(
+//                 Icons.block,
+//                 color: Color(0xFFAAAAAA),
+//                 size: 16,
+//               ),
+//             )
+//           else if (quantity == 0)
+//             GestureDetector(
+//               onTap: onAdd,
+//               child: Container(
+//                 width: 32,
+//                 height: 32,
+//                 decoration: BoxDecoration(
+//                   color: _C.primary,
+//                   borderRadius: BorderRadius.circular(9),
+//                 ),
+//                 child: const Icon(Icons.add, color: Colors.white, size: 18),
+//               ),
+//             )
+//           else
+//             Row(
+//               children: [
+//                 GestureDetector(
+//                   onTap: onRemove,
+//                   child: Container(
+//                     width: 28,
+//                     height: 28,
+//                     decoration: BoxDecoration(
+//                       color: _C.primaryL,
+//                       borderRadius: BorderRadius.circular(8),
+//                     ),
+//                     child: const Icon(
+//                       Icons.remove,
+//                       color: _C.primary,
+//                       size: 16,
+//                     ),
+//                   ),
+//                 ),
+//                 SizedBox(
+//                   width: 28,
+//                   child: Text(
+//                     '$quantity',
+//                     textAlign: TextAlign.center,
+//                     style: const TextStyle(
+//                       fontSize: 14,
+//                       fontWeight: FontWeight.w900,
+//                       color: _C.primary,
+//                     ),
+//                   ),
+//                 ),
+//                 GestureDetector(
+//                   // ✓ Handle async onAdd (don't await, fire-and-forget with error capture)
+//                   onTap: () async {
+//                     try {
+//                       onAdd();
+//                     } catch (e) {
+//                       debugPrint('❌ Add item error: $e');
+//                     }
+//                   },
+//                   child: Container(
+//                     width: 28,
+//                     height: 28,
+//                     decoration: BoxDecoration(
+//                       color: _C.primary,
+//                       borderRadius: BorderRadius.circular(8),
+//                     ),
+//                     child: const Icon(Icons.add, color: Colors.white, size: 16),
+//                   ),
+//                 ),
+//               ],
+//             ),
+//         ],
+//       ),
+//     );
+//   }
+// }
+
+// // ══════════════════════════════════════════════════════════════
+// //  CART VIEW
+// // ══════════════════════════════════════════════════════════════
+// class _CartView extends StatelessWidget {
+//   final List<CartItem> cartItems;
+//   final OrderType orderType;
+//   final List<Map<String, dynamic>> tables;
+//   final String? selectedTableId;
+//   final String? selectedSeatId;
+//   final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
+//   final double cartSubtotal, cartTax, cartTotal;
+//   final bool placing;
+//   final ValueChanged<OrderType> onTypeChanged;
+//   final Function(String id, int num) onTableSelected;
+//   final Function(String? id) onSeatSelected;
+//   final ValueChanged<Map<String, dynamic>> onAdd;
+//   final ValueChanged<String> onRemove;
+//   final VoidCallback onPlaceOrder;
+
+//   const _CartView({
+//     Key? key,
+//     required this.cartItems,
+//     required this.orderType,
+//     required this.tables,
+//     required this.selectedTableId,
+//     required this.selectedSeatId,
+//     required this.customerCtrl,
+//     required this.phoneCtrl,
+//     required this.noteCtrl,
+//     required this.cartSubtotal,
+//     required this.cartTax,
+//     required this.cartTotal,
+//     required this.placing,
+//     required this.onTypeChanged,
+//     required this.onTableSelected,
+//     required this.onSeatSelected,
+//     required this.onAdd,
+//     required this.onRemove,
+//     required this.onPlaceOrder,
+//   }) : super(key: key);
+
+//   @override
+//   Widget build(BuildContext context) {
+//     if (cartItems.isEmpty) {
+//       return const Center(
+//         child: Column(
+//           mainAxisSize: MainAxisSize.min,
+//           children: [
+//             Text('🛒', style: TextStyle(fontSize: 52)),
+//             SizedBox(height: 16),
+//             Text(
+//               'Cart is empty',
+//               style: TextStyle(
+//                 fontSize: 16,
+//                 fontWeight: FontWeight.w700,
+//                 color: _C.textPri,
+//               ),
+//             ),
+//             SizedBox(height: 6),
+//             Text(
+//               'Go back to add items',
+//               style: TextStyle(fontSize: 13, color: _C.textSec),
+//             ),
+//           ],
+//         ),
+//       );
+//     }
+
+//     return ListView(
+//       padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+//       children: [
+//         // ── ALLOCATION DISPLAY BANNER ──────────────────────────────────────
+//         if (orderType == OrderType.dineIn && selectedTableId != null)
+//           _AllocationDisplayBanner(
+//             tableId: selectedTableId,
+//             tables: tables,
+//             seatId: selectedSeatId,
+//           ),
+//         const SizedBox(height: 16),
+
+//         _SectionLabel('Order Type'),
+//         const SizedBox(height: 10),
+//         Row(
+//           children: OrderType.values.map((t) {
+//             final isSel = orderType == t;
+//             return Expanded(
+//               child: Padding(
+//                 padding: const EdgeInsets.only(right: 8),
+//                 child: GestureDetector(
+//                   onTap: () => onTypeChanged(t),
+//                   child: AnimatedContainer(
+//                     duration: const Duration(milliseconds: 150),
+//                     padding: const EdgeInsets.symmetric(vertical: 11),
+//                     decoration: BoxDecoration(
+//                       color: isSel ? _C.primaryL : _C.surface,
+//                       borderRadius: BorderRadius.circular(12),
+//                       border: Border.all(
+//                         color: isSel ? _C.primary : _C.border,
+//                         width: isSel ? 1.5 : 1,
+//                       ),
+//                     ),
+//                     child: Column(
+//                       children: [
+//                         Text(t.emoji, style: const TextStyle(fontSize: 18)),
+//                         const SizedBox(height: 4),
+//                         Text(
+//                           t.label,
+//                           style: TextStyle(
+//                             fontSize: 11,
+//                             fontWeight: FontWeight.w700,
+//                             color: isSel ? _C.primary : _C.textSec,
+//                           ),
+//                         ),
+//                       ],
+//                     ),
+//                   ),
+//                 ),
+//               ),
+//             );
+//           }).toList(),
+//         ),
+//         const SizedBox(height: 16),
+
+//         if (orderType == OrderType.dineIn) ...[
+//           _SectionLabel('Select Table'),
+//           const SizedBox(height: 6),
+//           Padding(
+//             padding: const EdgeInsets.only(bottom: 10),
+//             child: Wrap(
+//               spacing: 14,
+//               runSpacing: 4,
+//               children: const [
+//                 _LegendDot(color: _C.available, label: 'Available'),
+//                 _LegendDot(color: _C.partial, label: 'Partial (seats free)'),
+//                 _LegendDot(color: _C.occupied, label: 'Occupied (can order)'),
+//                 _LegendDot(color: _C.reserved, label: 'Reserved (can order)'),
+//                 _LegendDot(color: _C.cleaning, label: 'Cleaning (no order)'),
+//               ],
+//             ),
+//           ),
+//           if (tables.isEmpty)
+//             Container(
+//               padding: const EdgeInsets.all(14),
+//               decoration: BoxDecoration(
+//                 color: const Color(0xFFFEF2F2),
+//                 borderRadius: BorderRadius.circular(12),
+//                 border: Border.all(
+//                   color: const Color(0xFFDC2626).withOpacity(0.2),
+//                 ),
+//               ),
+//               child: const Row(
+//                 children: [
+//                   Text('⚠️', style: TextStyle(fontSize: 16)),
+//                   SizedBox(width: 8),
+//                   Expanded(
+//                     child: Text(
+//                       'No tables found',
+//                       style: TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+//                     ),
+//                   ),
+//                 ],
+//               ),
+//             )
+//           else
+//             Wrap(
+//               spacing: 10,
+//               runSpacing: 10,
+//               children: tables.map((t) {
+//                 final tid = t['id'] as String;
+//                 final num = t['table_number'] as int;
+//                 final cap = t['capacity'] as int;
+//                 final status = t['status'] as String? ?? 'available';
+//                 final customer = t['current_customer_name'] as String?;
+//                 final isSel = selectedTableId == tid;
+//                 final canSelect = _tableIsSelectable(status);
+
+//                 // ── Partial occupancy detection ──────────────────────
+//                 final List<dynamic> tSeats =
+//                     (t['table_seats'] as List?)?.cast<dynamic>() ?? [];
+//                 final occupiedCount = tSeats
+//                     .where((s) => (s as Map)['status'] == 'occupied')
+//                     .length;
+//                 final isPartial =
+//                     tSeats.isNotEmpty &&
+//                     occupiedCount > 0 &&
+//                     occupiedCount < tSeats.length;
+//                 final availCount = tSeats.length - occupiedCount;
+
+//                 // Partial tables use amber; otherwise use status colour
+//                 final sColor = isPartial
+//                     ? _C.partial
+//                     : _tableStatusColor(status);
+
+//                 return GestureDetector(
+//                   onTap: canSelect ? () => onTableSelected(tid, num) : null,
+//                   child: AnimatedContainer(
+//                     duration: const Duration(milliseconds: 150),
+//                     width: 82,
+//                     padding: const EdgeInsets.symmetric(
+//                       horizontal: 8,
+//                       vertical: 10,
+//                     ),
+//                     decoration: BoxDecoration(
+//                       color: isSel
+//                           ? _C.primary
+//                           : !canSelect
+//                           ? const Color(0xFFF5F5F5)
+//                           : isPartial
+//                           ? const Color(0xFFFFF4E0)
+//                           : sColor.withOpacity(0.08),
+//                       borderRadius: BorderRadius.circular(12),
+//                       border: Border.all(
+//                         color: isSel
+//                             ? _C.primary
+//                             : !canSelect
+//                             ? const Color(0xFFDDDDDD)
+//                             : sColor.withOpacity(isPartial ? 0.7 : 0.5),
+//                         width: isSel ? 2 : (isPartial ? 1.5 : 1),
+//                       ),
+//                       boxShadow: isSel
+//                           ? [
+//                               BoxShadow(
+//                                 color: _C.primary.withOpacity(0.3),
+//                                 blurRadius: 8,
+//                                 offset: const Offset(0, 4),
+//                               ),
+//                             ]
+//                           : [],
+//                     ),
+//                     child: Column(
+//                       mainAxisSize: MainAxisSize.min,
+//                       children: [
+//                         Text(
+//                           isPartial ? '⚡' : _tableStatusEmoji(status),
+//                           style: const TextStyle(fontSize: 14),
+//                         ),
+//                         const SizedBox(height: 3),
+//                         Text(
+//                           'T$num',
+//                           style: TextStyle(
+//                             fontSize: 15,
+//                             fontWeight: FontWeight.w900,
+//                             color: isSel
+//                                 ? Colors.white
+//                                 : !canSelect
+//                                 ? _C.textMute
+//                                 : sColor,
+//                           ),
+//                         ),
+//                         // Show available/total when partial; capacity otherwise
+//                         Text(
+//                           isPartial ? '$availCount/$cap free' : '$cap seats',
+//                           style: TextStyle(
+//                             fontSize: 9,
+//                             color: isSel
+//                                 ? Colors.white70
+//                                 : isPartial
+//                                 ? _C.partial
+//                                 : _C.textMute,
+//                           ),
+//                         ),
+//                         const SizedBox(height: 3),
+//                         Container(
+//                           padding: const EdgeInsets.symmetric(
+//                             horizontal: 5,
+//                             vertical: 2,
+//                           ),
+//                           decoration: BoxDecoration(
+//                             color: isSel
+//                                 ? Colors.white.withOpacity(0.2)
+//                                 : !canSelect
+//                                 ? const Color(0xFFEEEEEE)
+//                                 : sColor.withOpacity(0.15),
+//                             borderRadius: BorderRadius.circular(4),
+//                           ),
+//                           child: Text(
+//                             isPartial ? 'Partial' : _statusLabel(status),
+//                             style: TextStyle(
+//                               fontSize: 8,
+//                               fontWeight: FontWeight.w700,
+//                               color: isSel
+//                                   ? Colors.white
+//                                   : !canSelect
+//                                   ? _C.textMute
+//                                   : sColor,
+//                             ),
+//                           ),
+//                         ),
+//                         if (customer != null &&
+//                             customer.isNotEmpty &&
+//                             !isSel) ...[
+//                           const SizedBox(height: 3),
+//                           Text(
+//                             customer,
+//                             style: const TextStyle(
+//                               fontSize: 8,
+//                               color: _C.textMute,
+//                             ),
+//                             overflow: TextOverflow.ellipsis,
+//                             textAlign: TextAlign.center,
+//                           ),
+//                         ],
+//                         if (!canSelect) ...[
+//                           const SizedBox(height: 3),
+//                           const Icon(
+//                             Icons.lock_outline_rounded,
+//                             size: 10,
+//                             color: _C.textMute,
+//                           ),
+//                         ],
+//                       ],
+//                     ),
+//                   ),
+//                 );
+//               }).toList(),
+//             ),
+//           const SizedBox(height: 14),
+
+//           if (selectedTableId != null) ...[
+//             Builder(
+//               builder: (context) {
+//                 final selectedTable = tables.firstWhere(
+//                   (t) => t['id'] == selectedTableId,
+//                   orElse: () => {},
+//                 );
+//                 final List<dynamic> seats = selectedTable['table_seats'] ?? [];
+
+//                 // ✅ Check if table has an active reservation (between check-in and check-out)
+//                 // If reservation is active, don't show seat selection
+//                 final tableStatus =
+//                     selectedTable['status'] as String? ?? 'available';
+//                 final reservations =
+//                     (selectedTable['table_reservations'] as List<dynamic>?)
+//                         ?.cast<Map<String, dynamic>>() ??
+//                     [];
+//                 final now = nowIST();
+
+//                 bool isReservationActive = false;
+//                 if (reservations.isNotEmpty && tableStatus == 'reserved') {
+//                   for (var reservation in reservations) {
+//                     final checkInStr = reservation['check_in'] as String?;
+//                     final checkOutStr = reservation['check_out'] as String?;
+
+//                     if (checkInStr != null && checkOutStr != null) {
+//                       try {
+//                         final checkIn = parseToIST(checkInStr);
+//                         final checkOut = parseToIST(checkOutStr);
+//                         // Check if current time is between check-in and check-out
+//                         if (now.isAfter(checkIn) && now.isBefore(checkOut)) {
+//                           isReservationActive = true;
+//                           break;
+//                         }
+//                       } catch (e) {
+//                         // If date parsing fails, continue to next reservation
+//                         continue;
+//                       }
+//                     }
+//                   }
+//                 }
+
+//                 // ✅ Don't show seat selection if reservation is currently active
+//                 if (isReservationActive) {
+//                   return Container(
+//                     padding: const EdgeInsets.all(12),
+//                     decoration: BoxDecoration(
+//                       color: const Color(0xFFFFF4E0),
+//                       borderRadius: BorderRadius.circular(12),
+//                       border: Border.all(
+//                         color: const Color(0xFFE8860A).withOpacity(0.3),
+//                       ),
+//                     ),
+//                     child: const Row(
+//                       children: [
+//                         Text('⏰', style: TextStyle(fontSize: 14)),
+//                         SizedBox(width: 8),
+//                         Expanded(
+//                           child: Text(
+//                             'Table is reserved. Seats cannot be individually selected during active reservation.',
+//                             style: TextStyle(
+//                               fontSize: 12,
+//                               color: Color(0xFF92400E),
+//                               fontWeight: FontWeight.w600,
+//                               height: 1.4,
+//                             ),
+//                           ),
+//                         ),
+//                       ],
+//                     ),
+//                   );
+//                 }
+
+//                 // ✅ Show seat selection for all other cases
+//                 if (seats.isEmpty) {
+//                   return Container(
+//                     padding: const EdgeInsets.all(12),
+//                     decoration: BoxDecoration(
+//                       color: _C.primaryL,
+//                       borderRadius: BorderRadius.circular(12),
+//                       border: Border.all(color: _C.primary.withOpacity(0.3)),
+//                     ),
+//                     child: const Row(
+//                       children: [
+//                         Text('ℹ️', style: TextStyle(fontSize: 14)),
+//                         SizedBox(width: 8),
+//                         Expanded(
+//                           child: Text(
+//                             'No individual seats defined. Booking entire table.',
+//                             style: TextStyle(
+//                               fontSize: 12,
+//                               color: _C.primary,
+//                               fontWeight: FontWeight.w600,
+//                             ),
+//                           ),
+//                         ),
+//                       ],
+//                     ),
+//                   );
+//                 }
+
+//                 return Column(
+//                   crossAxisAlignment: CrossAxisAlignment.start,
+//                   children: [
+//                     const _SectionLabel('Select Seat (Optional)'),
+//                     const SizedBox(height: 8),
+//                     Wrap(
+//                       spacing: 8,
+//                       runSpacing: 8,
+//                       children: [
+//                         _SeatChip(
+//                           label: 'Whole Table',
+//                           isSelected: selectedSeatId == null,
+//                           onTap: () => onSeatSelected(null),
+//                         ),
+//                         ...seats.map((s) {
+//                           final sid = s['id'] as String;
+//                           final sl = s['seat_label'] as String;
+//                           final status = s['status'] as String? ?? 'available';
+//                           final isSel = selectedSeatId == sid;
+
+//                           return _SeatChip(
+//                             label: 'Seat $sl',
+//                             isSelected: isSel,
+//                             status: status,
+//                             onTap: () => onSeatSelected(sid),
+//                           );
+//                         }),
+//                       ],
+//                     ),
+//                     const SizedBox(height: 14),
+//                   ],
+//                 );
+//               },
+//             ),
+//           ],
+//         ],
+
+//         Row(
+//           children: [
+//             Expanded(
+//               child: _Field(
+//                 label: 'Customer Name',
+//                 hint: 'Enter name',
+//                 ctrl: customerCtrl,
+//               ),
+//             ),
+//             const SizedBox(width: 10),
+//             Expanded(
+//               child: _Field(label: 'Phone', hint: 'Optional', ctrl: phoneCtrl),
+//             ),
+//           ],
+//         ),
+//         const SizedBox(height: 14),
+
+//         _SectionLabel('Cart (${cartItems.length} items)'),
+//         const SizedBox(height: 10),
+//         Container(
+//           decoration: BoxDecoration(
+//             color: _C.surface,
+//             borderRadius: BorderRadius.circular(16),
+//             border: Border.all(color: _C.border),
+//           ),
+//           child: Column(
+//             children: cartItems.asMap().entries.map((e) {
+//               final i = e.key;
+//               final ci = e.value;
+//               return Column(
+//                 children: [
+//                   Padding(
+//                     padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+//                     child: Row(
+//                       children: [
+//                         Expanded(
+//                           child: Column(
+//                             crossAxisAlignment: CrossAxisAlignment.start,
+//                             children: [
+//                               Text(
+//                                 ci.itemName,
+//                                 style: const TextStyle(
+//                                   fontSize: 14,
+//                                   fontWeight: FontWeight.w700,
+//                                   color: _C.textPri,
+//                                 ),
+//                               ),
+//                               Text(
+//                                 '₹${ci.itemPrice.toStringAsFixed(0)} each',
+//                                 style: const TextStyle(
+//                                   fontSize: 11,
+//                                   color: _C.textMute,
+//                                 ),
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//                         Text(
+//                           '₹${ci.subtotal.toStringAsFixed(0)}',
+//                           style: const TextStyle(
+//                             fontSize: 14,
+//                             fontWeight: FontWeight.w800,
+//                             color: _C.textPri,
+//                           ),
+//                         ),
+//                         const SizedBox(width: 10),
+//                         Row(
+//                           children: [
+//                             GestureDetector(
+//                               onTap: () => onRemove(ci.menuItemId),
+//                               child: Container(
+//                                 width: 26,
+//                                 height: 26,
+//                                 decoration: BoxDecoration(
+//                                   color: _C.primaryL,
+//                                   borderRadius: BorderRadius.circular(7),
+//                                 ),
+//                                 child: const Icon(
+//                                   Icons.remove,
+//                                   color: _C.primary,
+//                                   size: 14,
+//                                 ),
+//                               ),
+//                             ),
+//                             SizedBox(
+//                               width: 28,
+//                               child: Text(
+//                                 '${ci.quantity}',
+//                                 textAlign: TextAlign.center,
+//                                 style: const TextStyle(
+//                                   fontSize: 14,
+//                                   fontWeight: FontWeight.w900,
+//                                   color: _C.primary,
+//                                 ),
+//                               ),
+//                             ),
+//                             GestureDetector(
+//                               onTap: () => onAdd({
+//                                 'id': ci.menuItemId,
+//                                 'name': ci.itemName,
+//                                 'price': ci.itemPrice,
+//                                 'is_veg': ci.isVeg,
+//                                 'category_name': ci.categoryName,
+//                                 'is_available': true,
+//                               }),
+//                               child: Container(
+//                                 width: 26,
+//                                 height: 26,
+//                                 decoration: BoxDecoration(
+//                                   color: _C.primary,
+//                                   borderRadius: BorderRadius.circular(7),
+//                                 ),
+//                                 child: const Icon(
+//                                   Icons.add,
+//                                   color: Colors.white,
+//                                   size: 14,
+//                                 ),
+//                               ),
+//                             ),
+//                           ],
+//                         ),
+//                       ],
+//                     ),
+//                   ),
+//                   if (i < cartItems.length - 1)
+//                     const Divider(height: 1, color: _C.border),
+//                 ],
+//               );
+//             }).toList(),
+//           ),
+//         ),
+//         const SizedBox(height: 14),
+
+//         _Field(
+//           label: 'Order Notes',
+//           hint: 'Special instructions...',
+//           ctrl: noteCtrl,
+//         ),
+//         const SizedBox(height: 18),
+
+//         Container(
+//           padding: const EdgeInsets.all(16),
+//           decoration: BoxDecoration(
+//             color: _C.primaryL,
+//             borderRadius: BorderRadius.circular(16),
+//           ),
+//           child: Column(
+//             children: [
+//               _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
+//               const SizedBox(height: 6),
+//               _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+//               const Divider(color: _C.border, height: 16),
+//               Row(
+//                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                 children: [
+//                   const Text(
+//                     'Total',
+//                     style: TextStyle(
+//                       fontSize: 16,
+//                       fontWeight: FontWeight.w900,
+//                       color: _C.primary,
+//                     ),
+//                   ),
+//                   Text(
+//                     '₹${cartTotal.toStringAsFixed(0)}',
+//                     style: const TextStyle(
+//                       fontSize: 22,
+//                       fontWeight: FontWeight.w900,
+//                       color: _C.primary,
+//                     ),
+//                   ),
+//                 ],
+//               ),
+//             ],
+//           ),
+//         ),
+//         const SizedBox(height: 18),
+
+//         // ── TABLE SELECTION WARNING FOR DINE-IN ────────────────────────────────
+//         if (orderType == OrderType.dineIn && selectedTableId == null) ...[
+//           Container(
+//             width: double.infinity,
+//             padding: const EdgeInsets.all(14),
+//             decoration: BoxDecoration(
+//               color: const Color(0xFFFEF2F2),
+//               borderRadius: BorderRadius.circular(12),
+//               border: Border.all(
+//                 color: const Color(0xFFDC2626).withOpacity(0.3),
+//                 width: 1.5,
+//               ),
+//             ),
+//             child: Row(
+//               children: [
+//                 const Text('⚠️', style: TextStyle(fontSize: 18)),
+//                 const SizedBox(width: 10),
+//                 const Expanded(
+//                   child: Column(
+//                     crossAxisAlignment: CrossAxisAlignment.start,
+//                     children: [
+//                       Text(
+//                         'Table Selection Required',
+//                         style: TextStyle(
+//                           fontSize: 13,
+//                           fontWeight: FontWeight.w700,
+//                           color: Color(0xFFDC2626),
+//                         ),
+//                       ),
+//                       SizedBox(height: 3),
+//                       Text(
+//                         'Please select a table from the list above',
+//                         style: TextStyle(
+//                           fontSize: 11,
+//                           color: Color(0xFF991B1B),
+//                         ),
+//                       ),
+//                     ],
+//                   ),
+//                 ),
+//               ],
+//             ),
+//           ),
+//           const SizedBox(height: 16),
+//         ],
+
+//         GestureDetector(
+//           onTap:
+//               (placing ||
+//                   (orderType == OrderType.dineIn && selectedTableId == null))
+//               ? null
+//               : onPlaceOrder,
+//           child: Container(
+//             width: double.infinity,
+//             padding: const EdgeInsets.symmetric(vertical: 17),
+//             decoration: BoxDecoration(
+//               gradient: LinearGradient(
+//                 colors:
+//                     (placing ||
+//                         (orderType == OrderType.dineIn &&
+//                             selectedTableId == null))
+//                     ? [Colors.grey, Colors.grey.shade400]
+//                     : [_C.primary, _C.primaryD],
+//               ),
+//               borderRadius: BorderRadius.circular(16),
+//               boxShadow:
+//                   (placing ||
+//                       (orderType == OrderType.dineIn &&
+//                           selectedTableId == null))
+//                   ? []
+//                   : [
+//                       BoxShadow(
+//                         color: _C.primary.withOpacity(0.35),
+//                         blurRadius: 16,
+//                         offset: const Offset(0, 6),
+//                       ),
+//                     ],
+//             ),
+//             child: Row(
+//               mainAxisAlignment: MainAxisAlignment.center,
+//               children: [
+//                 if (placing) ...[
+//                   const SizedBox(
+//                     width: 20,
+//                     height: 20,
+//                     child: CircularProgressIndicator(
+//                       color: Colors.white,
+//                       strokeWidth: 2,
+//                     ),
+//                   ),
+//                   const SizedBox(width: 10),
+//                   const Text(
+//                     'Placing Order...',
+//                     style: TextStyle(
+//                       color: Colors.white,
+//                       fontSize: 16,
+//                       fontWeight: FontWeight.w900,
+//                     ),
+//                   ),
+//                 ] else if (orderType == OrderType.dineIn &&
+//                     selectedTableId == null) ...[
+//                   const Icon(Icons.info_outline, color: Colors.white, size: 20),
+//                   const SizedBox(width: 10),
+//                   const Text(
+//                     'Select Table to Continue',
+//                     style: TextStyle(
+//                       color: Colors.white,
+//                       fontSize: 16,
+//                       fontWeight: FontWeight.w900,
+//                     ),
+//                   ),
+//                 ] else ...[
+//                   const Icon(
+//                     Icons.check_circle_outline,
+//                     color: Colors.white,
+//                     size: 20,
+//                   ),
+//                   const SizedBox(width: 10),
+//                   const Text(
+//                     'Place Order',
+//                     style: TextStyle(
+//                       color: Colors.white,
+//                       fontSize: 16,
+//                       fontWeight: FontWeight.w900,
+//                     ),
+//                   ),
+//                 ],
+//               ],
+//             ),
+//           ),
+//         ),
+//       ],
+//     );
+//   }
+// }
+
+// // ── Legend dot ────────────────────────────────────────────────────
+// class _LegendDot extends StatelessWidget {
+//   final Color color;
+//   final String label;
+//   const _LegendDot({required this.color, required this.label});
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Row(
+//       mainAxisSize: MainAxisSize.min,
+//       children: [
+//         Container(
+//           width: 8,
+//           height: 8,
+//           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+//         ),
+//         const SizedBox(width: 4),
+//         Text(
+//           label,
+//           style: const TextStyle(
+//             fontSize: 10,
+//             color: _C.textSec,
+//             fontWeight: FontWeight.w600,
+//           ),
+//         ),
+//       ],
+//     );
+//   }
+// }
+
+// class _SectionLabel extends StatelessWidget {
+//   final String text;
+//   const _SectionLabel(this.text);
+//   @override
+//   Widget build(BuildContext context) => Text(
+//     text.toUpperCase(),
+//     style: const TextStyle(
+//       fontSize: 10,
+//       fontWeight: FontWeight.w800,
+//       color: _C.textMute,
+//       letterSpacing: 1.4,
+//     ),
+//   );
+// }
+
+// class _Field extends StatelessWidget {
+//   final String label, hint;
+//   final TextEditingController ctrl;
+//   const _Field({required this.label, required this.hint, required this.ctrl});
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Column(
+//       crossAxisAlignment: CrossAxisAlignment.start,
+//       children: [
+//         Text(
+//           label,
+//           style: const TextStyle(
+//             fontSize: 11,
+//             fontWeight: FontWeight.w700,
+//             color: _C.textSec,
+//             letterSpacing: 0.3,
+//           ),
+//         ),
+//         const SizedBox(height: 6),
+//         TextField(
+//           controller: ctrl,
+//           style: const TextStyle(
+//             fontSize: 14,
+//             fontWeight: FontWeight.w600,
+//             color: _C.textPri,
+//           ),
+//           decoration: InputDecoration(
+//             hintText: hint,
+//             hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+//             filled: true,
+//             fillColor: _C.surface,
+//             contentPadding: const EdgeInsets.symmetric(
+//               horizontal: 14,
+//               vertical: 12,
+//             ),
+//             border: OutlineInputBorder(
+//               borderRadius: BorderRadius.circular(12),
+//               borderSide: const BorderSide(color: _C.border),
+//             ),
+//             enabledBorder: OutlineInputBorder(
+//               borderRadius: BorderRadius.circular(12),
+//               borderSide: const BorderSide(color: _C.border),
+//             ),
+//             focusedBorder: OutlineInputBorder(
+//               borderRadius: BorderRadius.circular(12),
+//               borderSide: const BorderSide(color: _C.primary, width: 1.5),
+//             ),
+//           ),
+//         ),
+//       ],
+//     );
+//   }
+// }
+
+// class _BillRow extends StatelessWidget {
+//   final String label, value;
+//   const _BillRow(this.label, this.value);
+//   @override
+//   Widget build(BuildContext context) => Row(
+//     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//     children: [
+//       Text(label, style: const TextStyle(fontSize: 13, color: _C.textSec)),
+//       Text(
+//         value,
+//         style: const TextStyle(
+//           fontSize: 13,
+//           fontWeight: FontWeight.w700,
+//           color: _C.textPri,
+//         ),
+//       ),
+//     ],
+//   );
+// }
+// // import 'package:flutter/material.dart';
+// // import 'package:pos_app/models/order_modal.dart';
+// // import 'package:provider/provider.dart';
+// // import 'package:supabase_flutter/supabase_flutter.dart';
+// // import 'package:shared_preferences/shared_preferences.dart';
+// // import '../../providers/orders_provider.dart';
+
+// // class _C {
+// //   static const bg = Color(0xFFF6F6FB);
+// //   static const surface = Color(0xFFFFFFFF);
+// //   static const surfaceAlt = Color(0xFFF2F2F8);
+// //   static const border = Color(0xFFEAEAF4);
+// //   static const primary = Color(0xFF5A3FD6);
+// //   static const primaryL = Color(0xFFEDE9FF);
+// //   static const primaryD = Color(0xFF3D2AA0);
+// //   static const textPri = Color(0xFF1A1A2E);
+// //   static const textSec = Color(0xFF6B6B86);
+// //   static const textMute = Color(0xFFAAABBB);
+// //   static const occupied = Color(0xFFDC2626);
+// //   static const reserved = Color(0xFF7C3AED);
+// //   static const available = Color(0xFF059669);
+// //   static const cleaning = Color(0xFFD97706);
+// // }
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  NEW ORDER SCREEN
+// // // ══════════════════════════════════════════════════════════════
+// // class NewOrderScreen extends StatefulWidget {
+// //   final String? preselectedTableId;
+// //   final int? preselectedTableNumber;
+
+// //   const NewOrderScreen({
+// //     Key? key,
+// //     this.preselectedTableId,
+// //     this.preselectedTableNumber,
+// //   }) : super(key: key);
+
+// //   @override
+// //   State<NewOrderScreen> createState() => _NewOrderScreenState();
+// // }
+
+// // class _NewOrderScreenState extends State<NewOrderScreen> {
+// //   String _businessId = '';
+
+// //   List<Map<String, dynamic>> _categories = [];
+// //   List<Map<String, dynamic>> _allMenuItems = [];
+// //   bool _menuLoading = true;
+
+// //   List<Map<String, dynamic>> _tables = [];
+
+// //   final Map<String, CartItem> _cart = {};
+
+// //   OrderType _orderType = OrderType.dineIn;
+// //   String? _selectedTableId;
+// //   int? _selectedTableNumber;
+// //   final _customerCtrl = TextEditingController();
+// //   final _phoneCtrl = TextEditingController();
+// //   final _noteCtrl = TextEditingController();
+// //   final _searchCtrl = TextEditingController();
+
+// //   String _selectedCategory = 'All';
+// //   String _searchQuery = '';
+// //   bool _showCart = false;
+// //   bool _placing = false;
+
+// //   List<CartItem> get cartItems => _cart.values.toList();
+// //   double get cartSubtotal => cartItems.fold(0.0, (s, i) => s + i.subtotal);
+// //   double get cartTax => cartSubtotal * 0.05;
+// //   double get cartTotal => cartSubtotal + cartTax;
+// //   int get cartCount => cartItems.fold(0, (s, i) => s + i.quantity);
+
+// //   List<Map<String, dynamic>> get filteredItems {
+// //     List<Map<String, dynamic>> items = _selectedCategory == 'All'
+// //         ? _allMenuItems
+// //         : _allMenuItems
+// //               .where((i) => i['category_name'] == _selectedCategory)
+// //               .toList();
+// //     if (_searchQuery.isNotEmpty) {
+// //       final q = _searchQuery.toLowerCase();
+// //       items = items
+// //           .where((i) => (i['name'] as String).toLowerCase().contains(q))
+// //           .toList();
+// //     }
+// //     items.sort((a, b) {
+// //       final aAvail = a['is_available'] as bool? ?? true;
+// //       final bAvail = b['is_available'] as bool? ?? true;
+// //       if (aAvail == bAvail) return 0;
+// //       return aAvail ? -1 : 1;
+// //     });
+// //     return items;
+// //   }
+
+// //   @override
+// //   void initState() {
+// //     super.initState();
+// //     _selectedTableId = widget.preselectedTableId;
+// //     _selectedTableNumber = widget.preselectedTableNumber;
+// //     _load();
+// //   }
+
+// //   @override
+// //   void dispose() {
+// //     _customerCtrl.dispose();
+// //     _phoneCtrl.dispose();
+// //     _noteCtrl.dispose();
+// //     _searchCtrl.dispose();
+// //     super.dispose();
+// //   }
+
+// //   Future<void> _load() async {
+// //     final prefs = await SharedPreferences.getInstance();
+// //     _businessId = prefs.getString('businessId') ?? '';
+// //     await Future.wait([_loadMenu(), _loadTables()]);
+// //   }
+
+// //   Future<void> _loadMenu() async {
+// //     if (_businessId.isEmpty) return;
+// //     try {
+// //       final cats = await Supabase.instance.client
+// //           .from('menu_categories')
+// //           .select('id, name, icon, color_hex')
+// //           .eq('business_id', _businessId)
+// //           .eq('is_active', true)
+// //           .order('display_order');
+
+// //       final items = await Supabase.instance.client
+// //           .from('menu_items')
+// //           .select(
+// //             'id, name, description, price, discount_price, is_veg, is_available, '
+// //             'is_featured, is_best_seller, preparation_time, category_id, '
+// //             'menu_categories!inner(name, icon, color_hex)',
+// //           )
+// //           .eq('business_id', _businessId)
+// //           .order('sort_order');
+
+// //       setState(() {
+// //         _categories = (cats as List).cast<Map<String, dynamic>>();
+// //         _allMenuItems = (items as List).map((item) {
+// //           final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
+// //           return {
+// //             ...Map<String, dynamic>.from(item as Map),
+// //             'category_name': cat['name'] ?? '',
+// //             'category_icon': cat['icon'] ?? '🍽️',
+// //             'category_color': cat['color_hex'] ?? '#D4673A',
+// //           };
+// //         }).toList();
+// //         _menuLoading = false;
+// //       });
+// //     } catch (e) {
+// //       setState(() => _menuLoading = false);
+// //     }
+// //   }
+
+// //   Future<void> _loadTables() async {
+// //     if (_businessId.isEmpty) return;
+// //     try {
+// //       final data = await Supabase.instance.client
+// //           .from('restaurant_tables')
+// //           .select(
+// //             'id, table_number, capacity, status, section, current_customer_name',
+// //           )
+// //           .eq('business_id', _businessId)
+// //           .eq('is_active', true)
+// //           .order('table_number');
+
+// //       setState(() => _tables = (data as List).cast<Map<String, dynamic>>());
+// //     } catch (_) {}
+// //   }
+
+// //   void _addItem(Map<String, dynamic> item) {
+// //     if (!(item['is_available'] as bool? ?? true)) return;
+// //     final id = item['id'] as String;
+// //     setState(() {
+// //       if (_cart.containsKey(id)) {
+// //         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity + 1);
+// //       } else {
+// //         _cart[id] = CartItem(
+// //           menuItemId: id,
+// //           itemName: item['name'] as String,
+// //           itemPrice: (item['discount_price'] ?? item['price'] as num)
+// //               .toDouble(),
+// //           categoryName: item['category_name'] as String?,
+// //           isVeg: item['is_veg'] as bool? ?? true,
+// //         );
+// //       }
+// //     });
+// //   }
+
+// //   void _removeItem(String id) {
+// //     setState(() {
+// //       if (!_cart.containsKey(id)) return;
+// //       if (_cart[id]!.quantity <= 1) {
+// //         _cart.remove(id);
+// //       } else {
+// //         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity - 1);
+// //       }
+// //     });
+// //   }
+
+// //   Future<void> _placeOrder() async {
+// //     if (_cart.isEmpty) {
+// //       _snack('Add items to cart first');
+// //       return;
+// //     }
+// //     if (_orderType == OrderType.dineIn && _selectedTableId == null) {
+// //       _snack('Please select a table');
+// //       return;
+// //     }
+// //     setState(() => _placing = true);
+// //     try {
+// //       final prov = context.read<OrdersProvider>();
+// //       await prov.createOrder(
+// //         cartItems: cartItems,
+// //         orderType: _orderType,
+// //         tableId: _selectedTableId,
+// //         tableNumber: _selectedTableNumber,
+// //         customerName: _customerCtrl.text.isEmpty ? null : _customerCtrl.text,
+// //         customerPhone: _phoneCtrl.text.isEmpty ? null : _phoneCtrl.text,
+// //         notes: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
+// //       );
+// //       if (mounted) Navigator.pop(context);
+// //     } catch (e) {
+// //       _snack('Failed to place order: $e');
+// //     } finally {
+// //       if (mounted) setState(() => _placing = false);
+// //     }
+// //   }
+
+// //   void _snack(String msg) =>
+// //       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Scaffold(
+// //       backgroundColor: _C.bg,
+// //       body: SafeArea(
+// //         child: Column(
+// //           children: [
+// //             _buildHeader(),
+// //             Expanded(
+// //               child: AnimatedSwitcher(
+// //                 duration: const Duration(milliseconds: 250),
+// //                 child: _showCart
+// //                     ? _CartView(
+// //                         key: const ValueKey('cart'),
+// //                         cartItems: cartItems,
+// //                         orderType: _orderType,
+// //                         tables: _tables,
+// //                         selectedTableId: _selectedTableId,
+// //                         customerCtrl: _customerCtrl,
+// //                         phoneCtrl: _phoneCtrl,
+// //                         noteCtrl: _noteCtrl,
+// //                         cartSubtotal: cartSubtotal,
+// //                         cartTax: cartTax,
+// //                         cartTotal: cartTotal,
+// //                         placing: _placing,
+// //                         onTypeChanged: (t) => setState(() => _orderType = t),
+// //                         onTableSelected: (id, num) => setState(() {
+// //                           _selectedTableId = id;
+// //                           _selectedTableNumber = num;
+// //                         }),
+// //                         onAdd: _addItem,
+// //                         onRemove: (id) => _removeItem(id),
+// //                         onPlaceOrder: _placeOrder,
+// //                       )
+// //                     : _MenuView(
+// //                         key: const ValueKey('menu'),
+// //                         categories: _categories,
+// //                         items: filteredItems,
+// //                         selectedCategory: _selectedCategory,
+// //                         searchCtrl: _searchCtrl,
+// //                         cart: _cart,
+// //                         loading: _menuLoading,
+// //                         onCategoryChanged: (c) =>
+// //                             setState(() => _selectedCategory = c),
+// //                         onSearchChanged: (q) =>
+// //                             setState(() => _searchQuery = q),
+// //                         onAdd: _addItem,
+// //                         onRemove: (id) => _removeItem(id),
+// //                       ),
+// //               ),
+// //             ),
+// //           ],
+// //         ),
+// //       ),
+// //     );
+// //   }
+
+// //   Widget _buildHeader() {
+// //     return Container(
+// //       color: _C.surface,
+// //       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+// //       child: Row(
+// //         children: [
+// //           GestureDetector(
+// //             onTap: () => Navigator.pop(context),
+// //             child: Container(
+// //               padding: const EdgeInsets.all(10),
+// //               decoration: BoxDecoration(
+// //                 color: _C.surfaceAlt,
+// //                 borderRadius: BorderRadius.circular(12),
+// //                 border: Border.all(color: _C.border),
+// //               ),
+// //               child: const Icon(
+// //                 Icons.arrow_back_ios_new,
+// //                 size: 16,
+// //                 color: _C.textPri,
+// //               ),
+// //             ),
+// //           ),
+// //           const SizedBox(width: 14),
+// //           const Expanded(
+// //             child: Column(
+// //               crossAxisAlignment: CrossAxisAlignment.start,
+// //               children: [
+// //                 Text(
+// //                   'New Order',
+// //                   style: TextStyle(
+// //                     fontSize: 20,
+// //                     fontWeight: FontWeight.w900,
+// //                     color: _C.textPri,
+// //                   ),
+// //                 ),
+// //                 Text(
+// //                   'Select items from menu',
+// //                   style: TextStyle(fontSize: 11, color: _C.textSec),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //           GestureDetector(
+// //             onTap: () => setState(() => _showCart = !_showCart),
+// //             child: AnimatedContainer(
+// //               duration: const Duration(milliseconds: 180),
+// //               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+// //               decoration: BoxDecoration(
+// //                 color: _showCart ? _C.primaryL : _C.primary,
+// //                 borderRadius: BorderRadius.circular(14),
+// //               ),
+// //               child: Row(
+// //                 children: [
+// //                   Icon(
+// //                     _showCart
+// //                         ? Icons.menu_book_rounded
+// //                         : Icons.shopping_cart_outlined,
+// //                     color: _showCart ? _C.primary : Colors.white,
+// //                     size: 18,
+// //                   ),
+// //                   const SizedBox(width: 6),
+// //                   Text(
+// //                     _showCart ? 'Menu' : 'Cart ($cartCount)',
+// //                     style: TextStyle(
+// //                       color: _showCart ? _C.primary : Colors.white,
+// //                       fontSize: 13,
+// //                       fontWeight: FontWeight.w800,
+// //                     ),
+// //                   ),
+// //                   if (!_showCart && cartTotal > 0) ...[
+// //                     const SizedBox(width: 6),
+// //                     Text(
+// //                       '₹${cartTotal.toStringAsFixed(0)}',
+// //                       style: const TextStyle(
+// //                         color: Colors.white70,
+// //                         fontSize: 11,
+// //                       ),
+// //                     ),
+// //                   ],
+// //                 ],
+// //               ),
+// //             ),
+// //           ),
+// //         ],
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // // ── Table status helpers ─────────────────────────────────────────
+
+// // Color _tableStatusColor(String status) {
+// //   switch (status) {
+// //     case 'occupied':
+// //       return _C.occupied;
+// //     case 'reserved':
+// //       return _C.reserved;
+// //     case 'cleaning':
+// //       return _C.cleaning;
+// //     default:
+// //       return _C.available;
+// //   }
+// // }
+
+// // String _tableStatusEmoji(String status) {
+// //   switch (status) {
+// //     case 'occupied':
+// //       return '🍽️';
+// //     case 'reserved':
+// //       return '📅';
+// //     case 'cleaning':
+// //       return '🧹';
+// //     default:
+// //       return '✅';
+// //   }
+// // }
+
+// // /// ✅ FIXED LOGIC:
+// // /// available  → can take order (empty table)
+// // /// occupied   → can take order (extra items for seated guests)
+// // /// reserved   → can take order (guest arrived early / pre-order)
+// // /// cleaning   → CANNOT take order (table out of service)
+// // bool _tableIsSelectable(String status) => status != 'cleaning';
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  MENU VIEW
+// // // ══════════════════════════════════════════════════════════════
+// // class _MenuView extends StatelessWidget {
+// //   final List<Map<String, dynamic>> categories;
+// //   final List<Map<String, dynamic>> items;
+// //   final String selectedCategory;
+// //   final TextEditingController searchCtrl;
+// //   final Map<String, CartItem> cart;
+// //   final bool loading;
+// //   final ValueChanged<String> onCategoryChanged;
+// //   final ValueChanged<String> onSearchChanged;
+// //   final ValueChanged<Map<String, dynamic>> onAdd;
+// //   final ValueChanged<String> onRemove;
+
+// //   const _MenuView({
+// //     Key? key,
+// //     required this.categories,
+// //     required this.items,
+// //     required this.selectedCategory,
+// //     required this.searchCtrl,
+// //     required this.cart,
+// //     required this.loading,
+// //     required this.onCategoryChanged,
+// //     required this.onSearchChanged,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //   }) : super(key: key);
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     if (loading)
+// //       return const Center(child: CircularProgressIndicator(color: _C.primary));
+
+// //     final unavailableCount = items
+// //         .where((i) => !(i['is_available'] as bool? ?? true))
+// //         .length;
+
+// //     return Column(
+// //       children: [
+// //         Padding(
+// //           padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+// //           child: SizedBox(
+// //             height: 42,
+// //             child: TextField(
+// //               controller: searchCtrl,
+// //               onChanged: onSearchChanged,
+// //               style: const TextStyle(fontSize: 14, color: _C.textPri),
+// //               decoration: InputDecoration(
+// //                 hintText: 'Search dishes...',
+// //                 hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+// //                 prefixIcon: const Icon(
+// //                   Icons.search_rounded,
+// //                   color: _C.textMute,
+// //                   size: 19,
+// //                 ),
+// //                 suffixIcon: searchCtrl.text.isNotEmpty
+// //                     ? GestureDetector(
+// //                         onTap: () {
+// //                           searchCtrl.clear();
+// //                           onSearchChanged('');
+// //                         },
+// //                         child: const Icon(
+// //                           Icons.close_rounded,
+// //                           size: 16,
+// //                           color: _C.textMute,
+// //                         ),
+// //                       )
+// //                     : null,
+// //                 filled: true,
+// //                 fillColor: _C.surface,
+// //                 contentPadding: EdgeInsets.zero,
+// //                 border: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.border),
+// //                 ),
+// //                 enabledBorder: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.border),
+// //                 ),
+// //                 focusedBorder: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.primary, width: 1.5),
+// //                 ),
+// //               ),
+// //             ),
+// //           ),
+// //         ),
+// //         SizedBox(
+// //           height: 40,
+// //           child: ListView(
+// //             scrollDirection: Axis.horizontal,
+// //             padding: const EdgeInsets.only(left: 16, right: 8),
+// //             children: [
+// //               _CatChip(
+// //                 label: 'All',
+// //                 isSelected: selectedCategory == 'All',
+// //                 onTap: () => onCategoryChanged('All'),
+// //               ),
+// //               ...categories.map(
+// //                 (c) => _CatChip(
+// //                   label: '${c['icon'] ?? '🍽️'} ${c['name']}',
+// //                   isSelected: selectedCategory == c['name'],
+// //                   onTap: () => onCategoryChanged(c['name'] as String),
+// //                 ),
+// //               ),
+// //             ],
+// //           ),
+// //         ),
+// //         if (unavailableCount > 0)
+// //           Container(
+// //             margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+// //             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+// //             decoration: BoxDecoration(
+// //               color: const Color(0xFFFFF4E0),
+// //               borderRadius: BorderRadius.circular(10),
+// //               border: Border.all(
+// //                 color: const Color(0xFFD97706).withOpacity(0.4),
+// //               ),
+// //             ),
+// //             child: Row(
+// //               children: [
+// //                 const Text('⚠️', style: TextStyle(fontSize: 13)),
+// //                 const SizedBox(width: 8),
+// //                 Text(
+// //                   '$unavailableCount item${unavailableCount > 1 ? 's' : ''} currently unavailable',
+// //                   style: const TextStyle(
+// //                     fontSize: 11,
+// //                     color: Color(0xFFB45309),
+// //                     fontWeight: FontWeight.w600,
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //         const SizedBox(height: 6),
+// //         Expanded(
+// //           child: items.isEmpty
+// //               ? const Center(
+// //                   child: Column(
+// //                     mainAxisSize: MainAxisSize.min,
+// //                     children: [
+// //                       Text('🍽️', style: TextStyle(fontSize: 44)),
+// //                       SizedBox(height: 12),
+// //                       Text(
+// //                         'No items found',
+// //                         style: TextStyle(color: _C.textSec),
+// //                       ),
+// //                     ],
+// //                   ),
+// //                 )
+// //               : ListView.separated(
+// //                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+// //                   itemCount: items.length,
+// //                   separatorBuilder: (_, __) => const SizedBox(height: 8),
+// //                   itemBuilder: (_, i) {
+// //                     final item = items[i];
+// //                     final id = item['id'] as String;
+// //                     return _MenuTile(
+// //                       item: item,
+// //                       quantity: cart[id]?.quantity ?? 0,
+// //                       onAdd: () => onAdd(item),
+// //                       onRemove: () => onRemove(id),
+// //                     );
+// //                   },
+// //                 ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // class _CatChip extends StatelessWidget {
+// //   final String label;
+// //   final bool isSelected;
+// //   final VoidCallback onTap;
+// //   const _CatChip({
+// //     required this.label,
+// //     required this.isSelected,
+// //     required this.onTap,
+// //   });
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Padding(
+// //       padding: const EdgeInsets.only(right: 8),
+// //       child: GestureDetector(
+// //         onTap: onTap,
+// //         child: AnimatedContainer(
+// //           duration: const Duration(milliseconds: 150),
+// //           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+// //           decoration: BoxDecoration(
+// //             color: isSelected ? _C.primary : _C.surface,
+// //             borderRadius: BorderRadius.circular(20),
+// //             border: Border.all(color: isSelected ? _C.primary : _C.border),
+// //           ),
+// //           child: Text(
+// //             label,
+// //             style: TextStyle(
+// //               fontSize: 12,
+// //               fontWeight: FontWeight.w700,
+// //               color: isSelected ? Colors.white : _C.textSec,
+// //             ),
+// //           ),
+// //         ),
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // class _MenuTile extends StatelessWidget {
+// //   final Map<String, dynamic> item;
+// //   final int quantity;
+// //   final VoidCallback onAdd;
+// //   final VoidCallback onRemove;
+// //   const _MenuTile({
+// //     required this.item,
+// //     required this.quantity,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //   });
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     final isAvailable = item['is_available'] as bool? ?? true;
+// //     final inCart = quantity > 0;
+// //     final isVeg = item['is_veg'] as bool? ?? true;
+// //     final vegColor = isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+// //     final price = (item['discount_price'] ?? item['price'] as num).toDouble();
+// //     final isBestseller = item['is_best_seller'] as bool? ?? false;
+
+// //     return AnimatedContainer(
+// //       duration: const Duration(milliseconds: 150),
+// //       padding: const EdgeInsets.all(12),
+// //       decoration: BoxDecoration(
+// //         color: isAvailable ? _C.surface : const Color(0xFFF8F8F8),
+// //         borderRadius: BorderRadius.circular(14),
+// //         border: Border.all(
+// //           color: !isAvailable
+// //               ? const Color(0xFFE5E5E5)
+// //               : inCart
+// //               ? _C.primary.withOpacity(0.4)
+// //               : _C.border,
+// //           width: inCart ? 1.5 : 1,
+// //         ),
+// //         boxShadow: (inCart && isAvailable)
+// //             ? [
+// //                 BoxShadow(
+// //                   color: _C.primary.withOpacity(0.08),
+// //                   blurRadius: 8,
+// //                   offset: const Offset(0, 3),
+// //                 ),
+// //               ]
+// //             : [],
+// //       ),
+// //       child: Row(
+// //         children: [
+// //           Opacity(
+// //             opacity: isAvailable ? 1.0 : 0.4,
+// //             child: Container(
+// //               width: 14,
+// //               height: 14,
+// //               decoration: BoxDecoration(
+// //                 borderRadius: BorderRadius.circular(3),
+// //                 border: Border.all(color: vegColor, width: 1.5),
+// //               ),
+// //               alignment: Alignment.center,
+// //               child: Container(
+// //                 width: 7,
+// //                 height: 7,
+// //                 decoration: BoxDecoration(
+// //                   color: vegColor,
+// //                   shape: BoxShape.circle,
+// //                 ),
+// //               ),
+// //             ),
+// //           ),
+// //           const SizedBox(width: 10),
+// //           Expanded(
+// //             child: Opacity(
+// //               opacity: isAvailable ? 1.0 : 0.5,
+// //               child: Column(
+// //                 crossAxisAlignment: CrossAxisAlignment.start,
+// //                 children: [
+// //                   Row(
+// //                     children: [
+// //                       Expanded(
+// //                         child: Text(
+// //                           item['name'] as String,
+// //                           style: TextStyle(
+// //                             fontSize: 14,
+// //                             fontWeight: FontWeight.w700,
+// //                             color: isAvailable ? _C.textPri : _C.textMute,
+// //                           ),
+// //                         ),
+// //                       ),
+// //                       if (!isAvailable)
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 6,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: const Color(0xFFDC2626).withOpacity(0.1),
+// //                             borderRadius: BorderRadius.circular(6),
+// //                           ),
+// //                           child: const Text(
+// //                             'Unavailable',
+// //                             style: TextStyle(
+// //                               fontSize: 9,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: Color(0xFFDC2626),
+// //                             ),
+// //                           ),
+// //                         )
+// //                       else if (isBestseller)
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 6,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: const Color(0xFFFF6B35).withOpacity(0.1),
+// //                             borderRadius: BorderRadius.circular(6),
+// //                           ),
+// //                           child: const Text(
+// //                             '🔥 Best',
+// //                             style: TextStyle(
+// //                               fontSize: 9,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: Color(0xFFFF6B35),
+// //                             ),
+// //                           ),
+// //                         ),
+// //                     ],
+// //                   ),
+// //                   if (item['description'] != null &&
+// //                       (item['description'] as String).isNotEmpty)
+// //                     Text(
+// //                       item['description'] as String,
+// //                       style: const TextStyle(fontSize: 11, color: _C.textMute),
+// //                       maxLines: 1,
+// //                       overflow: TextOverflow.ellipsis,
+// //                     ),
+// //                   Text(
+// //                     item['category_name'] as String? ?? '',
+// //                     style: const TextStyle(fontSize: 10, color: _C.textMute),
+// //                   ),
+// //                 ],
+// //               ),
+// //             ),
+// //           ),
+// //           Opacity(
+// //             opacity: isAvailable ? 1.0 : 0.4,
+// //             child: Column(
+// //               crossAxisAlignment: CrossAxisAlignment.end,
+// //               children: [
+// //                 if (item['discount_price'] != null)
+// //                   Text(
+// //                     '₹${(item['price'] as num).toStringAsFixed(0)}',
+// //                     style: const TextStyle(
+// //                       fontSize: 11,
+// //                       color: _C.textMute,
+// //                       decoration: TextDecoration.lineThrough,
+// //                     ),
+// //                   ),
+// //                 Text(
+// //                   '₹${price.toStringAsFixed(0)}',
+// //                   style: TextStyle(
+// //                     fontSize: 14,
+// //                     fontWeight: FontWeight.w800,
+// //                     color: isAvailable ? _C.textPri : _C.textMute,
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //           const SizedBox(width: 12),
+// //           if (!isAvailable)
+// //             Container(
+// //               width: 32,
+// //               height: 32,
+// //               decoration: BoxDecoration(
+// //                 color: const Color(0xFFE5E5E5),
+// //                 borderRadius: BorderRadius.circular(9),
+// //               ),
+// //               child: const Icon(
+// //                 Icons.block,
+// //                 color: Color(0xFFAAAAAA),
+// //                 size: 16,
+// //               ),
+// //             )
+// //           else if (quantity == 0)
+// //             GestureDetector(
+// //               onTap: onAdd,
+// //               child: Container(
+// //                 width: 32,
+// //                 height: 32,
+// //                 decoration: BoxDecoration(
+// //                   color: _C.primary,
+// //                   borderRadius: BorderRadius.circular(9),
+// //                 ),
+// //                 child: const Icon(Icons.add, color: Colors.white, size: 18),
+// //               ),
+// //             )
+// //           else
+// //             Row(
+// //               children: [
+// //                 GestureDetector(
+// //                   onTap: onRemove,
+// //                   child: Container(
+// //                     width: 28,
+// //                     height: 28,
+// //                     decoration: BoxDecoration(
+// //                       color: _C.primaryL,
+// //                       borderRadius: BorderRadius.circular(8),
+// //                     ),
+// //                     child: const Icon(
+// //                       Icons.remove,
+// //                       color: _C.primary,
+// //                       size: 16,
+// //                     ),
+// //                   ),
+// //                 ),
+// //                 SizedBox(
+// //                   width: 28,
+// //                   child: Text(
+// //                     '$quantity',
+// //                     textAlign: TextAlign.center,
+// //                     style: const TextStyle(
+// //                       fontSize: 14,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                 ),
+// //                 GestureDetector(
+// //                   onTap: onAdd,
+// //                   child: Container(
+// //                     width: 28,
+// //                     height: 28,
+// //                     decoration: BoxDecoration(
+// //                       color: _C.primary,
+// //                       borderRadius: BorderRadius.circular(8),
+// //                     ),
+// //                     child: const Icon(Icons.add, color: Colors.white, size: 16),
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //         ],
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  CART VIEW
+// // // ══════════════════════════════════════════════════════════════
+// // class _CartView extends StatelessWidget {
+// //   final List<CartItem> cartItems;
+// //   final OrderType orderType;
+// //   final List<Map<String, dynamic>> tables;
+// //   final String? selectedTableId;
+// //   final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
+// //   final double cartSubtotal, cartTax, cartTotal;
+// //   final bool placing;
+// //   final ValueChanged<OrderType> onTypeChanged;
+// //   final Function(String id, int num) onTableSelected;
+// //   final ValueChanged<Map<String, dynamic>> onAdd;
+// //   final ValueChanged<String> onRemove;
+// //   final VoidCallback onPlaceOrder;
+
+// //   const _CartView({
+// //     Key? key,
+// //     required this.cartItems,
+// //     required this.orderType,
+// //     required this.tables,
+// //     required this.selectedTableId,
+// //     required this.customerCtrl,
+// //     required this.phoneCtrl,
+// //     required this.noteCtrl,
+// //     required this.cartSubtotal,
+// //     required this.cartTax,
+// //     required this.cartTotal,
+// //     required this.placing,
+// //     required this.onTypeChanged,
+// //     required this.onTableSelected,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //     required this.onPlaceOrder,
+// //   }) : super(key: key);
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     if (cartItems.isEmpty) {
+// //       return const Center(
+// //         child: Column(
+// //           mainAxisSize: MainAxisSize.min,
+// //           children: [
+// //             Text('🛒', style: TextStyle(fontSize: 52)),
+// //             SizedBox(height: 16),
+// //             Text(
+// //               'Cart is empty',
+// //               style: TextStyle(
+// //                 fontSize: 16,
+// //                 fontWeight: FontWeight.w700,
+// //                 color: _C.textPri,
+// //               ),
+// //             ),
+// //             SizedBox(height: 6),
+// //             Text(
+// //               'Go back to add items',
+// //               style: TextStyle(fontSize: 13, color: _C.textSec),
+// //             ),
+// //           ],
+// //         ),
+// //       );
+// //     }
+
+// //     return ListView(
+// //       padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+// //       children: [
+// //         // Order type
+// //         _SectionLabel('Order Type'),
+// //         const SizedBox(height: 10),
+// //         Row(
+// //           children: OrderType.values.map((t) {
+// //             final isSel = orderType == t;
+// //             return Expanded(
+// //               child: Padding(
+// //                 padding: const EdgeInsets.only(right: 8),
+// //                 child: GestureDetector(
+// //                   onTap: () => onTypeChanged(t),
+// //                   child: AnimatedContainer(
+// //                     duration: const Duration(milliseconds: 150),
+// //                     padding: const EdgeInsets.symmetric(vertical: 11),
+// //                     decoration: BoxDecoration(
+// //                       color: isSel ? _C.primaryL : _C.surface,
+// //                       borderRadius: BorderRadius.circular(12),
+// //                       border: Border.all(
+// //                         color: isSel ? _C.primary : _C.border,
+// //                         width: isSel ? 1.5 : 1,
+// //                       ),
+// //                     ),
+// //                     child: Column(
+// //                       children: [
+// //                         Text(t.emoji, style: const TextStyle(fontSize: 18)),
+// //                         const SizedBox(height: 4),
+// //                         Text(
+// //                           t.label,
+// //                           style: TextStyle(
+// //                             fontSize: 11,
+// //                             fontWeight: FontWeight.w700,
+// //                             color: isSel ? _C.primary : _C.textSec,
+// //                           ),
+// //                         ),
+// //                       ],
+// //                     ),
+// //                   ),
+// //                 ),
+// //               ),
+// //             );
+// //           }).toList(),
+// //         ),
+// //         const SizedBox(height: 16),
+
+// //         // ── TABLE PICKER ─────────────────────────────────────────
+// //         if (orderType == OrderType.dineIn) ...[
+// //           _SectionLabel('Select Table'),
+// //           const SizedBox(height: 6),
+
+// //           // Legend — 4 statuses, cleaning shown as disabled
+// //           Padding(
+// //             padding: const EdgeInsets.only(bottom: 10),
+// //             child: Wrap(
+// //               spacing: 14,
+// //               runSpacing: 4,
+// //               children: const [
+// //                 _LegendDot(color: _C.available, label: 'Available'),
+// //                 _LegendDot(color: _C.occupied, label: 'Occupied (can order)'),
+// //                 _LegendDot(color: _C.reserved, label: 'Reserved (can order)'),
+// //                 _LegendDot(color: _C.cleaning, label: 'Cleaning (no order)'),
+// //               ],
+// //             ),
+// //           ),
+
+// //           if (tables.isEmpty)
+// //             Container(
+// //               padding: const EdgeInsets.all(14),
+// //               decoration: BoxDecoration(
+// //                 color: const Color(0xFFFEF2F2),
+// //                 borderRadius: BorderRadius.circular(12),
+// //                 border: Border.all(
+// //                   color: const Color(0xFFDC2626).withOpacity(0.2),
+// //                 ),
+// //               ),
+// //               child: const Row(
+// //                 children: [
+// //                   Text('⚠️', style: TextStyle(fontSize: 16)),
+// //                   SizedBox(width: 8),
+// //                   Expanded(
+// //                     child: Text(
+// //                       'No tables found',
+// //                       style: TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ),
+// //             )
+// //           else
+// //             Wrap(
+// //               spacing: 10,
+// //               runSpacing: 10,
+// //               children: tables.map((t) {
+// //                 final tid = t['id'] as String;
+// //                 final num = t['table_number'] as int;
+// //                 final cap = t['capacity'] as int;
+// //                 final status = t['status'] as String? ?? 'available';
+// //                 final customer = t['current_customer_name'] as String?;
+// //                 final isSel = selectedTableId == tid;
+// //                 final canSelect = _tableIsSelectable(
+// //                   status,
+// //                 ); // cleaning = false, rest = true
+// //                 final statusColor = _tableStatusColor(status);
+
+// //                 return GestureDetector(
+// //                   onTap: canSelect ? () => onTableSelected(tid, num) : null,
+// //                   child: AnimatedContainer(
+// //                     duration: const Duration(milliseconds: 150),
+// //                     width: 82,
+// //                     padding: const EdgeInsets.symmetric(
+// //                       horizontal: 8,
+// //                       vertical: 10,
+// //                     ),
+// //                     decoration: BoxDecoration(
+// //                       color: isSel
+// //                           ? _C.primary
+// //                           : !canSelect
+// //                           ? const Color(0xFFF5F5F5) // cleaning: greyed out
+// //                           : statusColor.withOpacity(0.08),
+// //                       borderRadius: BorderRadius.circular(12),
+// //                       border: Border.all(
+// //                         color: isSel
+// //                             ? _C.primary
+// //                             : !canSelect
+// //                             ? const Color(0xFFDDDDDD) // cleaning: muted border
+// //                             : statusColor.withOpacity(0.5),
+// //                         width: isSel ? 2 : 1,
+// //                       ),
+// //                       boxShadow: isSel
+// //                           ? [
+// //                               BoxShadow(
+// //                                 color: _C.primary.withOpacity(0.3),
+// //                                 blurRadius: 8,
+// //                                 offset: const Offset(0, 4),
+// //                               ),
+// //                             ]
+// //                           : [],
+// //                     ),
+// //                     child: Column(
+// //                       mainAxisSize: MainAxisSize.min,
+// //                       children: [
+// //                         Text(
+// //                           _tableStatusEmoji(status),
+// //                           style: const TextStyle(fontSize: 14),
+// //                         ),
+// //                         const SizedBox(height: 3),
+// //                         Text(
+// //                           'T$num',
+// //                           style: TextStyle(
+// //                             fontSize: 15,
+// //                             fontWeight: FontWeight.w900,
+// //                             color: isSel
+// //                                 ? Colors.white
+// //                                 : !canSelect
+// //                                 ? _C
+// //                                       .textMute // cleaning: muted text
+// //                                 : statusColor,
+// //                           ),
+// //                         ),
+// //                         Text(
+// //                           '$cap seats',
+// //                           style: TextStyle(
+// //                             fontSize: 9,
+// //                             color: isSel ? Colors.white70 : _C.textMute,
+// //                           ),
+// //                         ),
+// //                         const SizedBox(height: 3),
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 5,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: isSel
+// //                                 ? Colors.white.withOpacity(0.2)
+// //                                 : !canSelect
+// //                                 ? const Color(0xFFEEEEEE)
+// //                                 : statusColor.withOpacity(0.15),
+// //                             borderRadius: BorderRadius.circular(4),
+// //                           ),
+// //                           child: Text(
+// //                             _statusLabel(status),
+// //                             style: TextStyle(
+// //                               fontSize: 8,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: isSel
+// //                                   ? Colors.white
+// //                                   : !canSelect
+// //                                   ? _C.textMute
+// //                                   : statusColor,
+// //                             ),
+// //                           ),
+// //                         ),
+// //                         // Show customer name for occupied tables
+// //                         if (customer != null &&
+// //                             customer.isNotEmpty &&
+// //                             !isSel) ...[
+// //                           const SizedBox(height: 3),
+// //                           Text(
+// //                             customer,
+// //                             style: const TextStyle(
+// //                               fontSize: 8,
+// //                               color: _C.textMute,
+// //                             ),
+// //                             overflow: TextOverflow.ellipsis,
+// //                             textAlign: TextAlign.center,
+// //                           ),
+// //                         ],
+// //                         // "Cleaning" lock icon hint
+// //                         if (!canSelect) ...[
+// //                           const SizedBox(height: 3),
+// //                           const Icon(
+// //                             Icons.lock_outline_rounded,
+// //                             size: 10,
+// //                             color: _C.textMute,
+// //                           ),
+// //                         ],
+// //                       ],
+// //                     ),
+// //                   ),
+// //                 );
+// //               }).toList(),
+// //             ),
+// //           const SizedBox(height: 14),
+// //         ],
+
+// //         // Customer info
+// //         Row(
+// //           children: [
+// //             Expanded(
+// //               child: _Field(
+// //                 label: 'Customer Name',
+// //                 hint: 'Enter name',
+// //                 ctrl: customerCtrl,
+// //               ),
+// //             ),
+// //             const SizedBox(width: 10),
+// //             Expanded(
+// //               child: _Field(label: 'Phone', hint: 'Optional', ctrl: phoneCtrl),
+// //             ),
+// //           ],
+// //         ),
+// //         const SizedBox(height: 14),
+
+// //         // Cart items
+// //         _SectionLabel('Cart (${cartItems.length} items)'),
+// //         const SizedBox(height: 10),
+// //         Container(
+// //           decoration: BoxDecoration(
+// //             color: _C.surface,
+// //             borderRadius: BorderRadius.circular(16),
+// //             border: Border.all(color: _C.border),
+// //           ),
+// //           child: Column(
+// //             children: cartItems.asMap().entries.map((e) {
+// //               final i = e.key;
+// //               final ci = e.value;
+// //               return Column(
+// //                 children: [
+// //                   Padding(
+// //                     padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+// //                     child: Row(
+// //                       children: [
+// //                         Expanded(
+// //                           child: Column(
+// //                             crossAxisAlignment: CrossAxisAlignment.start,
+// //                             children: [
+// //                               Text(
+// //                                 ci.itemName,
+// //                                 style: const TextStyle(
+// //                                   fontSize: 14,
+// //                                   fontWeight: FontWeight.w700,
+// //                                   color: _C.textPri,
+// //                                 ),
+// //                               ),
+// //                               Text(
+// //                                 '₹${ci.itemPrice.toStringAsFixed(0)} each',
+// //                                 style: const TextStyle(
+// //                                   fontSize: 11,
+// //                                   color: _C.textMute,
+// //                                 ),
+// //                               ),
+// //                             ],
+// //                           ),
+// //                         ),
+// //                         Text(
+// //                           '₹${ci.subtotal.toStringAsFixed(0)}',
+// //                           style: const TextStyle(
+// //                             fontSize: 14,
+// //                             fontWeight: FontWeight.w800,
+// //                             color: _C.textPri,
+// //                           ),
+// //                         ),
+// //                         const SizedBox(width: 10),
+// //                         Row(
+// //                           children: [
+// //                             GestureDetector(
+// //                               onTap: () => onRemove(ci.menuItemId),
+// //                               child: Container(
+// //                                 width: 26,
+// //                                 height: 26,
+// //                                 decoration: BoxDecoration(
+// //                                   color: _C.primaryL,
+// //                                   borderRadius: BorderRadius.circular(7),
+// //                                 ),
+// //                                 child: const Icon(
+// //                                   Icons.remove,
+// //                                   color: _C.primary,
+// //                                   size: 14,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                             SizedBox(
+// //                               width: 28,
+// //                               child: Text(
+// //                                 '${ci.quantity}',
+// //                                 textAlign: TextAlign.center,
+// //                                 style: const TextStyle(
+// //                                   fontSize: 14,
+// //                                   fontWeight: FontWeight.w900,
+// //                                   color: _C.primary,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                             GestureDetector(
+// //                               onTap: () => onAdd({
+// //                                 'id': ci.menuItemId,
+// //                                 'name': ci.itemName,
+// //                                 'price': ci.itemPrice,
+// //                                 'is_veg': ci.isVeg,
+// //                                 'category_name': ci.categoryName,
+// //                                 'is_available': true,
+// //                               }),
+// //                               child: Container(
+// //                                 width: 26,
+// //                                 height: 26,
+// //                                 decoration: BoxDecoration(
+// //                                   color: _C.primary,
+// //                                   borderRadius: BorderRadius.circular(7),
+// //                                 ),
+// //                                 child: const Icon(
+// //                                   Icons.add,
+// //                                   color: Colors.white,
+// //                                   size: 14,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                           ],
+// //                         ),
+// //                       ],
+// //                     ),
+// //                   ),
+// //                   if (i < cartItems.length - 1)
+// //                     const Divider(height: 1, color: _C.border),
+// //                 ],
+// //               );
+// //             }).toList(),
+// //           ),
+// //         ),
+// //         const SizedBox(height: 14),
+
+// //         _Field(
+// //           label: 'Order Notes',
+// //           hint: 'Special instructions...',
+// //           ctrl: noteCtrl,
+// //         ),
+// //         const SizedBox(height: 18),
+
+// //         // Bill summary
+// //         Container(
+// //           padding: const EdgeInsets.all(16),
+// //           decoration: BoxDecoration(
+// //             color: _C.primaryL,
+// //             borderRadius: BorderRadius.circular(16),
+// //           ),
+// //           child: Column(
+// //             children: [
+// //               _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
+// //               const SizedBox(height: 6),
+// //               _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+// //               const Divider(color: _C.border, height: 16),
+// //               Row(
+// //                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+// //                 children: [
+// //                   const Text(
+// //                     'Total',
+// //                     style: TextStyle(
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                   Text(
+// //                     '₹${cartTotal.toStringAsFixed(0)}',
+// //                     style: const TextStyle(
+// //                       fontSize: 22,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ),
+// //             ],
+// //           ),
+// //         ),
+// //         const SizedBox(height: 18),
+
+// //         // Place order button
+// //         GestureDetector(
+// //           onTap: placing ? null : onPlaceOrder,
+// //           child: Container(
+// //             width: double.infinity,
+// //             padding: const EdgeInsets.symmetric(vertical: 17),
+// //             decoration: BoxDecoration(
+// //               gradient: LinearGradient(
+// //                 colors: placing
+// //                     ? [Colors.grey, Colors.grey.shade400]
+// //                     : [_C.primary, _C.primaryD],
+// //               ),
+// //               borderRadius: BorderRadius.circular(16),
+// //               boxShadow: placing
+// //                   ? []
+// //                   : [
+// //                       BoxShadow(
+// //                         color: _C.primary.withOpacity(0.35),
+// //                         blurRadius: 16,
+// //                         offset: const Offset(0, 6),
+// //                       ),
+// //                     ],
+// //             ),
+// //             child: Row(
+// //               mainAxisAlignment: MainAxisAlignment.center,
+// //               children: [
+// //                 if (placing) ...[
+// //                   const SizedBox(
+// //                     width: 20,
+// //                     height: 20,
+// //                     child: CircularProgressIndicator(
+// //                       color: Colors.white,
+// //                       strokeWidth: 2,
+// //                     ),
+// //                   ),
+// //                   const SizedBox(width: 10),
+// //                   const Text(
+// //                     'Placing Order...',
+// //                     style: TextStyle(
+// //                       color: Colors.white,
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                     ),
+// //                   ),
+// //                 ] else ...[
+// //                   const Icon(
+// //                     Icons.check_circle_outline,
+// //                     color: Colors.white,
+// //                     size: 20,
+// //                   ),
+// //                   const SizedBox(width: 10),
+// //                   const Text(
+// //                     'Place Order',
+// //                     style: TextStyle(
+// //                       color: Colors.white,
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ],
+// //             ),
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // String _statusLabel(String status) {
+// //   switch (status) {
+// //     case 'occupied':
+// //       return 'Occupied';
+// //     case 'reserved':
+// //       return 'Reserved';
+// //     case 'cleaning':
+// //       return 'Cleaning';
+// //     default:
+// //       return 'Free';
+// //   }
+// // }
+
+// // // ── Legend dot ───────────────────────────────────────────────────
+// // class _LegendDot extends StatelessWidget {
+// //   final Color color;
+// //   final String label;
+// //   const _LegendDot({required this.color, required this.label});
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Row(
+// //       mainAxisSize: MainAxisSize.min,
+// //       children: [
+// //         Container(
+// //           width: 8,
+// //           height: 8,
+// //           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+// //         ),
+// //         const SizedBox(width: 4),
+// //         Text(
+// //           label,
+// //           style: const TextStyle(
+// //             fontSize: 10,
+// //             color: _C.textSec,
+// //             fontWeight: FontWeight.w600,
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // // ── Helpers ───────────────────────────────────────────────────────
+// // class _SectionLabel extends StatelessWidget {
+// //   final String text;
+// //   const _SectionLabel(this.text);
+// //   @override
+// //   Widget build(BuildContext context) => Text(
+// //     text.toUpperCase(),
+// //     style: const TextStyle(
+// //       fontSize: 10,
+// //       fontWeight: FontWeight.w800,
+// //       color: _C.textMute,
+// //       letterSpacing: 1.4,
+// //     ),
+// //   );
+// // }
+
+// // class _Field extends StatelessWidget {
+// //   final String label, hint;
+// //   final TextEditingController ctrl;
+// //   const _Field({required this.label, required this.hint, required this.ctrl});
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Column(
+// //       crossAxisAlignment: CrossAxisAlignment.start,
+// //       children: [
+// //         Text(
+// //           label,
+// //           style: const TextStyle(
+// //             fontSize: 11,
+// //             fontWeight: FontWeight.w700,
+// //             color: _C.textSec,
+// //             letterSpacing: 0.3,
+// //           ),
+// //         ),
+// //         const SizedBox(height: 6),
+// //         TextField(
+// //           controller: ctrl,
+// //           style: const TextStyle(
+// //             fontSize: 14,
+// //             fontWeight: FontWeight.w600,
+// //             color: _C.textPri,
+// //           ),
+// //           decoration: InputDecoration(
+// //             hintText: hint,
+// //             hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+// //             filled: true,
+// //             fillColor: _C.surface,
+// //             contentPadding: const EdgeInsets.symmetric(
+// //               horizontal: 14,
+// //               vertical: 12,
+// //             ),
+// //             border: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.border),
+// //             ),
+// //             enabledBorder: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.border),
+// //             ),
+// //             focusedBorder: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.primary, width: 1.5),
+// //             ),
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // class _BillRow extends StatelessWidget {
+// //   final String label, value;
+// //   const _BillRow(this.label, this.value);
+// //   @override
+// //   Widget build(BuildContext context) => Row(
+// //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+// //     children: [
+// //       Text(label, style: const TextStyle(fontSize: 13, color: _C.textSec)),
+// //       Text(
+// //         value,
+// //         style: const TextStyle(
+// //           fontSize: 13,
+// //           fontWeight: FontWeight.w700,
+// //           color: _C.textPri,
+// //         ),
+// //       ),
+// //     ],
+// //   );
+// // }
+
+// // /*
+// // import 'package:flutter/material.dart';
+// // import 'package:pos_app/models/order_modal.dart';
+// // import 'package:provider/provider.dart';
+// // import 'package:supabase_flutter/supabase_flutter.dart';
+// // import 'package:shared_preferences/shared_preferences.dart';
+// // import '../../providers/orders_provider.dart';
+
+// // class _C {
+// //   static const bg = Color(0xFFF6F6FB);
+// //   static const surface = Color(0xFFFFFFFF);
+// //   static const surfaceAlt = Color(0xFFF2F2F8);
+// //   static const border = Color(0xFFEAEAF4);
+// //   static const primary = Color(0xFF5A3FD6);
+// //   static const primaryL = Color(0xFFEDE9FF);
+// //   static const primaryD = Color(0xFF3D2AA0);
+// //   static const textPri = Color(0xFF1A1A2E);
+// //   static const textSec = Color(0xFF6B6B86);
+// //   static const textMute = Color(0xFFAAABBB);
+// //   static const occupied = Color(0xFFDC2626);
+// //   static const reserved = Color(0xFF7C3AED);
+// //   static const available = Color(0xFF059669);
+// //   static const cleaning = Color(0xFFD97706);
+// // }
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  NEW ORDER SCREEN
+// // // ══════════════════════════════════════════════════════════════
+// // class NewOrderScreen extends StatefulWidget {
+// //   final String? preselectedTableId;
+// //   final int? preselectedTableNumber;
+
+// //   const NewOrderScreen({
+// //     Key? key,
+// //     this.preselectedTableId,
+// //     this.preselectedTableNumber,
+// //   }) : super(key: key);
+
+// //   @override
+// //   State<NewOrderScreen> createState() => _NewOrderScreenState();
+// // }
+
+// // class _NewOrderScreenState extends State<NewOrderScreen> {
+// //   String _businessId = '';
+
+// //   List<Map<String, dynamic>> _categories = [];
+// //   // ALL items (available + unavailable) so we can show grayed-out unavailable ones
+// //   List<Map<String, dynamic>> _allMenuItems = [];
+// //   bool _menuLoading = true;
+
+// //   // ALL tables (not just available) so the staff can see the floor status
+// //   List<Map<String, dynamic>> _tables = [];
+
+// //   final Map<String, CartItem> _cart = {};
+
+// //   OrderType _orderType = OrderType.dineIn;
+// //   String? _selectedTableId;
+// //   int? _selectedTableNumber;
+// //   final _customerCtrl = TextEditingController();
+// //   final _phoneCtrl = TextEditingController();
+// //   final _noteCtrl = TextEditingController();
+// //   final _searchCtrl = TextEditingController();
+
+// //   String _selectedCategory = 'All';
+// //   String _searchQuery = '';
+// //   bool _showCart = false;
+// //   bool _placing = false;
+
+// //   // ── Computed ─────────────────────────────────────────────────
+// //   List<CartItem> get cartItems => _cart.values.toList();
+// //   double get cartSubtotal => cartItems.fold(0.0, (s, i) => s + i.subtotal);
+// //   double get cartTax => cartSubtotal * 0.05;
+// //   double get cartTotal => cartSubtotal + cartTax;
+// //   int get cartCount => cartItems.fold(0, (s, i) => s + i.quantity);
+
+// //   /// Returns ALL items in the selected category/search — including unavailable
+// //   List<Map<String, dynamic>> get filteredItems {
+// //     List<Map<String, dynamic>> items = _selectedCategory == 'All'
+// //         ? _allMenuItems
+// //         : _allMenuItems
+// //               .where((i) => i['category_name'] == _selectedCategory)
+// //               .toList();
+// //     if (_searchQuery.isNotEmpty) {
+// //       final q = _searchQuery.toLowerCase();
+// //       items = items
+// //           .where((i) => (i['name'] as String).toLowerCase().contains(q))
+// //           .toList();
+// //     }
+// //     // Sort: available first, unavailable at the bottom
+// //     items.sort((a, b) {
+// //       final aAvail = a['is_available'] as bool? ?? true;
+// //       final bAvail = b['is_available'] as bool? ?? true;
+// //       if (aAvail == bAvail) return 0;
+// //       return aAvail ? -1 : 1;
+// //     });
+// //     return items;
+// //   }
+
+// //   // ── Lifecycle ─────────────────────────────────────────────────
+// //   @override
+// //   void initState() {
+// //     super.initState();
+// //     _selectedTableId = widget.preselectedTableId;
+// //     _selectedTableNumber = widget.preselectedTableNumber;
+// //     _load();
+// //   }
+
+// //   @override
+// //   void dispose() {
+// //     _customerCtrl.dispose();
+// //     _phoneCtrl.dispose();
+// //     _noteCtrl.dispose();
+// //     _searchCtrl.dispose();
+// //     super.dispose();
+// //   }
+
+// //   Future<void> _load() async {
+// //     final prefs = await SharedPreferences.getInstance();
+// //     _businessId = prefs.getString('businessId') ?? '';
+// //     await Future.wait([_loadMenu(), _loadTables()]);
+// //   }
+
+// //   Future<void> _loadMenu() async {
+// //     if (_businessId.isEmpty) return;
+// //     try {
+// //       final cats = await Supabase.instance.client
+// //           .from('menu_categories')
+// //           .select('id, name, icon, color_hex')
+// //           .eq('business_id', _businessId)
+// //           .eq('is_active', true)
+// //           .order('display_order');
+
+// //       // Fetch ALL items — including unavailable — so we can show them grayed out
+// //       final items = await Supabase.instance.client
+// //           .from('menu_items')
+// //           .select(
+// //             'id, name, description, price, discount_price, is_veg, is_available, '
+// //             'is_featured, is_best_seller, preparation_time, category_id, '
+// //             'menu_categories!inner(name, icon, color_hex)',
+// //           )
+// //           .eq('business_id', _businessId)
+// //           .order('sort_order');
+
+// //       setState(() {
+// //         _categories = (cats as List).cast<Map<String, dynamic>>();
+// //         _allMenuItems = (items as List).map((item) {
+// //           final cat = item['menu_categories'] as Map<String, dynamic>? ?? {};
+// //           return {
+// //             ...Map<String, dynamic>.from(item as Map),
+// //             'category_name': cat['name'] ?? '',
+// //             'category_icon': cat['icon'] ?? '🍽️',
+// //             'category_color': cat['color_hex'] ?? '#D4673A',
+// //           };
+// //         }).toList();
+// //         _menuLoading = false;
+// //       });
+// //     } catch (e) {
+// //       setState(() => _menuLoading = false);
+// //     }
+// //   }
+
+// //   Future<void> _loadTables() async {
+// //     if (_businessId.isEmpty) return;
+// //     try {
+// //       // Load ALL active tables (available, occupied, reserved, cleaning)
+// //       final data = await Supabase.instance.client
+// //           .from('restaurant_tables')
+// //           .select(
+// //             'id, table_number, capacity, status, section, current_customer_name',
+// //           )
+// //           .eq('business_id', _businessId)
+// //           .eq('is_active', true)
+// //           .order('table_number');
+
+// //       setState(() => _tables = (data as List).cast<Map<String, dynamic>>());
+// //     } catch (_) {}
+// //   }
+
+// //   // ── Cart operations ───────────────────────────────────────────
+// //   void _addItem(Map<String, dynamic> item) {
+// //     // Guard: do not add unavailable items
+// //     if (!(item['is_available'] as bool? ?? true)) return;
+
+// //     final id = item['id'] as String;
+// //     setState(() {
+// //       if (_cart.containsKey(id)) {
+// //         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity + 1);
+// //       } else {
+// //         _cart[id] = CartItem(
+// //           menuItemId: id,
+// //           itemName: item['name'] as String,
+// //           itemPrice: (item['discount_price'] ?? item['price'] as num)
+// //               .toDouble(),
+// //           categoryName: item['category_name'] as String?,
+// //           isVeg: item['is_veg'] as bool? ?? true,
+// //         );
+// //       }
+// //     });
+// //   }
+
+// //   void _removeItem(String id) {
+// //     setState(() {
+// //       if (!_cart.containsKey(id)) return;
+// //       if (_cart[id]!.quantity <= 1) {
+// //         _cart.remove(id);
+// //       } else {
+// //         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity - 1);
+// //       }
+// //     });
+// //   }
+
+// //   Future<void> _placeOrder() async {
+// //     if (_cart.isEmpty) {
+// //       _snack('Add items to cart first');
+// //       return;
+// //     }
+// //     if (_orderType == OrderType.dineIn && _selectedTableId == null) {
+// //       _snack('Please select a table');
+// //       return;
+// //     }
+
+// //     setState(() => _placing = true);
+
+// //     try {
+// //       final prov = context.read<OrdersProvider>();
+// //       await prov.createOrder(
+// //         cartItems: cartItems,
+// //         orderType: _orderType,
+// //         tableId: _selectedTableId,
+// //         tableNumber: _selectedTableNumber,
+// //         customerName: _customerCtrl.text.isEmpty ? null : _customerCtrl.text,
+// //         customerPhone: _phoneCtrl.text.isEmpty ? null : _phoneCtrl.text,
+// //         notes: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
+// //       );
+// //       if (mounted) Navigator.pop(context);
+// //     } catch (e) {
+// //       _snack('Failed to place order: $e');
+// //     } finally {
+// //       if (mounted) setState(() => _placing = false);
+// //     }
+// //   }
+
+// //   void _snack(String msg) =>
+// //       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Scaffold(
+// //       backgroundColor: _C.bg,
+// //       body: SafeArea(
+// //         child: Column(
+// //           children: [
+// //             _buildHeader(),
+// //             Expanded(
+// //               child: AnimatedSwitcher(
+// //                 duration: const Duration(milliseconds: 250),
+// //                 child: _showCart
+// //                     ? _CartView(
+// //                         key: const ValueKey('cart'),
+// //                         cartItems: cartItems,
+// //                         orderType: _orderType,
+// //                         tables: _tables, // ALL tables
+// //                         selectedTableId: _selectedTableId,
+// //                         customerCtrl: _customerCtrl,
+// //                         phoneCtrl: _phoneCtrl,
+// //                         noteCtrl: _noteCtrl,
+// //                         cartSubtotal: cartSubtotal,
+// //                         cartTax: cartTax,
+// //                         cartTotal: cartTotal,
+// //                         placing: _placing,
+// //                         onTypeChanged: (t) => setState(() => _orderType = t),
+// //                         onTableSelected: (id, num) => setState(() {
+// //                           _selectedTableId = id;
+// //                           _selectedTableNumber = num;
+// //                         }),
+// //                         onAdd: _addItem,
+// //                         onRemove: (id) => _removeItem(id),
+// //                         onPlaceOrder: _placeOrder,
+// //                       )
+// //                     : _MenuView(
+// //                         key: const ValueKey('menu'),
+// //                         categories: _categories,
+// //                         items: filteredItems,
+// //                         selectedCategory: _selectedCategory,
+// //                         searchCtrl: _searchCtrl,
+// //                         cart: _cart,
+// //                         loading: _menuLoading,
+// //                         onCategoryChanged: (c) =>
+// //                             setState(() => _selectedCategory = c),
+// //                         onSearchChanged: (q) =>
+// //                             setState(() => _searchQuery = q),
+// //                         onAdd: _addItem,
+// //                         onRemove: (id) => _removeItem(id),
+// //                       ),
+// //               ),
+// //             ),
+// //           ],
+// //         ),
+// //       ),
+// //     );
+// //   }
+
+// //   Widget _buildHeader() {
+// //     return Container(
+// //       color: _C.surface,
+// //       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+// //       child: Row(
+// //         children: [
+// //           GestureDetector(
+// //             onTap: () => Navigator.pop(context),
+// //             child: Container(
+// //               padding: const EdgeInsets.all(10),
+// //               decoration: BoxDecoration(
+// //                 color: _C.surfaceAlt,
+// //                 borderRadius: BorderRadius.circular(12),
+// //                 border: Border.all(color: _C.border),
+// //               ),
+// //               child: const Icon(
+// //                 Icons.arrow_back_ios_new,
+// //                 size: 16,
+// //                 color: _C.textPri,
+// //               ),
+// //             ),
+// //           ),
+// //           const SizedBox(width: 14),
+// //           const Expanded(
+// //             child: Column(
+// //               crossAxisAlignment: CrossAxisAlignment.start,
+// //               children: [
+// //                 Text(
+// //                   'New Order',
+// //                   style: TextStyle(
+// //                     fontSize: 20,
+// //                     fontWeight: FontWeight.w900,
+// //                     color: _C.textPri,
+// //                   ),
+// //                 ),
+// //                 Text(
+// //                   'Select items from menu',
+// //                   style: TextStyle(fontSize: 11, color: _C.textSec),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //           GestureDetector(
+// //             onTap: () => setState(() => _showCart = !_showCart),
+// //             child: AnimatedContainer(
+// //               duration: const Duration(milliseconds: 180),
+// //               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+// //               decoration: BoxDecoration(
+// //                 color: _showCart ? _C.primaryL : _C.primary,
+// //                 borderRadius: BorderRadius.circular(14),
+// //               ),
+// //               child: Row(
+// //                 children: [
+// //                   Icon(
+// //                     _showCart
+// //                         ? Icons.menu_book_rounded
+// //                         : Icons.shopping_cart_outlined,
+// //                     color: _showCart ? _C.primary : Colors.white,
+// //                     size: 18,
+// //                   ),
+// //                   const SizedBox(width: 6),
+// //                   Text(
+// //                     _showCart ? 'Menu' : 'Cart ($cartCount)',
+// //                     style: TextStyle(
+// //                       color: _showCart ? _C.primary : Colors.white,
+// //                       fontSize: 13,
+// //                       fontWeight: FontWeight.w800,
+// //                     ),
+// //                   ),
+// //                   if (!_showCart && cartTotal > 0) ...[
+// //                     const SizedBox(width: 6),
+// //                     Text(
+// //                       '₹${cartTotal.toStringAsFixed(0)}',
+// //                       style: const TextStyle(
+// //                         color: Colors.white70,
+// //                         fontSize: 11,
+// //                       ),
+// //                     ),
+// //                   ],
+// //                 ],
+// //               ),
+// //             ),
+// //           ),
+// //         ],
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // // ── Table status helpers ─────────────────────────────────────────
+// // Color _tableStatusColor(String status) {
+// //   switch (status) {
+// //     case 'occupied':
+// //       return _C.occupied;
+// //     case 'reserved':
+// //       return _C.reserved;
+// //     case 'cleaning':
+// //       return _C.cleaning;
+// //     default:
+// //       return _C.available;
+// //   }
+// // }
+
+// // String _tableStatusEmoji(String status) {
+// //   switch (status) {
+// //     case 'occupied':
+// //       return '🍽️';
+// //     case 'reserved':
+// //       return '📅';
+// //     case 'cleaning':
+// //       return '🧹';
+// //     default:
+// //       return '✅';
+// //   }
+// // }
+
+// // bool _tableIsSelectable(String status) => status == 'available';
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  MENU VIEW
+// // // ══════════════════════════════════════════════════════════════
+// // class _MenuView extends StatelessWidget {
+// //   final List<Map<String, dynamic>> categories;
+// //   final List<Map<String, dynamic>> items;
+// //   final String selectedCategory;
+// //   final TextEditingController searchCtrl;
+// //   final Map<String, CartItem> cart;
+// //   final bool loading;
+// //   final ValueChanged<String> onCategoryChanged;
+// //   final ValueChanged<String> onSearchChanged;
+// //   final ValueChanged<Map<String, dynamic>> onAdd;
+// //   final ValueChanged<String> onRemove;
+
+// //   const _MenuView({
+// //     Key? key,
+// //     required this.categories,
+// //     required this.items,
+// //     required this.selectedCategory,
+// //     required this.searchCtrl,
+// //     required this.cart,
+// //     required this.loading,
+// //     required this.onCategoryChanged,
+// //     required this.onSearchChanged,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //   }) : super(key: key);
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     if (loading)
+// //       return const Center(child: CircularProgressIndicator(color: _C.primary));
+
+// //     final unavailableCount = items
+// //         .where((i) => !(i['is_available'] as bool? ?? true))
+// //         .length;
+
+// //     return Column(
+// //       children: [
+// //         // Search
+// //         Padding(
+// //           padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+// //           child: SizedBox(
+// //             height: 42,
+// //             child: TextField(
+// //               controller: searchCtrl,
+// //               onChanged: onSearchChanged,
+// //               style: const TextStyle(fontSize: 14, color: _C.textPri),
+// //               decoration: InputDecoration(
+// //                 hintText: 'Search dishes...',
+// //                 hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+// //                 prefixIcon: const Icon(
+// //                   Icons.search_rounded,
+// //                   color: _C.textMute,
+// //                   size: 19,
+// //                 ),
+// //                 suffixIcon: searchCtrl.text.isNotEmpty
+// //                     ? GestureDetector(
+// //                         onTap: () {
+// //                           searchCtrl.clear();
+// //                           onSearchChanged('');
+// //                         },
+// //                         child: const Icon(
+// //                           Icons.close_rounded,
+// //                           size: 16,
+// //                           color: _C.textMute,
+// //                         ),
+// //                       )
+// //                     : null,
+// //                 filled: true,
+// //                 fillColor: _C.surface,
+// //                 contentPadding: EdgeInsets.zero,
+// //                 border: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.border),
+// //                 ),
+// //                 enabledBorder: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.border),
+// //                 ),
+// //                 focusedBorder: OutlineInputBorder(
+// //                   borderRadius: BorderRadius.circular(12),
+// //                   borderSide: const BorderSide(color: _C.primary, width: 1.5),
+// //                 ),
+// //               ),
+// //             ),
+// //           ),
+// //         ),
+// //         // Category chips
+// //         SizedBox(
+// //           height: 40,
+// //           child: ListView(
+// //             scrollDirection: Axis.horizontal,
+// //             padding: const EdgeInsets.only(left: 16, right: 8),
+// //             children: [
+// //               _CatChip(
+// //                 label: 'All',
+// //                 isSelected: selectedCategory == 'All',
+// //                 onTap: () => onCategoryChanged('All'),
+// //               ),
+// //               ...categories.map(
+// //                 (c) => _CatChip(
+// //                   label: '${c['icon'] ?? '🍽️'} ${c['name']}',
+// //                   isSelected: selectedCategory == c['name'],
+// //                   onTap: () => onCategoryChanged(c['name'] as String),
+// //                 ),
+// //               ),
+// //             ],
+// //           ),
+// //         ),
+// //         // Unavailable notice banner
+// //         if (unavailableCount > 0)
+// //           Container(
+// //             margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+// //             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+// //             decoration: BoxDecoration(
+// //               color: const Color(0xFFFFF4E0),
+// //               borderRadius: BorderRadius.circular(10),
+// //               border: Border.all(
+// //                 color: const Color(0xFFD97706).withOpacity(0.4),
+// //               ),
+// //             ),
+// //             child: Row(
+// //               children: [
+// //                 const Text('⚠️', style: TextStyle(fontSize: 13)),
+// //                 const SizedBox(width: 8),
+// //                 Text(
+// //                   '$unavailableCount item${unavailableCount > 1 ? 's' : ''} currently unavailable — shown below but cannot be added',
+// //                   style: const TextStyle(
+// //                     fontSize: 11,
+// //                     color: Color(0xFFB45309),
+// //                     fontWeight: FontWeight.w600,
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //         const SizedBox(height: 6),
+// //         // Items list
+// //         Expanded(
+// //           child: items.isEmpty
+// //               ? const Center(
+// //                   child: Column(
+// //                     mainAxisSize: MainAxisSize.min,
+// //                     children: [
+// //                       Text('🍽️', style: TextStyle(fontSize: 44)),
+// //                       SizedBox(height: 12),
+// //                       Text(
+// //                         'No items found',
+// //                         style: TextStyle(color: _C.textSec),
+// //                       ),
+// //                     ],
+// //                   ),
+// //                 )
+// //               : ListView.separated(
+// //                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+// //                   itemCount: items.length,
+// //                   separatorBuilder: (_, __) => const SizedBox(height: 8),
+// //                   itemBuilder: (_, i) {
+// //                     final item = items[i];
+// //                     final id = item['id'] as String;
+// //                     return _MenuTile(
+// //                       item: item,
+// //                       quantity: cart[id]?.quantity ?? 0,
+// //                       onAdd: () => onAdd(item),
+// //                       onRemove: () => onRemove(id),
+// //                     );
+// //                   },
+// //                 ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // class _CatChip extends StatelessWidget {
+// //   final String label;
+// //   final bool isSelected;
+// //   final VoidCallback onTap;
+// //   const _CatChip({
+// //     required this.label,
+// //     required this.isSelected,
+// //     required this.onTap,
+// //   });
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Padding(
+// //       padding: const EdgeInsets.only(right: 8),
+// //       child: GestureDetector(
+// //         onTap: onTap,
+// //         child: AnimatedContainer(
+// //           duration: const Duration(milliseconds: 150),
+// //           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+// //           decoration: BoxDecoration(
+// //             color: isSelected ? _C.primary : _C.surface,
+// //             borderRadius: BorderRadius.circular(20),
+// //             border: Border.all(color: isSelected ? _C.primary : _C.border),
+// //           ),
+// //           child: Text(
+// //             label,
+// //             style: TextStyle(
+// //               fontSize: 12,
+// //               fontWeight: FontWeight.w700,
+// //               color: isSelected ? Colors.white : _C.textSec,
+// //             ),
+// //           ),
+// //         ),
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // // ── Menu tile — handles available & unavailable states ───────────
+// // class _MenuTile extends StatelessWidget {
+// //   final Map<String, dynamic> item;
+// //   final int quantity;
+// //   final VoidCallback onAdd;
+// //   final VoidCallback onRemove;
+// //   const _MenuTile({
+// //     required this.item,
+// //     required this.quantity,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //   });
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     final isAvailable = item['is_available'] as bool? ?? true;
+// //     final inCart = quantity > 0;
+// //     final isVeg = item['is_veg'] as bool? ?? true;
+// //     final vegColor = isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+// //     final price = (item['discount_price'] ?? item['price'] as num).toDouble();
+// //     final isBestseller = item['is_best_seller'] as bool? ?? false;
+
+// //     return AnimatedContainer(
+// //       duration: const Duration(milliseconds: 150),
+// //       padding: const EdgeInsets.all(12),
+// //       decoration: BoxDecoration(
+// //         // Grayed out background for unavailable items
+// //         color: isAvailable ? _C.surface : const Color(0xFFF8F8F8),
+// //         borderRadius: BorderRadius.circular(14),
+// //         border: Border.all(
+// //           color: !isAvailable
+// //               ? const Color(0xFFE5E5E5)
+// //               : inCart
+// //               ? _C.primary.withOpacity(0.4)
+// //               : _C.border,
+// //           width: inCart ? 1.5 : 1,
+// //         ),
+// //         boxShadow: (inCart && isAvailable)
+// //             ? [
+// //                 BoxShadow(
+// //                   color: _C.primary.withOpacity(0.08),
+// //                   blurRadius: 8,
+// //                   offset: const Offset(0, 3),
+// //                 ),
+// //               ]
+// //             : [],
+// //       ),
+// //       child: Row(
+// //         children: [
+// //           // Veg indicator
+// //           Opacity(
+// //             opacity: isAvailable ? 1.0 : 0.4,
+// //             child: Container(
+// //               width: 14,
+// //               height: 14,
+// //               decoration: BoxDecoration(
+// //                 borderRadius: BorderRadius.circular(3),
+// //                 border: Border.all(color: vegColor, width: 1.5),
+// //               ),
+// //               alignment: Alignment.center,
+// //               child: Container(
+// //                 width: 7,
+// //                 height: 7,
+// //                 decoration: BoxDecoration(
+// //                   color: vegColor,
+// //                   shape: BoxShape.circle,
+// //                 ),
+// //               ),
+// //             ),
+// //           ),
+// //           const SizedBox(width: 10),
+// //           Expanded(
+// //             child: Opacity(
+// //               opacity: isAvailable ? 1.0 : 0.5,
+// //               child: Column(
+// //                 crossAxisAlignment: CrossAxisAlignment.start,
+// //                 children: [
+// //                   Row(
+// //                     children: [
+// //                       Expanded(
+// //                         child: Text(
+// //                           item['name'] as String,
+// //                           style: TextStyle(
+// //                             fontSize: 14,
+// //                             fontWeight: FontWeight.w700,
+// //                             color: isAvailable ? _C.textPri : _C.textMute,
+// //                             decoration: isAvailable
+// //                                 ? null
+// //                                 : TextDecoration.none,
+// //                           ),
+// //                         ),
+// //                       ),
+// //                       if (!isAvailable)
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 6,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: const Color(0xFFDC2626).withOpacity(0.1),
+// //                             borderRadius: BorderRadius.circular(6),
+// //                           ),
+// //                           child: const Text(
+// //                             'Unavailable',
+// //                             style: TextStyle(
+// //                               fontSize: 9,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: Color(0xFFDC2626),
+// //                             ),
+// //                           ),
+// //                         )
+// //                       else if (isBestseller)
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 6,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: const Color(0xFFFF6B35).withOpacity(0.1),
+// //                             borderRadius: BorderRadius.circular(6),
+// //                           ),
+// //                           child: const Text(
+// //                             '🔥 Best',
+// //                             style: TextStyle(
+// //                               fontSize: 9,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: Color(0xFFFF6B35),
+// //                             ),
+// //                           ),
+// //                         ),
+// //                     ],
+// //                   ),
+// //                   if (item['description'] != null &&
+// //                       (item['description'] as String).isNotEmpty)
+// //                     Text(
+// //                       item['description'] as String,
+// //                       style: const TextStyle(fontSize: 11, color: _C.textMute),
+// //                       maxLines: 1,
+// //                       overflow: TextOverflow.ellipsis,
+// //                     ),
+// //                   Text(
+// //                     item['category_name'] as String? ?? '',
+// //                     style: const TextStyle(fontSize: 10, color: _C.textMute),
+// //                   ),
+// //                 ],
+// //               ),
+// //             ),
+// //           ),
+// //           // Price column
+// //           Opacity(
+// //             opacity: isAvailable ? 1.0 : 0.4,
+// //             child: Column(
+// //               crossAxisAlignment: CrossAxisAlignment.end,
+// //               children: [
+// //                 if (item['discount_price'] != null)
+// //                   Text(
+// //                     '₹${(item['price'] as num).toStringAsFixed(0)}',
+// //                     style: const TextStyle(
+// //                       fontSize: 11,
+// //                       color: _C.textMute,
+// //                       decoration: TextDecoration.lineThrough,
+// //                     ),
+// //                   ),
+// //                 Text(
+// //                   '₹${price.toStringAsFixed(0)}',
+// //                   style: TextStyle(
+// //                     fontSize: 14,
+// //                     fontWeight: FontWeight.w800,
+// //                     color: isAvailable ? _C.textPri : _C.textMute,
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //           ),
+// //           const SizedBox(width: 12),
+// //           // Add / qty controls — disabled for unavailable items
+// //           if (!isAvailable)
+// //             Container(
+// //               width: 32,
+// //               height: 32,
+// //               decoration: BoxDecoration(
+// //                 color: const Color(0xFFE5E5E5),
+// //                 borderRadius: BorderRadius.circular(9),
+// //               ),
+// //               child: const Icon(
+// //                 Icons.block,
+// //                 color: Color(0xFFAAAAAA),
+// //                 size: 16,
+// //               ),
+// //             )
+// //           else if (quantity == 0)
+// //             GestureDetector(
+// //               onTap: onAdd,
+// //               child: Container(
+// //                 width: 32,
+// //                 height: 32,
+// //                 decoration: BoxDecoration(
+// //                   color: _C.primary,
+// //                   borderRadius: BorderRadius.circular(9),
+// //                 ),
+// //                 child: const Icon(Icons.add, color: Colors.white, size: 18),
+// //               ),
+// //             )
+// //           else
+// //             Row(
+// //               children: [
+// //                 GestureDetector(
+// //                   onTap: onRemove,
+// //                   child: Container(
+// //                     width: 28,
+// //                     height: 28,
+// //                     decoration: BoxDecoration(
+// //                       color: _C.primaryL,
+// //                       borderRadius: BorderRadius.circular(8),
+// //                     ),
+// //                     child: const Icon(
+// //                       Icons.remove,
+// //                       color: _C.primary,
+// //                       size: 16,
+// //                     ),
+// //                   ),
+// //                 ),
+// //                 SizedBox(
+// //                   width: 28,
+// //                   child: Text(
+// //                     '$quantity',
+// //                     textAlign: TextAlign.center,
+// //                     style: const TextStyle(
+// //                       fontSize: 14,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                 ),
+// //                 GestureDetector(
+// //                   onTap: onAdd,
+// //                   child: Container(
+// //                     width: 28,
+// //                     height: 28,
+// //                     decoration: BoxDecoration(
+// //                       color: _C.primary,
+// //                       borderRadius: BorderRadius.circular(8),
+// //                     ),
+// //                     child: const Icon(Icons.add, color: Colors.white, size: 16),
+// //                   ),
+// //                 ),
+// //               ],
+// //             ),
+// //         ],
+// //       ),
+// //     );
+// //   }
+// // }
+
+// // // ══════════════════════════════════════════════════════════════
+// // //  CART VIEW
+// // // ══════════════════════════════════════════════════════════════
+// // class _CartView extends StatelessWidget {
+// //   final List<CartItem> cartItems;
+// //   final OrderType orderType;
+// //   final List<Map<String, dynamic>> tables;
+// //   final String? selectedTableId;
+// //   final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
+// //   final double cartSubtotal, cartTax, cartTotal;
+// //   final bool placing;
+// //   final ValueChanged<OrderType> onTypeChanged;
+// //   final Function(String id, int num) onTableSelected;
+// //   final ValueChanged<Map<String, dynamic>> onAdd;
+// //   final ValueChanged<String> onRemove;
+// //   final VoidCallback onPlaceOrder;
+
+// //   const _CartView({
+// //     Key? key,
+// //     required this.cartItems,
+// //     required this.orderType,
+// //     required this.tables,
+// //     required this.selectedTableId,
+// //     required this.customerCtrl,
+// //     required this.phoneCtrl,
+// //     required this.noteCtrl,
+// //     required this.cartSubtotal,
+// //     required this.cartTax,
+// //     required this.cartTotal,
+// //     required this.placing,
+// //     required this.onTypeChanged,
+// //     required this.onTableSelected,
+// //     required this.onAdd,
+// //     required this.onRemove,
+// //     required this.onPlaceOrder,
+// //   }) : super(key: key);
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     if (cartItems.isEmpty) {
+// //       return const Center(
+// //         child: Column(
+// //           mainAxisSize: MainAxisSize.min,
+// //           children: [
+// //             Text('🛒', style: TextStyle(fontSize: 52)),
+// //             SizedBox(height: 16),
+// //             Text(
+// //               'Cart is empty',
+// //               style: TextStyle(
+// //                 fontSize: 16,
+// //                 fontWeight: FontWeight.w700,
+// //                 color: _C.textPri,
+// //               ),
+// //             ),
+// //             SizedBox(height: 6),
+// //             Text(
+// //               'Go back to add items',
+// //               style: TextStyle(fontSize: 13, color: _C.textSec),
+// //             ),
+// //           ],
+// //         ),
+// //       );
+// //     }
+
+// //     return ListView(
+// //       padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+// //       children: [
+// //         // Order type selector
+// //         _SectionLabel('Order Type'),
+// //         const SizedBox(height: 10),
+// //         Row(
+// //           children: OrderType.values.map((t) {
+// //             final isSel = orderType == t;
+// //             return Expanded(
+// //               child: Padding(
+// //                 padding: const EdgeInsets.only(right: 8),
+// //                 child: GestureDetector(
+// //                   onTap: () => onTypeChanged(t),
+// //                   child: AnimatedContainer(
+// //                     duration: const Duration(milliseconds: 150),
+// //                     padding: const EdgeInsets.symmetric(vertical: 11),
+// //                     decoration: BoxDecoration(
+// //                       color: isSel ? _C.primaryL : _C.surface,
+// //                       borderRadius: BorderRadius.circular(12),
+// //                       border: Border.all(
+// //                         color: isSel ? _C.primary : _C.border,
+// //                         width: isSel ? 1.5 : 1,
+// //                       ),
+// //                     ),
+// //                     child: Column(
+// //                       children: [
+// //                         Text(t.emoji, style: const TextStyle(fontSize: 18)),
+// //                         const SizedBox(height: 4),
+// //                         Text(
+// //                           t.label,
+// //                           style: TextStyle(
+// //                             fontSize: 11,
+// //                             fontWeight: FontWeight.w700,
+// //                             color: isSel ? _C.primary : _C.textSec,
+// //                           ),
+// //                         ),
+// //                       ],
+// //                     ),
+// //                   ),
+// //                 ),
+// //               ),
+// //             );
+// //           }).toList(),
+// //         ),
+// //         const SizedBox(height: 16),
+
+// //         // ── TABLE PICKER (dine-in only) ───────────────────────────
+// //         if (orderType == OrderType.dineIn) ...[
+// //           _SectionLabel('Select Table'),
+// //           const SizedBox(height: 4),
+// //           // Legend
+// //           Padding(
+// //             padding: const EdgeInsets.only(bottom: 8),
+// //             child: Row(
+// //               children: [
+// //                 _LegendDot(color: _C.available, label: 'Available'),
+// //                 const SizedBox(width: 12),
+// //                 _LegendDot(color: _C.occupied, label: 'Occupied'),
+// //                 const SizedBox(width: 12),
+// //                 _LegendDot(color: _C.reserved, label: 'Reserved'),
+// //                 const SizedBox(width: 12),
+// //                 _LegendDot(color: _C.cleaning, label: 'Cleaning'),
+// //               ],
+// //             ),
+// //           ),
+// //           if (tables.isEmpty)
+// //             Container(
+// //               padding: const EdgeInsets.all(14),
+// //               decoration: BoxDecoration(
+// //                 color: const Color(0xFFFEF2F2),
+// //                 borderRadius: BorderRadius.circular(12),
+// //                 border: Border.all(
+// //                   color: const Color(0xFFDC2626).withOpacity(0.2),
+// //                 ),
+// //               ),
+// //               child: const Row(
+// //                 children: [
+// //                   Text('⚠️', style: TextStyle(fontSize: 16)),
+// //                   SizedBox(width: 8),
+// //                   Expanded(
+// //                     child: Text(
+// //                       'No tables found',
+// //                       style: TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ),
+// //             )
+// //           else
+// //             // Wrap so all tables are visible (not just a horizontal scroll)
+// //             Wrap(
+// //               spacing: 10,
+// //               runSpacing: 10,
+// //               children: tables.map((t) {
+// //                 final tid = t['id'] as String;
+// //                 final num = t['table_number'] as int;
+// //                 final cap = t['capacity'] as int;
+// //                 final status = t['status'] as String? ?? 'available';
+// //                 final customer = t['current_customer_name'] as String?;
+// //                 final isSel = selectedTableId == tid;
+// //                 final canSelect = _tableIsSelectable(status);
+// //                 final statusColor = _tableStatusColor(status);
+
+// //                 return GestureDetector(
+// //                   onTap: canSelect ? () => onTableSelected(tid, num) : null,
+// //                   child: AnimatedContainer(
+// //                     duration: const Duration(milliseconds: 150),
+// //                     width: 80,
+// //                     padding: const EdgeInsets.symmetric(
+// //                       horizontal: 8,
+// //                       vertical: 10,
+// //                     ),
+// //                     decoration: BoxDecoration(
+// //                       color: isSel
+// //                           ? _C.primary
+// //                           : canSelect
+// //                           ? _C.surface
+// //                           : statusColor.withOpacity(0.07),
+// //                       borderRadius: BorderRadius.circular(12),
+// //                       border: Border.all(
+// //                         color: isSel
+// //                             ? _C.primary
+// //                             : canSelect
+// //                             ? _C.border
+// //                             : statusColor.withOpacity(0.5),
+// //                         width: isSel ? 2 : 1,
+// //                       ),
+// //                       boxShadow: isSel
+// //                           ? [
+// //                               BoxShadow(
+// //                                 color: _C.primary.withOpacity(0.3),
+// //                                 blurRadius: 8,
+// //                                 offset: const Offset(0, 4),
+// //                               ),
+// //                             ]
+// //                           : [],
+// //                     ),
+// //                     child: Column(
+// //                       mainAxisSize: MainAxisSize.min,
+// //                       children: [
+// //                         // Status emoji
+// //                         Text(
+// //                           _tableStatusEmoji(status),
+// //                           style: const TextStyle(fontSize: 14),
+// //                         ),
+// //                         const SizedBox(height: 3),
+// //                         Text(
+// //                           'T$num',
+// //                           style: TextStyle(
+// //                             fontSize: 15,
+// //                             fontWeight: FontWeight.w900,
+// //                             color: isSel
+// //                                 ? Colors.white
+// //                                 : (canSelect ? _C.textPri : statusColor),
+// //                           ),
+// //                         ),
+// //                         Text(
+// //                           '$cap seats',
+// //                           style: TextStyle(
+// //                             fontSize: 9,
+// //                             color: isSel ? Colors.white70 : _C.textMute,
+// //                           ),
+// //                         ),
+// //                         const SizedBox(height: 3),
+// //                         Container(
+// //                           padding: const EdgeInsets.symmetric(
+// //                             horizontal: 5,
+// //                             vertical: 2,
+// //                           ),
+// //                           decoration: BoxDecoration(
+// //                             color: isSel
+// //                                 ? Colors.white.withOpacity(0.2)
+// //                                 : statusColor.withOpacity(0.15),
+// //                             borderRadius: BorderRadius.circular(4),
+// //                           ),
+// //                           child: Text(
+// //                             status == 'available'
+// //                                 ? 'Free'
+// //                                 : status[0].toUpperCase() + status.substring(1),
+// //                             style: TextStyle(
+// //                               fontSize: 8,
+// //                               fontWeight: FontWeight.w700,
+// //                               color: isSel ? Colors.white : statusColor,
+// //                             ),
+// //                           ),
+// //                         ),
+// //                         // Show customer name if occupied
+// //                         if (customer != null && !isSel) ...[
+// //                           const SizedBox(height: 2),
+// //                           Text(
+// //                             customer,
+// //                             style: const TextStyle(
+// //                               fontSize: 8,
+// //                               color: _C.textMute,
+// //                             ),
+// //                             overflow: TextOverflow.ellipsis,
+// //                             textAlign: TextAlign.center,
+// //                           ),
+// //                         ],
+// //                       ],
+// //                     ),
+// //                   ),
+// //                 );
+// //               }).toList(),
+// //             ),
+// //           const SizedBox(height: 14),
+// //         ],
+
+// //         // Customer info
+// //         Row(
+// //           children: [
+// //             Expanded(
+// //               child: _Field(
+// //                 label: 'Customer Name',
+// //                 hint: 'Enter name',
+// //                 ctrl: customerCtrl,
+// //               ),
+// //             ),
+// //             const SizedBox(width: 10),
+// //             Expanded(
+// //               child: _Field(label: 'Phone', hint: 'Optional', ctrl: phoneCtrl),
+// //             ),
+// //           ],
+// //         ),
+// //         const SizedBox(height: 14),
+
+// //         // Cart items
+// //         _SectionLabel('Cart (${cartItems.length} items)'),
+// //         const SizedBox(height: 10),
+// //         Container(
+// //           decoration: BoxDecoration(
+// //             color: _C.surface,
+// //             borderRadius: BorderRadius.circular(16),
+// //             border: Border.all(color: _C.border),
+// //           ),
+// //           child: Column(
+// //             children: cartItems.asMap().entries.map((e) {
+// //               final i = e.key;
+// //               final ci = e.value;
+// //               return Column(
+// //                 children: [
+// //                   Padding(
+// //                     padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+// //                     child: Row(
+// //                       children: [
+// //                         Expanded(
+// //                           child: Column(
+// //                             crossAxisAlignment: CrossAxisAlignment.start,
+// //                             children: [
+// //                               Text(
+// //                                 ci.itemName,
+// //                                 style: const TextStyle(
+// //                                   fontSize: 14,
+// //                                   fontWeight: FontWeight.w700,
+// //                                   color: _C.textPri,
+// //                                 ),
+// //                               ),
+// //                               Text(
+// //                                 '₹${ci.itemPrice.toStringAsFixed(0)} each',
+// //                                 style: const TextStyle(
+// //                                   fontSize: 11,
+// //                                   color: _C.textMute,
+// //                                 ),
+// //                               ),
+// //                             ],
+// //                           ),
+// //                         ),
+// //                         Text(
+// //                           '₹${ci.subtotal.toStringAsFixed(0)}',
+// //                           style: const TextStyle(
+// //                             fontSize: 14,
+// //                             fontWeight: FontWeight.w800,
+// //                             color: _C.textPri,
+// //                           ),
+// //                         ),
+// //                         const SizedBox(width: 10),
+// //                         Row(
+// //                           children: [
+// //                             GestureDetector(
+// //                               onTap: () => onRemove(ci.menuItemId),
+// //                               child: Container(
+// //                                 width: 26,
+// //                                 height: 26,
+// //                                 decoration: BoxDecoration(
+// //                                   color: _C.primaryL,
+// //                                   borderRadius: BorderRadius.circular(7),
+// //                                 ),
+// //                                 child: const Icon(
+// //                                   Icons.remove,
+// //                                   color: _C.primary,
+// //                                   size: 14,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                             SizedBox(
+// //                               width: 28,
+// //                               child: Text(
+// //                                 '${ci.quantity}',
+// //                                 textAlign: TextAlign.center,
+// //                                 style: const TextStyle(
+// //                                   fontSize: 14,
+// //                                   fontWeight: FontWeight.w900,
+// //                                   color: _C.primary,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                             GestureDetector(
+// //                               onTap: () => onAdd({
+// //                                 'id': ci.menuItemId,
+// //                                 'name': ci.itemName,
+// //                                 'price': ci.itemPrice,
+// //                                 'is_veg': ci.isVeg,
+// //                                 'category_name': ci.categoryName,
+// //                                 'is_available': true,
+// //                               }),
+// //                               child: Container(
+// //                                 width: 26,
+// //                                 height: 26,
+// //                                 decoration: BoxDecoration(
+// //                                   color: _C.primary,
+// //                                   borderRadius: BorderRadius.circular(7),
+// //                                 ),
+// //                                 child: const Icon(
+// //                                   Icons.add,
+// //                                   color: Colors.white,
+// //                                   size: 14,
+// //                                 ),
+// //                               ),
+// //                             ),
+// //                           ],
+// //                         ),
+// //                       ],
+// //                     ),
+// //                   ),
+// //                   if (i < cartItems.length - 1)
+// //                     const Divider(height: 1, color: _C.border),
+// //                 ],
+// //               );
+// //             }).toList(),
+// //           ),
+// //         ),
+// //         const SizedBox(height: 14),
+
+// //         // Notes
+// //         _Field(
+// //           label: 'Order Notes',
+// //           hint: 'Special instructions...',
+// //           ctrl: noteCtrl,
+// //         ),
+// //         const SizedBox(height: 18),
+
+// //         // Bill summary
+// //         Container(
+// //           padding: const EdgeInsets.all(16),
+// //           decoration: BoxDecoration(
+// //             color: _C.primaryL,
+// //             borderRadius: BorderRadius.circular(16),
+// //           ),
+// //           child: Column(
+// //             children: [
+// //               _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
+// //               const SizedBox(height: 6),
+// //               _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+// //               const Divider(color: _C.border, height: 16),
+// //               Row(
+// //                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+// //                 children: [
+// //                   const Text(
+// //                     'Total',
+// //                     style: TextStyle(
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                   Text(
+// //                     '₹${cartTotal.toStringAsFixed(0)}',
+// //                     style: const TextStyle(
+// //                       fontSize: 22,
+// //                       fontWeight: FontWeight.w900,
+// //                       color: _C.primary,
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ),
+// //             ],
+// //           ),
+// //         ),
+// //         const SizedBox(height: 18),
+
+// //         // Place order button
+// //         GestureDetector(
+// //           onTap: placing ? null : onPlaceOrder,
+// //           child: Container(
+// //             width: double.infinity,
+// //             padding: const EdgeInsets.symmetric(vertical: 17),
+// //             decoration: BoxDecoration(
+// //               gradient: LinearGradient(
+// //                 colors: placing
+// //                     ? [Colors.grey, Colors.grey.shade400]
+// //                     : [_C.primary, _C.primaryD],
+// //               ),
+// //               borderRadius: BorderRadius.circular(16),
+// //               boxShadow: placing
+// //                   ? []
+// //                   : [
+// //                       BoxShadow(
+// //                         color: _C.primary.withOpacity(0.35),
+// //                         blurRadius: 16,
+// //                         offset: const Offset(0, 6),
+// //                       ),
+// //                     ],
+// //             ),
+// //             child: Row(
+// //               mainAxisAlignment: MainAxisAlignment.center,
+// //               children: [
+// //                 if (placing) ...[
+// //                   const SizedBox(
+// //                     width: 20,
+// //                     height: 20,
+// //                     child: CircularProgressIndicator(
+// //                       color: Colors.white,
+// //                       strokeWidth: 2,
+// //                     ),
+// //                   ),
+// //                   const SizedBox(width: 10),
+// //                   const Text(
+// //                     'Placing Order...',
+// //                     style: TextStyle(
+// //                       color: Colors.white,
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                     ),
+// //                   ),
+// //                 ] else ...[
+// //                   const Icon(
+// //                     Icons.check_circle_outline,
+// //                     color: Colors.white,
+// //                     size: 20,
+// //                   ),
+// //                   const SizedBox(width: 10),
+// //                   const Text(
+// //                     'Place Order',
+// //                     style: TextStyle(
+// //                       color: Colors.white,
+// //                       fontSize: 16,
+// //                       fontWeight: FontWeight.w900,
+// //                     ),
+// //                   ),
+// //                 ],
+// //               ],
+// //             ),
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // ══════════════════════════════════════════════════════════════════════════════
+// //  ALLOCATION DISPLAY BANNER WIDGET
+// // ══════════════════════════════════════════════════════════════════════════════
+// // Shows currently allocated table and seat information with real-time updates
+// class _AllocationDisplayBanner extends StatelessWidget {
+//   final String? tableId;
+//   final List<Map<String, dynamic>> tables;
+//   final String? seatId;
+
+//   const _AllocationDisplayBanner({
+//     required this.tableId,
+//     required this.tables,
+//     this.seatId,
+//   });
+
+//   @override
+//   Widget build(BuildContext context) {
+//     if (tableId == null) {
+//       return const SizedBox.shrink();
+//     }
+
+//     // Find the selected table
+//     final selectedTable = tables.firstWhere(
+//       (t) => t['id'] == tableId,
+//       orElse: () => {},
+//     );
+
+//     if (selectedTable.isEmpty) {
+//       return const SizedBox.shrink();
+//     }
+
+//     final tableNum = selectedTable['table_number'] as int? ?? 0;
+//     final tableStatus = selectedTable['status'] as String? ?? 'available';
+//     final totalSeats = (selectedTable['table_seats'] as List?)?.length ?? 0;
+
+//     // Find selected seat details if provided
+//     String? selectedSeatLabel;
+//     if (seatId != null && seatId!.isNotEmpty) {
+//       final seats = selectedTable['table_seats'] as List? ?? [];
+//       try {
+//         final seat = seats.firstWhere(
+//           (s) => (s as Map)['id'] == seatId,
+//           orElse: () => {},
+//         );
+//         if ((seat as Map).isNotEmpty) {
+//           selectedSeatLabel = seat['seat_label'] as String?;
+//         }
+//       } catch (_) {}
+//     }
+
+//     final statusColor = _tableStatusColor(tableStatus);
+//     final statusEmoji = _tableStatusEmoji(tableStatus);
+
+//     return Container(
+//       margin: const EdgeInsets.symmetric(horizontal: 0),
+//       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+//       decoration: BoxDecoration(
+//         color: statusColor.withOpacity(0.08),
+//         borderRadius: BorderRadius.circular(14),
+//         border: Border.all(color: statusColor.withOpacity(0.3), width: 1.5),
+//         boxShadow: [
+//           BoxShadow(
+//             color: statusColor.withOpacity(0.1),
+//             blurRadius: 8,
+//             offset: const Offset(0, 2),
+//           ),
+//         ],
+//       ),
+//       child: Column(
+//         crossAxisAlignment: CrossAxisAlignment.start,
+//         children: [
+//           // Header: Status and Table Number
+//           Row(
+//             children: [
+//               Container(
+//                 width: 40,
+//                 height: 40,
+//                 decoration: BoxDecoration(
+//                   color: statusColor.withOpacity(0.15),
+//                   shape: BoxShape.circle,
+//                 ),
+//                 alignment: Alignment.center,
+//                 child: Text(statusEmoji, style: const TextStyle(fontSize: 20)),
+//               ),
+//               const SizedBox(width: 12),
+//               Expanded(
+//                 child: Column(
+//                   crossAxisAlignment: CrossAxisAlignment.start,
+//                   children: [
+//                     Text(
+//                       'TABLE ${tableNum.toString().padLeft(2, '0')}',
+//                       style: TextStyle(
+//                         fontSize: 16,
+//                         fontWeight: FontWeight.w900,
+//                         color: statusColor,
+//                       ),
+//                     ),
+//                     Text(
+//                       '$totalSeats seats available • ${_statusLabel(tableStatus)}',
+//                       style: const TextStyle(
+//                         fontSize: 11,
+//                         color: _C.textMute,
+//                         fontWeight: FontWeight.w500,
+//                       ),
+//                     ),
+//                   ],
+//                 ),
+//               ),
+//             ],
+//           ),
+
+//           // Seat selection info if a specific seat is selected
+//           if (selectedSeatLabel != null) ...[
+//             const SizedBox(height: 10),
+//             Container(
+//               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+//               decoration: BoxDecoration(
+//                 color: _C.primary.withOpacity(0.05),
+//                 borderRadius: BorderRadius.circular(10),
+//                 border: Border.all(color: _C.primary.withOpacity(0.2)),
+//               ),
+//               child: Row(
+//                 children: [
+//                   const Text('🪗 ', style: TextStyle(fontSize: 14)),
+//                   Expanded(
+//                     child: Text(
+//                       'Seat $selectedSeatLabel is allocated to this order',
+//                       style: const TextStyle(
+//                         fontSize: 12,
+//                         fontWeight: FontWeight.w600,
+//                         color: _C.primary,
+//                       ),
+//                     ),
+//                   ),
+//                 ],
+//               ),
+//             ),
+//           ] else ...[
+//             const SizedBox(height: 8),
+//             Text(
+//               '📋 Whole table is allocated',
+//               style: TextStyle(
+//                 fontSize: 12,
+//                 fontWeight: FontWeight.w600,
+//                 color: statusColor.withOpacity(0.8),
+//               ),
+//             ),
+//           ],
+//         ],
+//       ),
+//     );
+//   }
+
+//   // Helper methods from _CartView
+//   Color _tableStatusColor(String status) {
+//     switch (status) {
+//       case 'available':
+//         return _C.available;
+//       case 'occupied':
+//         return _C.occupied;
+//       case 'reserved':
+//         return _C.reserved;
+//       case 'cleaning':
+//         return _C.cleaning;
+//       default:
+//         return _C.textMute;
+//     }
+//   }
+
+//   String _tableStatusEmoji(String status) {
+//     switch (status) {
+//       case 'available':
+//         return '✅';
+//       case 'occupied':
+//         return '🍽️';
+//       case 'reserved':
+//         return '📅';
+//       case 'cleaning':
+//         return '🧹';
+//       default:
+//         return '❓';
+//     }
+//   }
+
+//   String _statusLabel(String status) {
+//     if (status == 'available') return 'Available';
+//     if (status == 'occupied') return 'Occupied (can order)';
+//     if (status == 'reserved') return 'Reserved (can order)';
+//     if (status == 'cleaning') return 'Cleaning';
+//     return 'Unknown';
+//   }
+// }
+
+// class _SeatChip extends StatelessWidget {
+//   final String label;
+//   final bool isSelected;
+//   final String? status;
+//   final VoidCallback onTap;
+
+//   const _SeatChip({
+//     required this.label,
+//     required this.isSelected,
+//     this.status,
+//     required this.onTap,
+//   });
+
+//   @override
+//   Widget build(BuildContext context) {
+//     Color bgColor = _C.surface;
+//     Color borderColor = _C.border;
+//     Color iconColor = _C.textSec;
+
+//     if (status == 'occupied') {
+//       bgColor = _C.occupied.withOpacity(0.08);
+//       borderColor = _C.occupied.withOpacity(0.3);
+//       iconColor = _C.occupied;
+//     } else if (status == 'available') {
+//       bgColor = _C.available.withOpacity(0.08);
+//       borderColor = _C.available.withOpacity(0.3);
+//       iconColor = _C.available;
+//     }
+
+//     if (isSelected) {
+//       bgColor = _C.primary;
+//       borderColor = _C.primary;
+//       iconColor = Colors.white;
+//     }
+
+//     return GestureDetector(
+//       onTap: onTap,
+//       child: AnimatedContainer(
+//         duration: const Duration(milliseconds: 150),
+//         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+//         decoration: BoxDecoration(
+//           color: bgColor,
+//           borderRadius: BorderRadius.circular(20),
+//           border: Border.all(color: borderColor),
+//         ),
+//         child: Row(
+//           mainAxisSize: MainAxisSize.min,
+//           children: [
+//             if (status == 'occupied')
+//               Padding(
+//                 padding: const EdgeInsets.only(right: 6),
+//                 child: Icon(
+//                   Icons.person,
+//                   size: 14,
+//                   color: isSelected ? Colors.white : iconColor,
+//                 ),
+//               ),
+//             Text(
+//               label,
+//               style: TextStyle(
+//                 fontSize: 12,
+//                 fontWeight: FontWeight.w700,
+//                 color: isSelected
+//                     ? Colors.white
+//                     : (status == 'occupied' ? _C.occupied : _C.textPri),
+//               ),
+//             ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+// }
+
+// // // ── Legend dot for table status ──────────────────────────────────
+// // class _LegendDot extends StatelessWidget {
+// //   final Color color;
+// //   final String label;
+// //   const _LegendDot({required this.color, required this.label});
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Row(
+// //       mainAxisSize: MainAxisSize.min,
+// //       children: [
+// //         Container(
+// //           width: 8,
+// //           height: 8,
+// //           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+// //         ),
+// //         const SizedBox(width: 4),
+// //         Text(
+// //           label,
+// //           style: const TextStyle(
+// //             fontSize: 10,
+// //             color: _C.textSec,
+// //             fontWeight: FontWeight.w600,
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // // ── Helpers ───────────────────────────────────────────────────────
+// // class _SectionLabel extends StatelessWidget {
+// //   final String text;
+// //   const _SectionLabel(this.text);
+// //   @override
+// //   Widget build(BuildContext context) => Text(
+// //     text.toUpperCase(),
+// //     style: const TextStyle(
+// //       fontSize: 10,
+// //       fontWeight: FontWeight.w800,
+// //       color: _C.textMute,
+// //       letterSpacing: 1.4,
+// //     ),
+// //   );
+// // }
+
+// // class _Field extends StatelessWidget {
+// //   final String label, hint;
+// //   final TextEditingController ctrl;
+// //   const _Field({required this.label, required this.hint, required this.ctrl});
+
+// //   @override
+// //   Widget build(BuildContext context) {
+// //     return Column(
+// //       crossAxisAlignment: CrossAxisAlignment.start,
+// //       children: [
+// //         Text(
+// //           label,
+// //           style: const TextStyle(
+// //             fontSize: 11,
+// //             fontWeight: FontWeight.w700,
+// //             color: _C.textSec,
+// //             letterSpacing: 0.3,
+// //           ),
+// //         ),
+// //         const SizedBox(height: 6),
+// //         TextField(
+// //           controller: ctrl,
+// //           style: const TextStyle(
+// //             fontSize: 14,
+// //             fontWeight: FontWeight.w600,
+// //             color: _C.textPri,
+// //           ),
+// //           decoration: InputDecoration(
+// //             hintText: hint,
+// //             hintStyle: const TextStyle(color: _C.textMute, fontSize: 13),
+// //             filled: true,
+// //             fillColor: _C.surface,
+// //             contentPadding: const EdgeInsets.symmetric(
+// //               horizontal: 14,
+// //               vertical: 12,
+// //             ),
+// //             border: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.border),
+// //             ),
+// //             enabledBorder: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.border),
+// //             ),
+// //             focusedBorder: OutlineInputBorder(
+// //               borderRadius: BorderRadius.circular(12),
+// //               borderSide: const BorderSide(color: _C.primary, width: 1.5),
+// //             ),
+// //           ),
+// //         ),
+// //       ],
+// //     );
+// //   }
+// // }
+
+// // class _BillRow extends StatelessWidget {
+// //   final String label, value;
+// //   const _BillRow(this.label, this.value);
+// //   @override
+// //   Widget build(BuildContext context) => Row(
+// //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+// //     children: [
+// //       Text(label, style: const TextStyle(fontSize: 13, color: _C.textSec)),
+// //       Text(
+// //         value,
+// //         style: const TextStyle(
+// //           fontSize: 13,
+// //           fontWeight: FontWeight.w700,
+// //           color: _C.textPri,
+// //         ),
+// //       ),
+// //     ],
+// //   );
+// // }
+// // */

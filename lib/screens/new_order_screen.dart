@@ -42,12 +42,10 @@ class _C {
 //  WORKFLOW STEPS — STRICT SEQUENTIAL ORDER (TABLE-FIRST DESIGN)
 // ══════════════════════════════════════════════════════════════
 enum OrderWorkflowStep {
-  tableSelection, // Step 1: Select table (mandatory for dine-in, enforced entry point)
-  seatConfirmation, // Step 2: Auto-select seats based on table occupancy & confirm
-  menuSelection, // Step 3: Build cart from menu (only after table/seat confirmation)
-  deliveryTiming, // Step 4: Select delivery/order timing
-  orderPreview, // Step 5: Preview order with table, items, customer details
-  orderPlacement, // Step 6: Place/process order
+  tableSelection, // Step 1: Select table + inline seat selection (mandatory entry point)
+  menuSelection, // Step 2: Build cart from menu (only after table/seat confirmation)
+  orderPreview, // Step 3: Preview order with dining type, items, customer details
+  orderPlacement, // Step 4: Place/process order
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -104,9 +102,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   bool _showCart = false;
   bool _placing = false;
 
-  // ── Seat & Delivery Selection ─────────────────────────────
+  // ── Seat Selection (inline with table selection) ────────
   bool _tableAutoSelectedSeats = false;
-  String? _selectedDeliveryTiming;
 
   // ── Computed ──────────────────────────────────────────────
   List<CartItem> get cartItems => _cart.values.toList();
@@ -148,9 +145,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     _selectedTableId = widget.preselectedTableId;
     _selectedTableNumber = widget.preselectedTableNumber;
 
-    // If table is pre-selected, move to seat confirmation step
+    // If table is pre-selected, start at table selection (now includes seat selection)
     if (_selectedTableId != null) {
-      _currentStep = OrderWorkflowStep.seatConfirmation;
+      _currentStep = OrderWorkflowStep.tableSelection;
     }
 
     _setupConnectivityListener();
@@ -795,8 +792,6 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
   // ══════════════════════════════════════════════════════════
 
-
-
   // ══════════════════════════════════════════════════════════
   //  PLACE ORDER WITH INVENTORY VALIDATION & DEDUCTION
   // ══════════════════════════════════════════════════════════
@@ -1061,27 +1056,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   void _stepBack() {
     setState(() {
       switch (_currentStep) {
-        case OrderWorkflowStep.seatConfirmation:
-          // Go back to table selection
-          _currentStep = OrderWorkflowStep.tableSelection;
-          _selectedTableId = null;
-          _selectedTableNumber = null;
-          _selectedSeatId = null;
-          _tableAutoSelectedSeats = false;
-          break;
         case OrderWorkflowStep.menuSelection:
-          // Go back to seat confirmation
-          _currentStep = OrderWorkflowStep.seatConfirmation;
+          // Go back to table selection (keep table/seat selection)
+          _currentStep = OrderWorkflowStep.tableSelection;
           _cart.clear();
           break;
-        case OrderWorkflowStep.deliveryTiming:
+        case OrderWorkflowStep.orderPreview:
           // Go back to menu selection
           _currentStep = OrderWorkflowStep.menuSelection;
-          _showCart = false;
-          break;
-        case OrderWorkflowStep.orderPreview:
-          // Go back to delivery timing
-          _currentStep = OrderWorkflowStep.deliveryTiming;
           _showCart = false;
           break;
         case OrderWorkflowStep.orderPlacement:
@@ -1101,14 +1083,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       case OrderWorkflowStep.tableSelection:
         return _buildTableSelectionStep();
 
-      case OrderWorkflowStep.seatConfirmation:
-        return _buildSeatConfirmationStep();
-
       case OrderWorkflowStep.menuSelection:
         return _buildMenuSelectionStep();
-
-      case OrderWorkflowStep.deliveryTiming:
-        return _buildDeliveryTimingStep();
 
       case OrderWorkflowStep.orderPreview:
         return _buildOrderPreviewStep();
@@ -1148,477 +1124,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: _buildTableSelectionFooter(),
-        ),
-      ],
-    );
-  }
-
-  /// STEP 2: Seat Confirmation (after table auto-selection)
-  Widget _buildSeatConfirmationStep() {
-    if (_selectedTableId == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 52, color: _C.textMute),
-            const SizedBox(height: 16),
-            const Text(
-              'Table not selected',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _C.textPri),
-            ),
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => _stepBack(),
-              child: const Text(
-                'Go back and select a table',
-                style: TextStyle(fontSize: 13, color: _C.primary),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final table = _tables.firstWhere(
-      (t) => t['id'] == _selectedTableId,
-      orElse: () => {},
-    );
-    final tableNumber = _selectedTableNumber ?? 0;
-    final seats = (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    final occupiedSeats = seats.where((s) => s['status'] == 'occupied').toList();
-    final isFullyOccupied = seats.isNotEmpty && occupiedSeats.length == seats.length;
-    final isPartiallyOccupied = occupiedSeats.isNotEmpty && occupiedSeats.length < seats.length;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
-        // Header
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _C.primaryL,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _C.primary, width: 1.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text(
-                    '🪑',
-                    style: TextStyle(fontSize: 24),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Step 2: Confirm Seat Selection',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: _C.textPri,
-                        ),
-                      ),
-                      Text(
-                        'Table T$tableNumber',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: _C.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (isFullyOccupied)
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, color: _C.primary, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Table is fully occupied. New order will be for the entire table.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _C.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else if (isPartiallyOccupied)
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, color: _C.partial, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Table is partially occupied. Auto-selected first occupied seat.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _C.partial,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, color: _C.available, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Table is available. You can book the entire table or individual seats.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _C.available,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Seat Selection
-        if (seats.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _C.primaryL,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _C.primary.withOpacity(0.3)),
-            ),
-            child: const Row(
-              children: [
-                Text('ℹ️', style: TextStyle(fontSize: 16)),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'No individual seats defined. Entire table is reserved for this order.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _C.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Selected Seat(s)',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: _C.textPri,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  if (_selectedSeatId == null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _C.primary,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _C.primary),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.white, size: 16),
-                          SizedBox(width: 6),
-                          Text(
-                            'Whole Table',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    ...seats.map((seat) {
-                      final seatId = seat['id'] as String;
-                      final seatLabel = seat['seat_label'] as String? ?? 'Unknown';
-                      final seatStatus = seat['status'] as String? ?? 'available';
-                      final isSelected = _selectedSeatId == seatId;
-
-                      return GestureDetector(
-                        onTap: () => setState(() => _selectedSeatId = seatId),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isSelected ? _C.primary : _C.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isSelected ? _C.primary : _C.border,
-                              width: isSelected ? 2 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (isSelected)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 6),
-                                  child: Icon(Icons.check_circle, color: Colors.white, size: 16),
-                                ),
-                              Text(
-                                'Seat $seatLabel',
-                                style: TextStyle(
-                                  color: isSelected ? Colors.white : _C.textPri,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                seatStatus == 'occupied' ? '🍽️' : '✅',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                ],
-              ),
-            ],
-          ),
-        const SizedBox(height: 20),
-
-        // Edit Selection Option
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: _C.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _C.border),
-          ),
-          child: GestureDetector(
-            onTap: () => setState(() => _currentStep = OrderWorkflowStep.tableSelection),
-            child: const Row(
-              children: [
-                Icon(Icons.edit_outlined, color: _C.textSec, size: 16),
-                SizedBox(width: 8),
-                Text(
-                  'Change table selection',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _C.textSec,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Confirm Button
-        GestureDetector(
-          onTap: _proceedToMenuSelection,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              color: _C.primary,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Confirm & Browse Menu',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// STEP 4: Delivery/Order Timing Selection
-  Widget _buildDeliveryTimingStep() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
-        Container(
-          color: _C.surface,
-          padding: const EdgeInsets.all(16),
-          child: const Row(
-            children: [
-              Text(
-                '⏰ Step 4: Order Timing',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: _C.textPri,
-                ),
-              ),
-              Spacer(),
-              Chip(
-                label: Text('Select', style: TextStyle(fontSize: 11)),
-                backgroundColor: Color(0xFF059669),
-                labelStyle: TextStyle(color: Colors.white, fontSize: 10),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'When should this order be prepared?',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: _C.textPri,
-          ),
-        ),
-        const SizedBox(height: 14),
-        GestureDetector(
-          onTap: () => setState(() => _selectedDeliveryTiming = 'now'),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _selectedDeliveryTiming == 'now' ? _C.primaryL : _C.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.border,
-                width: _selectedDeliveryTiming == 'now' ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.flash_on,
-                  color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textSec,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Prepare Now',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textPri,
-                        ),
-                      ),
-                      Text(
-                        'Immediate preparation',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _selectedDeliveryTiming == 'now' ? _C.primary : _C.textSec,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_selectedDeliveryTiming == 'now')
-                  Icon(
-                    Icons.check_circle,
-                    color: _C.primary,
-                    size: 20,
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Proceed to Preview Button
-        GestureDetector(
-          onTap: () {
-            if (_selectedDeliveryTiming == null) {
-              _snack('⏰ Please select order timing');
-              return;
-            }
-            _proceedToOrderPreview();
-          },
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              color: _selectedDeliveryTiming != null ? _C.primary : _C.textMute.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.arrow_forward_rounded,
-                  color: _selectedDeliveryTiming != null ? Colors.white : _C.textMute,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Review Order',
-                  style: TextStyle(
-                    color: _selectedDeliveryTiming != null ? Colors.white : _C.textMute,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        Expanded(child: _buildTableSelectionFooter()),
       ],
     );
   }
@@ -1627,164 +1133,421 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   Widget _buildTableSelectionFooter() {
     return Container(
       color: _C.surface,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          const Divider(color: _C.border),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          // ── Header with description ──────────────────────────────────
           const Text(
-            'Select a Table to Begin',
+            'Choose Your Table',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: FontWeight.w900,
               color: _C.textPri,
+              letterSpacing: 0.3,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           const Text(
-            'Choose a table to start a new order',
-            style: TextStyle(fontSize: 13, color: _C.textSec),
+            'Select a table to start a new order',
+            style: TextStyle(
+              fontSize: 13,
+              color: _C.textSec,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
+
+          // ── Status Legend ─────────────────────────────────────────────
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildStatusBadge('Available', _C.available),
+                const SizedBox(width: 12),
+                _buildStatusBadge('Occupied', _C.occupied),
+                const SizedBox(width: 12),
+                _buildStatusBadge('Reserved', _C.reserved),
+                const SizedBox(width: 12),
+                _buildStatusBadge('Cleaning', _C.cleaning),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // ── Table Grid ────────────────────────────────────────────────
           if (_tables.isEmpty)
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: const Color(0xFFDC2626).withOpacity(0.2),
+                  width: 1.5,
                 ),
               ),
-              child: const Row(
+              child: Column(
                 children: [
-                  Text('⚠️', style: TextStyle(fontSize: 16)),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'No tables available',
-                      style: TextStyle(color: Color(0xFFDC2626), fontSize: 13),
+                  const Text('⚠️', style: TextStyle(fontSize: 32)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No tables available',
+                    style: TextStyle(
+                      color: Color(0xFFDC2626),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
               ),
             )
           else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _tables.map((t) {
-                  final tid = t['id'] as String;
-                  final num = t['table_number'] as int;
-                  final cap = t['capacity'] as int;
-                  final status = t['status'] as String? ?? 'available';
-                  final canSelect = _tableIsSelectable(status);
-                  final sColor = _tableStatusColor(status);
-                  final isSelected = _selectedTableId == tid;
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.85,
+              ),
+              itemCount: _tables.length,
+              itemBuilder: (context, idx) {
+                final t = _tables[idx];
+                final tid = t['id'] as String;
+                final num = t['table_number'] as int;
+                final cap = t['capacity'] as int;
+                final status = t['status'] as String? ?? 'available';
+                final seats =
+                    (t['table_seats'] as List?)?.cast<Map<String, dynamic>>() ??
+                    [];
+                final occupiedSeats = seats
+                    .where((s) => s['status'] == 'occupied')
+                    .toList();
+                final occupancyPct = seats.isNotEmpty
+                    ? ((occupiedSeats.length / seats.length) * 100).toInt()
+                    : 0;
+                final canSelect = _tableIsSelectable(status);
+                final sColor = _tableStatusColor(status);
+                final isSelected = _selectedTableId == tid;
 
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: GestureDetector(
-                      onTap: canSelect ? () => _selectTable(tid, num) : null,
-                      child: Container(
-                        width: 100,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: !canSelect
-                              ? const Color(0xFFF5F5F5)
-                              : isSelected
-                              ? _C.primaryL
-                              : sColor.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: !canSelect
-                                ? const Color(0xFFDDDDDD)
-                                : isSelected
-                                ? _C.primary
-                                : sColor.withOpacity(0.5),
-                            width: isSelected ? 2.5 : 1.5,
+                return GestureDetector(
+                  onTap: canSelect ? () => _selectTable(tid, num) : null,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    decoration: BoxDecoration(
+                      color: !canSelect
+                          ? const Color(0xFFF9FAFB)
+                          : isSelected
+                          ? _C.primaryL
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: !canSelect
+                            ? const Color(0xFFE5E7EB)
+                            : isSelected
+                            ? _C.primary
+                            : sColor.withOpacity(0.3),
+                        width: isSelected ? 2.5 : 1.5,
+                      ),
+                      boxShadow: [
+                        if (isSelected)
+                          BoxShadow(
+                            color: _C.primary.withOpacity(0.15),
+                            blurRadius: 12,
+                            spreadRadius: 2,
+                          )
+                        else
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 8,
+                            spreadRadius: 0,
                           ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _tableStatusEmoji(status),
-                              style: const TextStyle(fontSize: 20),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'T$num',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: !canSelect
-                                    ? _C.textMute
-                                    : isSelected
-                                    ? _C.primary
-                                    : sColor,
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: canSelect ? () => _selectTable(tid, num) : null,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              // ── Top row: Emoji + Status Badge ────────────
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    _tableStatusEmoji(status),
+                                    style: const TextStyle(fontSize: 24),
+                                  ),
+                                  if (isSelected)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _C.primary,
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.check,
+                                            color: Colors.white,
+                                            size: 12,
+                                          ),
+                                          SizedBox(width: 2),
+                                          Text(
+                                            'Selected',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: sColor.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      child: Text(
+                                        status.toUpperCase(),
+                                        style: TextStyle(
+                                          color: sColor,
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$cap seats',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: !canSelect ? _C.textMute : sColor,
+                              const SizedBox(height: 6),
+
+                              // ── Table number (medium) ──────────────────────
+                              Text(
+                                'T$num',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: !canSelect
+                                      ? _C.textMute
+                                      : isSelected
+                                      ? _C.primary
+                                      : _C.textPri,
+                                  letterSpacing: 0.2,
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 4),
+
+                              // ── Capacity ──────────────────────────────────
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.chair,
+                                    size: 12,
+                                    color: !canSelect ? _C.textMute : sColor,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    '$cap',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: !canSelect ? _C.textMute : sColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 5),
+
+                              // ── Compact Seat Preview ──────────────────────
+                              if (seats.isNotEmpty)
+                                Flexible(
+                                  child: SingleChildScrollView(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _buildCompactSeatPreview(seats, tid),
+                                        const SizedBox(height: 6),
+                                        ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(3),
+                                          child: LinearProgressIndicator(
+                                            value: occupiedSeats.length /
+                                                seats.length,
+                                            minHeight: 5,
+                                            backgroundColor: _C.border,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                              occupiedSeats.isEmpty
+                                                  ? _C.available
+                                                  : occupancyPct.toInt() ==
+                                                      100
+                                                  ? _C.occupied
+                                                  : _C.partial,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                              // ── Bottom: Action indicator ──────────────────
+                              if (canSelect)
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? _C.primary
+                                        : _C.primaryL,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? _C.primary
+                                          : _C.primary.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      'Select',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: isSelected
+                                            ? Colors.white
+                                            : _C.primary,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF3F4F6),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFFE5E7EB),
+                                    ),
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      'Unavailable',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: _C.textMute,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  );
-                }).toList(),
-              ),
+                  ),
+                );
+              },
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+
+          // ── CTA Button ─────────────────────────────────────────────────
           if (_selectedTableId != null)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(
-                color: _C.primary,
-                borderRadius: BorderRadius.circular(12),
+                gradient: LinearGradient(
+                  colors: [_C.primary, _C.primary.withOpacity(0.85)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: _C.primary.withOpacity(0.3),
+                    blurRadius: 12,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
-              child: GestureDetector(
-                onTap: () => _proceedToSeatConfirmation(),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.check_circle, color: Colors.white, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Confirm & Select Seats',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _proceedToMenuSelection(),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Continue to Seats & Menu',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             )
           else
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
-                color: _C.textMute.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(12),
+                color: _C.textMute.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _C.textMute.withOpacity(0.2)),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  Icon(Icons.info_outline, color: _C.textMute, size: 18),
+                  const SizedBox(width: 8),
                   Text(
                     'Select a table to continue',
                     style: TextStyle(
@@ -1796,27 +1559,256 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                 ],
               ),
             ),
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  /// Select table and enable confirmation
+  /// Build status badge for legend
+  Widget _buildStatusBadge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build inline seat selection UI
+  Widget _buildInlineSeatSelection() {
+    if (_selectedTableId == null) {
+      return const SizedBox.shrink();
+    }
+
+    final table = _tables.firstWhere(
+      (t) => t['id'] == _selectedTableId,
+      orElse: () => {},
+    );
+
+    if (table.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final seats =
+        (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final occupiedSeats = seats
+        .where((s) => s['status'] == 'occupied')
+        .toList();
+    final isFullyOccupied =
+        seats.isNotEmpty && occupiedSeats.length == seats.length;
+    final isPartiallyOccupied =
+        occupiedSeats.isNotEmpty && occupiedSeats.length < seats.length;
+
+    // Auto-select seats on first table selection
+    if (_tableAutoSelectedSeats == false && _selectedSeatId == null) {
+      _autoSelectSeatsForTable();
+    }
+
+    if (seats.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _C.primaryL,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _C.primary.withOpacity(0.3)),
+        ),
+        child: const Row(
+          children: [
+            Text('ℹ️', style: TextStyle(fontSize: 14)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No seats defined. Entire table will be reserved.',
+                style: TextStyle(fontSize: 12, color: _C.primary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isFullyOccupied)
+          Container(
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: _C.primaryL,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              children: [
+                Text('ℹ️', style: TextStyle(fontSize: 12)),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Table is fully occupied.',
+                    style: TextStyle(fontSize: 11, color: _C.primary),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (isPartiallyOccupied)
+          Container(
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              children: [
+                Text('⚠️', style: TextStyle(fontSize: 12)),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Table is partially occupied.',
+                    style: TextStyle(fontSize: 11, color: Color(0xFFB45309)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // Whole Table Option
+            GestureDetector(
+              onTap: () => setState(() {
+                _selectedSeatId = null;
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _selectedSeatId == null ? _C.primary : _C.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _selectedSeatId == null ? _C.primary : _C.border,
+                    width: _selectedSeatId == null ? 2 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_selectedSeatId == null)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Icon(
+                          Icons.check_circle,
+                          color: Colors.white,
+                          size: 14,
+                        ),
+                      ),
+                    Text(
+                      'Whole Table',
+                      style: TextStyle(
+                        color: _selectedSeatId == null
+                            ? Colors.white
+                            : _C.textPri,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Individual Seats
+            ...seats.map((seat) {
+              final seatId = seat['id'] as String;
+              final seatLabel = seat['seat_label'] as String? ?? 'Unknown';
+              final seatStatus = seat['status'] as String? ?? 'available';
+              final isSelected = _selectedSeatId == seatId;
+
+              return GestureDetector(
+                onTap: () => setState(() {
+                  _selectedSeatId = seatId;
+                }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected ? _C.primary : _C.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected ? _C.primary : _C.border,
+                      width: isSelected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isSelected)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 4),
+                          child: Icon(
+                            Icons.check_circle,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      Text(
+                        'S$seatLabel',
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : _C.textPri,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        seatStatus == 'occupied' ? '🍽️' : '✓',
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Select table and reset seat selection
   void _selectTable(String tableId, int tableNumber) {
     setState(() {
       _selectedTableId = tableId;
       _selectedTableNumber = tableNumber;
       _selectedSeatId = null;
-    });
-  }
-
-  /// Proceed from table selection to seat confirmation
-  void _proceedToSeatConfirmation() {
-    setState(() {
-      _currentStep = OrderWorkflowStep.seatConfirmation;
-      _showCart = false;
-      // Auto-select seats based on table occupancy
-      _autoSelectSeatsForTable();
+      _tableAutoSelectedSeats = false;
     });
   }
 
@@ -1831,7 +1823,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
     if (table.isEmpty) return;
 
-    final seats = (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final seats =
+        (table['table_seats'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
     if (seats.isEmpty) {
       // No seats defined — set to null (whole table)
@@ -1841,10 +1834,13 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     }
 
     // Check occupancy: count occupied seats
-    final occupiedSeats = seats.where((s) => s['status'] == 'occupied').toList();
+    final occupiedSeats = seats
+        .where((s) => s['status'] == 'occupied')
+        .toList();
     final totalSeats = seats.length;
     final isFullyOccupied = occupiedSeats.length == totalSeats;
-    final isPartiallyOccupied = occupiedSeats.isNotEmpty && occupiedSeats.length < totalSeats;
+    final isPartiallyOccupied =
+        occupiedSeats.isNotEmpty && occupiedSeats.length < totalSeats;
 
     if (isFullyOccupied) {
       // Fully occupied: entire table is the order destination
@@ -1862,30 +1858,289 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     }
   }
 
-  /// Proceed from seat confirmation to menu selection
+  Widget _buildCompactSeatPreview1(
+    List<Map<String, dynamic>> seats,
+    String tableId,
+  ) {
+    if (seats.isEmpty) return const SizedBox.shrink();
+
+    final occupiedSeats = seats
+        .where((s) => s['status'] == 'occupied')
+        .toList();
+    final totalSeats = seats.length;
+    final isFullyOccupied = occupiedSeats.length == totalSeats;
+    final isPartiallyOccupied =
+        occupiedSeats.isNotEmpty && occupiedSeats.length < totalSeats;
+
+    String? autoSelectedSeatId;
+    bool showWholeTable = false;
+
+    if (isFullyOccupied) {
+      showWholeTable = true;
+    } else if (isPartiallyOccupied && occupiedSeats.isNotEmpty) {
+      autoSelectedSeatId = occupiedSeats.first['id'] as String?;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Seating Layout',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: _C.textSec,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // ── Seat tiles ──────────────────────────────────────────────────
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _C.surface.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _C.border.withOpacity(0.5)),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final cols = totalSeats <= 4
+                  ? totalSeats
+                  : totalSeats <= 9
+                  ? 3
+                  : 4;
+              final spacing = 6.0;
+              final tileWidth =
+                  (constraints.maxWidth - (cols - 1) * spacing) / cols;
+              final tileHeight = (tileWidth / 1.5).clamp(28.0, 48.0);
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: seats.map((seat) {
+                  final seatId = seat['id'] as String?;
+                  final seatLabel = seat['seat_label'] as String? ?? '?';
+                  final seatStatus = seat['status'] as String? ?? 'available';
+                  final isOccupied = seatStatus == 'occupied';
+                  final isAutoSelected =
+                      autoSelectedSeatId == seatId ||
+                      (showWholeTable && isOccupied);
+
+                  return Tooltip(
+                    message:
+                        'S$seatLabel - ${isOccupied ? 'Occupied' : 'Available'}',
+                    child: SizedBox(
+                      width: tileWidth,
+                      height: tileHeight,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: isAutoSelected
+                              ? _C.primary
+                              : isOccupied
+                              ? _C.occupied.withOpacity(0.15)
+                              : Colors.white,
+                          border: Border.all(
+                            color: isAutoSelected
+                                ? _C.primary
+                                : isOccupied
+                                ? _C.occupied.withOpacity(0.4)
+                                : _C.border,
+                            width: isAutoSelected ? 2 : 1,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: Text(
+                            seatLabel,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: isAutoSelected
+                                  ? Colors.white
+                                  : isOccupied
+                                  ? _C.occupied
+                                  : _C.textSec,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 6),
+
+        // ── Auto-select hint ────────────────────────────────────────────
+        if (isPartiallyOccupied && autoSelectedSeatId != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info, size: 12, color: Color(0xFFB45309)),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Default: S$autoSelectedSeatId',
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFB45309),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (isFullyOccupied)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: _C.primaryL,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info, size: 12, color: _C.primary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Default: Entire Table',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: _C.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Build compact seat preview for table cards
+  Widget _buildCompactSeatPreview(
+    List<Map<String, dynamic>> seats,
+    String tableId,
+  ) {
+    if (seats.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final occupiedSeats = seats
+        .where((s) => s['status'] == 'occupied')
+        .toList();
+    final totalSeats = seats.length;
+    final isFullyOccupied = occupiedSeats.length == totalSeats;
+    final isPartiallyOccupied =
+        occupiedSeats.isNotEmpty && occupiedSeats.length < totalSeats;
+
+    String? autoSelectedSeatId;
+    bool showWholeTable = false;
+
+    if (isFullyOccupied) {
+      showWholeTable = true;
+    } else if (isPartiallyOccupied && occupiedSeats.isNotEmpty) {
+      autoSelectedSeatId = occupiedSeats.first['id'] as String?;
+    }
+
+    final gridCols = totalSeats <= 4 ? totalSeats : (totalSeats <= 9 ? 3 : 4);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: _C.surface.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _C.border.withOpacity(0.3)),
+      ),
+      child: GridView.count(
+        crossAxisCount: gridCols,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 3,
+        crossAxisSpacing: 3,
+        childAspectRatio: 0.8,
+        children: seats.map((seat) {
+          final seatId = seat['id'] as String?;
+          final seatLabel = seat['seat_label'] as String? ?? '?';
+          final seatStatus = seat['status'] as String? ?? 'available';
+          final isOccupied = seatStatus == 'occupied';
+          final isAutoSelected =
+              autoSelectedSeatId == seatId || (showWholeTable && isOccupied);
+
+          return Container(
+            decoration: BoxDecoration(
+              color: isAutoSelected
+                  ? _C.primary
+                  : isOccupied
+                  ? _C.occupied.withOpacity(0.1)
+                  : Colors.white,
+              border: Border.all(
+                color: isAutoSelected
+                    ? _C.primary
+                    : isOccupied
+                    ? _C.occupied.withOpacity(0.3)
+                    : _C.border,
+                width: isAutoSelected ? 1.5 : 0.8,
+              ),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Center(
+              child: Text(
+                seatLabel,
+                style: TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w700,
+                  color: isAutoSelected
+                      ? Colors.white
+                      : isOccupied
+                      ? _C.occupied
+                      : _C.textSec,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  /// Proceed from table+seat selection to menu selection
   void _proceedToMenuSelection() {
+    if (_selectedTableId == null) {
+      _snack('📍 Please select a table first');
+      return;
+    }
     setState(() {
       _currentStep = OrderWorkflowStep.menuSelection;
       _showCart = false;
     });
   }
 
-  /// Proceed from menu selection to delivery timing
-  void _proceedToDeliveryTiming() {
+  /// Proceed from menu selection to order preview
+  void _proceedToOrderPreview() {
     if (_cart.isEmpty) {
       _snack('🛒 Add items to cart first');
       return;
     }
     setState(() {
-      _currentStep = OrderWorkflowStep.deliveryTiming;
-      _showCart = false;
-    });
-  }
-
-  /// Proceed from delivery timing to order preview
-  void _proceedToOrderPreview() {
-    setState(() {
       _currentStep = OrderWorkflowStep.orderPreview;
+      _showCart = false;
     });
   }
 
@@ -1899,7 +2154,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           child: Row(
             children: [
               const Text(
-                '🍽️ Step 3: Browse Menu',
+                '🍽️ Step 2: Browse Menu',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -1953,7 +2208,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                   }),
                   onAdd: _addItem,
                   onRemove: (id) => _removeItem(id),
-                  onPlaceOrder: _proceedToDeliveryTiming,
+                  onPlaceOrder: _proceedToOrderPreview,
                   showBackButton: true,
                   onBack: () => setState(() => _showCart = false),
                 )
@@ -1995,7 +2250,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       onTypeChanged: (t) => setState(() => _orderType = t),
       onPlaceOrder: _placeOrder,
       onBack: () =>
-          setState(() => _currentStep = OrderWorkflowStep.deliveryTiming),
+          setState(() => _currentStep = OrderWorkflowStep.menuSelection),
     );
   }
 

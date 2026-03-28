@@ -10,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:pos_app/services/order_service.dart';
 import 'package:pos_app/utils/ist_utils.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -107,6 +108,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   Set<String> _initiallyAssignedSeatIds = {};
   bool _tableSeatSelectionFetched = false;
 
+  // ── Seamless Workflow: Existing Order Support ──────────────
+  Order? _existingOrder; // When continuing with existing order
+  bool _isContinuingExistingOrder =
+      false; // Flag: adding items to existing order
+  List<OrderItem> _existingOrderItemsSnapshot =
+      []; // Original items for reference
+  bool _hasCheckedForExistingOrder = false; // Prevent duplicate checks
+
   // ── Computed ──────────────────────────────────────────────
   List<CartItem> get cartItems => _cart.values.toList();
   double get cartSubtotal => cartItems.fold(0.0, (s, i) => s + i.subtotal);
@@ -136,7 +145,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       items = items
-          .where((i) => (i['name'] as String).toLowerCase().contains(q))
+          .where(
+            (i) => ((i['name'] as String?) ?? '').toLowerCase().contains(q),
+          )
           .toList();
     }
 
@@ -498,6 +509,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
   /// Fetch and pre-select occupied seats for the selected table
   Future<void> _fetchAndPreSelectSeats() async {
+    log('Fetch and Pre-select seats');
     if (_selectedTableId == null || _selectedTableId!.isEmpty) return;
 
     try {
@@ -519,7 +531,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
       setState(() {
         // Pre-select all initially occupied seats
-        _selectedSeatIds = occupiedSeats.map((s) => s['id'] as String).toSet();
+        _selectedSeatIds = occupiedSeats
+            .map((s) => (s['id'] as String?) ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet();
         _initiallyAssignedSeatIds = Set<String>.from(_selectedSeatIds);
         _tableSeatSelectionFetched = true;
       });
@@ -527,6 +542,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       debugPrint(
         '🪑 Pre-selected ${_selectedSeatIds.length} occupied seats for table $_selectedTableNumber',
       );
+
+      // ✨ NEW: Check for existing active order on this table
+      if (!mounted) return;
+      await _checkForExistingOrderAndShowModal();
     } catch (e) {
       debugPrint('🪑 ERROR fetching seats: $e');
       // If offline or error, just continue with empty selection
@@ -537,6 +556,346 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         _tableSeatSelectionFetched = true;
       });
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  SEAMLESS WORKFLOW: Check for existing active orders (NEW FEATURE)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Check if there's an existing active order for this table and show options
+  Future<void> _checkForExistingOrderAndShowModal() async {
+    if (_selectedTableId == null ||
+        _selectedTableId!.isEmpty ||
+        _hasCheckedForExistingOrder) {
+      return;
+    }
+
+    setState(() => _hasCheckedForExistingOrder = true);
+
+    try {
+      debugPrint(
+        '🔍 Checking for existing active order on table $_selectedTableId...',
+      );
+
+      // Use the new OrdersService method to check for existing orders
+      final ordersService = OrdersService.instance;
+      final existingOrder = await ordersService.getActiveOrderForTable(
+        tableId: _selectedTableId!,
+        businessId: _businessId,
+        tableSeatId: primarySelectedSeatId,
+      );
+
+      if (!mounted || existingOrder == null) {
+        debugPrint('✓ No existing active order found — starting fresh');
+        // No existing order, proceed to menu selection
+        if (mounted) {
+          setState(() => _currentStep = OrderWorkflowStep.menuSelection);
+        }
+        return;
+      }
+
+      // Found existing order — show modal with options
+      debugPrint(
+        '✨ Found existing active order #${existingOrder.orderNumber} with ${existingOrder.items.length} items',
+      );
+
+      if (mounted) {
+        _showExistingOrderModal(existingOrder);
+      }
+    } catch (e) {
+      debugPrint('⚠️  Error checking for existing orders: $e');
+      // Silently continue — this is non-critical
+      if (mounted) {
+        setState(() => _currentStep = OrderWorkflowStep.menuSelection);
+      }
+    }
+  }
+
+  /// Show modal with options when existing order is found
+  void _showExistingOrderModal(Order existingOrder) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _C.surface,
+        title: const Row(
+          children: [
+            Text('✨', style: TextStyle(fontSize: 20)),
+            SizedBox(width: 8),
+            Text(
+              'Continue Existing Order?',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: _C.textPri,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Current order summary ──────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _C.primaryL,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _C.primary.withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Order #${existingOrder.orderNumber}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            color: _C.primary,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: existingOrder.status.color,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            existingOrder.status.label,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${existingOrder.items.length} items • ₹${existingOrder.totalAmount.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 12, color: _C.textSec),
+                    ),
+                    const SizedBox(height: 8),
+                    // Show first 3 items
+                    ...existingOrder.items
+                        .take(3)
+                        .map(
+                          (item) => Text(
+                            '  • ${item.itemName} (×${item.quantity})',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: _C.textSec,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    if (existingOrder.items.length > 3)
+                      Text(
+                        '  • +${existingOrder.items.length - 3} more items',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: _C.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // ── Description ────────────────────────────────────────────
+              const Text(
+                'You can:',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _C.textPri,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '✅ Add more items to this order (seamless continuation)\n'
+                '👁️ View full order details\n'
+                '⚠️ Create a new order on another table',
+                style: TextStyle(fontSize: 11, color: _C.textSec, height: 1.6),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Start fresh — user wants a new order
+              _resetForNewOrder();
+            },
+            child: const Text(
+              'New Order',
+              style: TextStyle(color: Color(0xFFDC2626)),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // View the existing order
+              _viewExistingOrder(existingOrder);
+            },
+            child: const Text(
+              'View Order',
+              style: TextStyle(color: _C.primary),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _C.primary),
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Continue with existing order
+              _continueWithExistingOrder(existingOrder);
+            },
+            child: const Text(
+              'Add Items',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Reset state to start a completely new order
+  void _resetForNewOrder() {
+    setState(() {
+      _existingOrder = null;
+      _isContinuingExistingOrder = false;
+      _existingOrderItemsSnapshot = [];
+      _hasCheckedForExistingOrder = false;
+      _cart.clear();
+      _currentStep = OrderWorkflowStep.menuSelection;
+    });
+    _snack('🔄 Starting a new order');
+  }
+
+  /// Show existing order details — separate screen/modal
+  void _viewExistingOrder(Order order) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _C.surface,
+        title: Text(
+          'Order #${order.orderNumber}',
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            color: _C.textPri,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ...order.items.map(
+                (item) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${item.itemName} ×${item.quantity}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: _C.textPri,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        '₹${item.subtotal.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _C.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Total',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _C.textPri,
+                    ),
+                  ),
+                  Text(
+                    '₹${order.totalAmount.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      color: _C.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _C.primary),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _continueWithExistingOrder(order);
+            },
+            child: const Text(
+              'Add Items',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Continue with existing order — switch to add-items mode
+  void _continueWithExistingOrder(Order existingOrder) {
+    setState(() {
+      _existingOrder = existingOrder;
+      _isContinuingExistingOrder = true;
+      _existingOrderItemsSnapshot = List<OrderItem>.from(existingOrder.items);
+      _cart.clear(); // Clear cart to show only NEW items being added
+      _currentStep = OrderWorkflowStep.menuSelection;
+    });
+
+    debugPrint(
+      '✨ Continuing with order #${existingOrder.orderNumber}. Ready to add items.',
+    );
+    _snack(
+      '✨ Adding items to order #${existingOrder.orderNumber}. Seamless continuation!',
+    );
   }
 
   /// Toggle seat selection on/off
@@ -562,8 +921,12 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       return;
     }
 
-    final id = item['id'] as String;
-    final itemName = item['name'] as String;
+    final id = (item['id'] as String?) ?? '';
+    final itemName = (item['name'] as String?) ?? '';
+    if (id.isEmpty || itemName.isEmpty) {
+      _snack('❌ Item data is incomplete');
+      return;
+    }
     final nextQuantity = _getNextQuantityForItem(id);
 
     // ✓ STEP 1: Validate stock before adding to cart
@@ -737,9 +1100,11 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                     spacing: 10,
                     runSpacing: 10,
                     children: _tables.map((t) {
-                      final tid = t['id'] as String;
-                      final num = t['table_number'] as int;
-                      final cap = t['capacity'] as int;
+                      final tid = (t['id'] as String?) ?? '';
+                      final num = (t['table_number'] as int?) ?? 0;
+                      final cap = (t['capacity'] as int?) ?? 0;
+                      if (tid.isEmpty || num <= 0)
+                        return const SizedBox.shrink();
                       final status = t['status'] as String? ?? 'available';
                       final canSelect = _tableIsSelectable(status);
                       final sColor = _tableStatusColor(status);
@@ -997,29 +1362,55 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
       if (!mounted) return;
 
-      // ✓ STEP 2: Create order
-      debugPrint('📝 Creating order...');
-      final prov = context.read<OrdersProvider>();
-      final order = await prov.createOrder(
-        cartItems: cartItems,
-        orderType: _orderType,
-        tableId: _selectedTableId,
-        tableNumber: _selectedTableNumber,
-        tableSeatId: primarySelectedSeatId,
-        customerName: _customerCtrl.text.trim().isEmpty
-            ? null
-            : _customerCtrl.text.trim(),
-        customerPhone: _phoneCtrl.text.trim().isEmpty
-            ? null
-            : _phoneCtrl.text.trim(),
-        notes: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+      // ✓ STEP 2: Create or add items to order
+      debugPrint(
+        _isContinuingExistingOrder
+            ? '➕ Adding items to existing order ${_existingOrder!.id}...'
+            : '📝 Creating new order...',
       );
+
+      final prov = context.read<OrdersProvider>();
+      final order = _isContinuingExistingOrder && _existingOrder != null
+          ? await prov.addItemsToExistingOrder(
+              orderId: _existingOrder!.id,
+              newItems: cartItems,
+              updatedNotes: _noteCtrl.text.trim().isNotEmpty
+                  ? _noteCtrl.text.trim()
+                  : null,
+            )
+          : await prov.createOrder(
+              cartItems: cartItems,
+              orderType: _orderType,
+              tableId: _selectedTableId,
+              tableNumber: _selectedTableNumber,
+              tableSeatId: primarySelectedSeatId,
+              customerName: _customerCtrl.text.trim().isEmpty
+                  ? null
+                  : _customerCtrl.text.trim(),
+              customerPhone: _phoneCtrl.text.trim().isEmpty
+                  ? null
+                  : _phoneCtrl.text.trim(),
+              notes: _noteCtrl.text.trim().isEmpty
+                  ? null
+                  : _noteCtrl.text.trim(),
+            );
 
       if (!mounted) return;
 
-      // ✓ STEP 3: Deduct inventory after successful order creation
-      debugPrint('📦 Deducting inventory for order ${order.id}...');
-      if (_isOnline) {
+      // ✓ STEP 3: Deduct inventory after successful order creation/update
+      debugPrint(
+        _isContinuingExistingOrder
+            ? '📦 Deducting inventory for new items on order ${order.id}...'
+            : '📦 Deducting inventory for order ${order.id}...',
+      );
+
+      // ✅ GUARD: Validate order has id before attempting inventory deduction
+      if (order.id.isEmpty) {
+        debugPrint(
+          '⚠️  Order id is empty, skipping inventory deduction. '
+          'Order likely not fully created yet.',
+        );
+      } else if (_isOnline) {
         try {
           await inventoryService.deductInventoryForOrder(
             order.id,
@@ -1035,14 +1426,20 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                 )
                 .toList(),
           );
-          debugPrint('✅ Inventory deducted successfully for order ${order.id}');
+          debugPrint(
+            _isContinuingExistingOrder
+                ? '✅ Inventory deducted for new items on order ${order.id}'
+                : '✅ Inventory deducted successfully for order ${order.id}',
+          );
         } catch (e) {
           debugPrint(
-            '⚠️  Inventory deduction failed (order still created): $e',
+            '⚠️  Inventory deduction failed (order still updated): $e',
           );
           if (mounted) {
             _snack(
-              '⚠️  Order #${order.orderNumber} created but inventory deduction failed. Will retry when online.',
+              _isContinuingExistingOrder
+                  ? '⚠️  Items added to order #${order.orderNumber} but inventory deduction failed. Will retry when online.'
+                  : '⚠️  Order #${order.orderNumber} created but inventory deduction failed. Will retry when online.',
             );
           }
         }
@@ -1068,9 +1465,17 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
       if (mounted) {
         if (!_isOnline) {
-          _snack('✅ Order created offline. Will sync when online.');
+          _snack(
+            _isContinuingExistingOrder
+                ? '✅ Items added offline. Will sync when online.'
+                : '✅ Order created offline. Will sync when online.',
+          );
         } else {
-          _snack('✅ Order #${order.orderNumber} placed & inventory updated');
+          _snack(
+            _isContinuingExistingOrder
+                ? '✅ ✨ Items added seamlessly to order #${order.orderNumber}'
+                : '✅ Order #${order.orderNumber} placed & inventory updated',
+          );
         }
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) Navigator.pop(context);
@@ -1292,9 +1697,10 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
               itemCount: _tables.length,
               itemBuilder: (context, idx) {
                 final t = _tables[idx];
-                final tid = t['id'] as String;
-                final num = t['table_number'] as int;
-                final cap = t['capacity'] as int;
+                final tid = (t['id'] as String?) ?? '';
+                final num = (t['table_number'] as int?) ?? 0;
+                final cap = (t['capacity'] as int?) ?? 0;
+                if (tid.isEmpty || num <= 0) return const SizedBox.shrink();
                 final status = t['status'] as String? ?? 'available';
                 final seats =
                     (t['table_seats'] as List?)?.cast<Map<String, dynamic>>() ??
@@ -1878,6 +2284,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                   onPlaceOrder: _proceedToOrderPreview,
                   showBackButton: true,
                   onBack: () => setState(() => _showCart = false),
+                  // ✨ NEW: Pass existing order context
+                  existingOrder: _existingOrder,
+                  isContinuingExistingOrder: _isContinuingExistingOrder,
                 )
               : _MenuView(
                   key: const ValueKey('menu_in_menu_step'),
@@ -2196,7 +2605,8 @@ class _MenuView extends StatelessWidget {
                 (c) => _CatChip(
                   label: '${c['icon'] ?? '🍽️'} ${c['name']}',
                   isSelected: selectedCategory == c['name'],
-                  onTap: () => onCategoryChanged(c['name'] as String),
+                  onTap: () =>
+                      onCategoryChanged((c['name'] as String?) ?? 'All'),
                 ),
               ),
             ],
@@ -2250,7 +2660,8 @@ class _MenuView extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
                     final item = items[i];
-                    final id = item['id'] as String;
+                    final id = (item['id'] as String?) ?? '';
+                    if (id.isEmpty) return const SizedBox.shrink();
                     return _MenuTile(
                       item: item,
                       quantity: cart[id]?.quantity ?? 0,
@@ -2383,7 +2794,7 @@ class _MenuTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          item['name'] as String,
+                          (item['name'] as String?) ?? 'Unknown Item',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
@@ -2431,9 +2842,9 @@ class _MenuTile extends StatelessWidget {
                         ),
                     ],
                   ),
-                  if ((item['description'] as String? ?? '').isNotEmpty)
+                  if (((item['description'] as String?) ?? '').isNotEmpty)
                     Text(
-                      item['description'] as String,
+                      (item['description'] as String?) ?? '',
                       style: const TextStyle(fontSize: 11, color: _C.textMute),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -2578,6 +2989,9 @@ class _CartView extends StatelessWidget {
   final VoidCallback onPlaceOrder;
   final bool showBackButton;
   final VoidCallback? onBack;
+  // ✨ NEW: Seamless order continuation context
+  final Order? existingOrder;
+  final bool isContinuingExistingOrder;
 
   const _CartView({
     Key? key,
@@ -2602,6 +3016,9 @@ class _CartView extends StatelessWidget {
     required this.onPlaceOrder,
     this.showBackButton = false,
     this.onBack,
+    // ✨ NEW: Optional existing order parameters
+    this.existingOrder,
+    this.isContinuingExistingOrder = false,
   }) : super(key: key);
 
   @override
@@ -2731,9 +3148,10 @@ class _CartView extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: tables.map((t) {
-                final tid = t['id'] as String;
-                final num = t['table_number'] as int;
-                final cap = t['capacity'] as int;
+                final tid = (t['id'] as String?) ?? '';
+                final num = (t['table_number'] as int?) ?? 0;
+                final cap = (t['capacity'] as int?) ?? 0;
+                if (tid.isEmpty || num <= 0) return const SizedBox.shrink();
                 final status = t['status'] as String? ?? 'available';
                 final customer = t['current_customer_name'] as String?;
                 final isSel = selectedTableId == tid;
@@ -3339,118 +3757,285 @@ class _CartView extends StatelessWidget {
         ),
         const SizedBox(height: 14),
 
-        _SectionLabel('Cart (${cartItems.length} items)'),
+        _SectionLabel(
+          isContinuingExistingOrder
+              ? '✨ Continuing Order #${existingOrder?.orderNumber}'
+              : 'Cart (${cartItems.length} items)',
+        ),
         const SizedBox(height: 10),
-        Container(
-          decoration: BoxDecoration(
-            color: _C.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _C.border),
-          ),
-          child: Column(
-            children: cartItems.asMap().entries.map((e) {
-              final i = e.key;
-              final ci = e.value;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ci.itemName,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: _C.textPri,
-                                ),
-                              ),
-                              Text(
-                                '₹${ci.itemPrice.toStringAsFixed(0)} each',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: _C.textMute,
-                                ),
-                              ),
-                            ],
-                          ),
+
+        // ── EXISTING ORDER ITEMS (if continuing) ────────────────────────────
+        if (isContinuingExistingOrder && existingOrder != null) ...[
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _C.primary.withOpacity(0.15),
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                  decoration: BoxDecoration(
+                    color: _C.primaryL,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      topRight: Radius.circular(12),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Text(
+                        '📋 Original Items',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _C.primary,
+                          letterSpacing: 0.2,
                         ),
-                        Text(
-                          '₹${ci.subtotal.toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: _C.textPri,
-                          ),
+                      ),
+                      Spacer(),
+                      Text(
+                        '(reference only)',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _C.primary,
+                          fontStyle: FontStyle.italic,
                         ),
-                        const SizedBox(width: 10),
-                        Row(
+                      ),
+                    ],
+                  ),
+                ),
+                // Items
+                ...existingOrder!.items.asMap().entries.map((e) {
+                  final i = e.key;
+                  final item = e.value;
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        child: Row(
                           children: [
-                            GestureDetector(
-                              onTap: () => onRemove(ci.menuItemId),
-                              child: Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: _C.primaryL,
-                                  borderRadius: BorderRadius.circular(7),
-                                ),
-                                child: const Icon(
-                                  Icons.remove,
-                                  color: _C.primary,
-                                  size: 14,
-                                ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.itemName,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: _C.textSec,
+                                    ),
+                                  ),
+                                  Text(
+                                    '₹${item.itemPrice.toStringAsFixed(0)} each',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: _C.textMute,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            SizedBox(
-                              width: 28,
+                            Text(
+                              '₹${item.subtotal.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: _C.textSec,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _C.primaryL,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
                               child: Text(
-                                '${ci.quantity}',
-                                textAlign: TextAlign.center,
+                                '×${item.quantity}',
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                   color: _C.primary,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => onAdd({
-                                'id': ci.menuItemId,
-                                'name': ci.itemName,
-                                'price': ci.itemPrice,
-                                'is_veg': ci.isVeg,
-                                'category_name': ci.categoryName,
-                                'is_available': true,
-                              }),
-                              child: Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: _C.primary,
-                                  borderRadius: BorderRadius.circular(7),
-                                ),
-                                child: const Icon(
-                                  Icons.add,
-                                  color: Colors.white,
-                                  size: 14,
                                 ),
                               ),
                             ),
                           ],
                         ),
-                      ],
+                      ),
+                      if (i < existingOrder!.items.length - 1)
+                        Divider(height: 1, color: _C.border.withOpacity(0.3)),
+                    ],
+                  );
+                }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // ── NEW ITEMS BEING ADDED ──────────────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            color: _C.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isContinuingExistingOrder
+                  ? Colors.green.withOpacity(0.3)
+                  : _C.border,
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            children: [
+              // Header for new items (only if continuing)
+              if (isContinuingExistingOrder)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
                     ),
                   ),
-                  if (i < cartItems.length - 1)
-                    const Divider(height: 1, color: _C.border),
-                ],
-              );
-            }).toList(),
+                  child: const Row(
+                    children: [
+                      Text(
+                        '✨ New Items',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF059669),
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      Spacer(),
+                      Text(
+                        '(being added)',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF059669),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              // Actual cart items
+              ...cartItems.asMap().entries.map((e) {
+                final i = e.key;
+                final ci = e.value;
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  ci.itemName,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: _C.textPri,
+                                  ),
+                                ),
+                                Text(
+                                  '₹${ci.itemPrice.toStringAsFixed(0)} each',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: _C.textMute,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            '₹${ci.subtotal.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: _C.textPri,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: () => onRemove(ci.menuItemId),
+                                child: Container(
+                                  width: 26,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    color: _C.primaryL,
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: const Icon(
+                                    Icons.remove,
+                                    color: _C.primary,
+                                    size: 14,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(
+                                width: 28,
+                                child: Text(
+                                  '${ci.quantity}',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w900,
+                                    color: _C.primary,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () => onAdd({
+                                  'id': ci.menuItemId,
+                                  'name': ci.itemName,
+                                  'price': ci.itemPrice,
+                                  'is_veg': ci.isVeg,
+                                  'category_name': ci.categoryName,
+                                  'is_available': true,
+                                }),
+                                child: Container(
+                                  width: 26,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    color: _C.primary,
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: const Icon(
+                                    Icons.add,
+                                    color: Colors.white,
+                                    size: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (i < cartItems.length - 1)
+                      const Divider(height: 1, color: _C.border),
+                  ],
+                );
+              }).toList(),
+            ],
           ),
         ),
         const SizedBox(height: 14),

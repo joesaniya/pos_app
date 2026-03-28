@@ -193,6 +193,25 @@ class OfflineSyncService {
   //  PAYLOAD SANITISATION
   // ══════════════════════════════════════════════════════════════════════════
 
+  // ── UUID fields that should never be empty strings ────────────────────────
+  static const _uuidFields = {
+    'id',
+    'business_id',
+    'table_id',
+    'table_seat_id',
+    'order_id',
+    'menu_item_id',
+    'recipe_id',
+    'ingredient_id',
+    'restaurant_id',
+    'session_id',
+    'created_by_uid',
+    'updated_by_uid',
+    'paid_by_uid',
+    'checked_by_uid',
+    'reserved_by_uid',
+  };
+
   Map<String, dynamic> _cleanPayload(Map<String, dynamic> raw) {
     final clean = Map<String, dynamic>.from(raw);
     for (final k in _kInternalFields) {
@@ -201,6 +220,18 @@ class OfflineSyncService {
     clean.removeWhere(
       (key, value) => value == null && _isOptionalNullable(clean, key),
     );
+
+    // ✅ FIX: Remove empty strings from UUID-type fields to prevent PostgreSQL errors
+    clean.removeWhere((key, value) {
+      if (_uuidFields.contains(key) &&
+          value is String &&
+          value.trim().isEmpty) {
+        log('[SyncService] Removed empty UUID field from payload: $key');
+        return true; // Remove this entry
+      }
+      return false;
+    });
+
     return clean;
   }
 
@@ -368,7 +399,13 @@ class OfflineSyncService {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> _syncOrder(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Order payload missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     switch (action) {
@@ -389,12 +426,21 @@ class OfflineSyncService {
 
         if (status == 'active' && tableId != null && tableId.isNotEmpty) {
           // Query for any active order on this table (both seat and whole-table orders)
+          // ✅ FIX: Safely cast business_id with null handling
+          final businessId = (clean['business_id'] as String?)?.trim() ?? '';
+          if (businessId.isEmpty) {
+            log(
+              '[SyncService] ⚠️ Order missing business_id, cannot query active orders',
+            );
+            return; // Cannot proceed without business_id
+          }
+
           var query = _sb
               .from('orders')
               .select('id, table_seat_id')
-              .eq('table_id', tableId) // ✅ tableId is guaranteed non-null now
+              .eq('table_id', tableId)
               .eq('status', 'active')
-              .eq('business_id', clean['business_id'] as String);
+              .eq('business_id', businessId);
 
           final activeOrders = await query;
 
@@ -433,27 +479,32 @@ class OfflineSyncService {
 
           if (matchingOrder != null && matchingOrder['id'] != id) {
             // ✅ Order exists for this seat/table - merge items into it
+            // ✅ FIX: Safely extract existingOrderId with null handling
             final existingOrderId =
-                matchingOrder['id']
-                    as String; // ✅ Extract ID to avoid null checks in closure
-            log(
-              '[SyncService] ℹ Merging offline order items into existing order $existingOrderId',
-            );
-            final items =
-                (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-            if (items.isNotEmpty) {
-              final cleanItems = items
-                  .map(
-                    (item) => {
-                      ..._cleanPayload(item),
-                      'order_id':
-                          existingOrderId, // ✅ Use extracted ID (non-null)
-                    },
-                  )
-                  .toList();
-              await _sb.from('order_items').insert(cleanItems);
+                (matchingOrder['id'] as String?)?.trim() ?? '';
+            if (existingOrderId.isEmpty) {
+              log('[SyncService] ⚠️ Existing order has empty id, cannot merge');
+              // Proceed with normal insert instead
+            } else {
+              log(
+                '[SyncService] ℹ Merging offline order items into existing order $existingOrderId',
+              );
+              final items =
+                  (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+              if (items.isNotEmpty) {
+                final cleanItems = items
+                    .map(
+                      (item) => {
+                        ..._cleanPayload(item),
+                        'order_id':
+                            existingOrderId, // ✅ Use extracted ID (non-null)
+                      },
+                    )
+                    .toList();
+                await _sb.from('order_items').insert(cleanItems);
+              }
+              return; // Mark as synced (merged into existing order)
             }
-            return; // Mark as synced (merged into existing order)
           }
         }
 
@@ -462,7 +513,15 @@ class OfflineSyncService {
         await _sb.from('orders').insert(orderData);
         final items = (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         if (items.isNotEmpty) {
-          final cleanItems = items.map(_cleanPayload).toList();
+          final cleanItems = items
+              .map(
+                (item) => {
+                  ..._cleanPayload(item),
+                  'order_id':
+                      id, // ✅ Ensure order_id is set to syncing order's id
+                },
+              )
+              .toList();
           await _sb.from('order_items').insert(cleanItems);
         }
         break;
@@ -478,36 +537,82 @@ class OfflineSyncService {
 
   Future<void> _syncOrderStatus(Map<String, dynamic> p) async {
     final clean = _cleanPayload(p);
+
+    // ✅ FIX: Safely get order id before processing
+    final orderId = (clean['id'] as String?)?.trim() ?? '';
+    if (orderId.isEmpty) {
+      log('[SyncService] ⚠️ Order status update missing order id, skipping');
+      return;
+    }
+
+    // ✅ FIX: Validate and sanitize UID fields to prevent empty UUID errors
+    final updatedByUid = clean['updated_by_uid'] as String?;
+    final isValidUid =
+        updatedByUid != null &&
+        updatedByUid.trim().isNotEmpty &&
+        _isValidUuid(updatedByUid);
+
+    if (updatedByUid != null && updatedByUid.trim().isEmpty) {
+      log(
+        '[SyncService] ⚠️ Order $orderId: Skipping empty updated_by_uid (prevents UUID error)',
+      );
+    }
+
     await _sb
         .from('orders')
         .update({
           'status': clean['status'],
-          'updated_by_uid': clean['updated_by_uid'],
-          'updated_by_name': clean['updated_by_name'],
+          if (isValidUid) 'updated_by_uid': updatedByUid?.trim(),
+          if (clean['updated_by_name'] != null &&
+              (clean['updated_by_name'] as String).trim().isNotEmpty)
+            'updated_by_name': clean['updated_by_name'],
           if (clean['started_at'] != null) 'started_at': clean['started_at'],
           if (clean['ready_at'] != null) 'ready_at': clean['ready_at'],
           if (clean['cancelled_at'] != null)
             'cancelled_at': clean['cancelled_at'],
         })
-        .eq('id', clean['id'] as String);
+        .eq('id', orderId);
   }
 
   Future<void> _syncOrderPayment(Map<String, dynamic> p) async {
     final clean = _cleanPayload(p);
+
+    // ✅ FIX: Safely get order id before processing
+    final orderId = (clean['id'] as String?)?.trim() ?? '';
+    if (orderId.isEmpty) {
+      log('[SyncService] ⚠️ Order payment update missing order id, skipping');
+      return;
+    }
+
+    // ✅ FIX: Validate and sanitize UID fields to prevent empty UUID errors
+    final paidByUid = clean['paid_by_uid'] as String?;
+    final isValidUid =
+        paidByUid != null &&
+        paidByUid.trim().isNotEmpty &&
+        _isValidUuid(paidByUid);
+
+    if (paidByUid != null && paidByUid.trim().isEmpty) {
+      log(
+        '[SyncService] ⚠️ Order $orderId: Skipping empty paid_by_uid (prevents UUID error)',
+      );
+    }
+
     await _sb
         .from('orders')
         .update({
           'payment_status': 'paid',
           'payment_mode': clean['payment_mode'],
-          'paid_by_uid': clean['paid_by_uid'],
-          'paid_by_name': clean['paid_by_name'],
+          if (isValidUid) 'paid_by_uid': paidByUid?.trim(),
+          if (clean['paid_by_name'] != null &&
+              (clean['paid_by_name'] as String).trim().isNotEmpty)
+            'paid_by_name': clean['paid_by_name'],
           'paid_at': clean['paid_at'],
           if (clean['payment_ref'] != null) 'payment_ref': clean['payment_ref'],
           if (clean['tip_amount'] != null) 'tip_amount': clean['tip_amount'],
           if (clean['discount_amount'] != null)
             'discount_amount': clean['discount_amount'],
         })
-        .eq('id', clean['id'] as String);
+        .eq('id', orderId);
   }
 
   Future<void> _syncTable(String action, Map<String, dynamic> p) async {
@@ -543,12 +648,21 @@ class OfflineSyncService {
         break;
 
       case LocalDatabase.actionDelete:
+        // ✅ FIX: Validate and sanitize UID fields before deleting
+        final updatedByUid = clean['updated_by_uid'] as String?;
+        final isValidUid =
+            updatedByUid != null &&
+            updatedByUid.trim().isNotEmpty &&
+            _isValidUuid(updatedByUid);
+
         await _sb
             .from('restaurant_tables')
             .update({
               'is_active': false,
-              'updated_by_uid': clean['updated_by_uid'],
-              'updated_by_name': clean['updated_by_name'],
+              if (isValidUid) 'updated_by_uid': updatedByUid?.trim(),
+              if (clean['updated_by_name'] != null &&
+                  (clean['updated_by_name'] as String).trim().isNotEmpty)
+                'updated_by_name': clean['updated_by_name'],
               'updated_at': clean['updated_at'],
             })
             .eq('id', id);
@@ -590,7 +704,13 @@ class OfflineSyncService {
   }
 
   Future<void> _syncMenuCategory(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Menu category missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     switch (action) {
@@ -616,7 +736,13 @@ class OfflineSyncService {
   }
 
   Future<void> _syncMenuItem(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Menu item missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     switch (action) {
@@ -639,7 +765,13 @@ class OfflineSyncService {
   }
 
   Future<void> _syncInventoryItem(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Inventory item missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     if (clean.containsKey('updated_at')) {
@@ -692,17 +824,31 @@ class OfflineSyncService {
 
   Future<void> _syncStockTransaction(Map<String, dynamic> p) async {
     final clean = _cleanPayload(p);
+
+    // ✅ FIX: Safely cast id with null handling
+    final txId = (clean['id'] as String?)?.trim() ?? '';
+    if (txId.isEmpty) {
+      log('[SyncService] ⚠️ Stock transaction missing id, skipping');
+      return;
+    }
+
     final existing = await _sb
         .from('stock_transactions')
         .select('id')
-        .eq('id', clean['id'] as String)
+        .eq('id', txId)
         .maybeSingle();
     if (existing != null) return;
     await _sb.from('stock_transactions').insert(clean);
   }
 
   Future<void> _syncSupplier(String action, Map<String, dynamic> p) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Order payload missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     switch (action) {
@@ -751,7 +897,13 @@ class OfflineSyncService {
     String action,
     Map<String, dynamic> p,
   ) async {
-    final id = p['id'] as String;
+    // ✅ FIX: Safely cast id with null handling
+    final id = (p['id'] as String?)?.trim() ?? '';
+    if (id.isEmpty) {
+      log('[SyncService] ⚠️ Supplier delivery missing id, skipping');
+      return;
+    }
+
     final clean = _cleanPayload(p);
 
     switch (action) {

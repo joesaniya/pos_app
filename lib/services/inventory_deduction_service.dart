@@ -295,12 +295,22 @@ class InventoryDeductionService {
     String businessId,
     List<Map<String, dynamic>> orderItems,
   ) async {
+    // ✅ GUARD: Validate orderId before proceeding
+    final trimmedOrderId = orderId.trim();
+    if (trimmedOrderId.isEmpty) {
+      debugPrint(
+        '⚠️  Cannot deduct inventory: orderId is empty. '
+        'Order likely not yet created. Skipping deduction.',
+      );
+      return;
+    }
+
     // ✅ NEW: Declare at method level so it's accessible in both try and catch blocks
     bool orderExistsInDb = false;
 
     try {
       debugPrint(
-        '🔄 Starting inventory deduction for order: $orderId (#$orderNumber)',
+        '🔄 Starting inventory deduction for order: $trimmedOrderId (#$orderNumber)',
       );
 
       // ✅ NEW: Verify order exists in database before creating consumption records
@@ -309,13 +319,13 @@ class InventoryDeductionService {
         final orderExists = await _db
             .from('orders')
             .select('id')
-            .eq('id', orderId)
+            .eq('id', trimmedOrderId)
             .maybeSingle();
         orderExistsInDb = orderExists != null;
 
         if (!orderExistsInDb) {
           debugPrint(
-            '⚠️  Order $orderId not found in database (offline order?). '
+            '⚠️  Order $trimmedOrderId not found in database (offline order?). '
             'Will deduct inventory but skip consumption records. '
             'Records will be created when order syncs.',
           );
@@ -413,7 +423,7 @@ class InventoryDeductionService {
 
               await _db.from('ingredient_consumption').insert({
                 'business_id': businessId,
-                'order_id': orderId,
+                'order_id': trimmedOrderId,
                 'order_number': orderNumber,
                 'menu_item_id': menuItemId,
                 'menu_item_name': itemName,
@@ -449,7 +459,7 @@ class InventoryDeductionService {
               'p_inventory_item_id': ing.ingredientId,
               'p_quantity': totalToDeduct,
               'p_business_id': businessId,
-              'p_order_id': orderId,
+              'p_order_id': trimmedOrderId,
               'p_order_number': orderNumber,
             },
           );

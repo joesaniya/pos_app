@@ -276,6 +276,56 @@ class OrdersProvider extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  ADD ITEMS TO EXISTING ORDER (NEW - for seamless order continuation)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Add items to an existing active order (seamless continuation)
+  /// Returns the updated order with new items merged
+  Future<Order> addItemsToExistingOrder({
+    required String orderId,
+    required List<CartItem> newItems,
+    String? updatedNotes,
+  }) async {
+    if (_businessId.isEmpty || _uid.isEmpty) await _loadUserFromFirestore();
+
+    if (_businessId.isEmpty) {
+      final stored = await StorageService.instance.getUserData();
+      _uid = stored['uid'] as String? ?? _uid;
+      _name = stored['name'] as String? ?? _name;
+      _role = stored['role'] as String? ?? _role;
+      _businessId = stored['businessId'] as String? ?? '';
+      _businessName = stored['businessName'] as String? ?? _businessName;
+    }
+
+    if (_businessId.isEmpty) {
+      throw Exception('Cannot add items: business profile not loaded');
+    }
+
+    // Use OrdersRepository to delegate to the remote service
+    final updatedOrder = await OrdersRepository.instance
+        .addItemsToExistingOrder(
+          orderId: orderId,
+          businessId: _businessId,
+          businessName: _businessName,
+          newItems: newItems,
+          updatedNotes: updatedNotes,
+        );
+
+    // Update the order in the local list (find and replace)
+    final idx = _orders.indexWhere((o) => o.id == orderId);
+    if (idx != -1) {
+      _orders[idx] = updatedOrder;
+    }
+    notifyListeners();
+
+    debugPrint(
+      '✨ [OrdersProvider] Seamlessly added ${newItems.length} items to order #${updatedOrder.orderNumber}',
+    );
+
+    return updatedOrder;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  ADVANCE ORDER STATUS (kitchen flow: pending → preparing → ready)
   //  NOTE: 'ready' → 'completed' requires payment via confirmPayment()
   // ══════════════════════════════════════════════════════════════════════════

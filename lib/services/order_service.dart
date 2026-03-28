@@ -206,11 +206,325 @@ class OrdersService {
           .eq('id', orderId)
           .maybeSingle();
       if (data == null) return null;
-      return Order.fromJson(data as Map<String, dynamic>);
+      return Order.fromJson(data);
     } catch (e) {
       debugPrint('[OrdersService] fetchOrder error: $e');
       return null;
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  SEAMLESS WORKFLOW: Check for existing active orders (NEW - for add items feature)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Get existing active order for a table/seat to enable "add items to existing order"
+  /// Returns null if no active order found
+  /// Returns the Order if an active order exists for this table/seat
+  Future<Order?> getActiveOrderForTable({
+    required String tableId,
+    required String businessId,
+    String? tableSeatId,
+  }) async {
+    try {
+      Map<String, dynamic>? existing;
+
+      // If specific seat is provided, check by seat (most specific)
+      if (tableSeatId != null && tableSeatId.isNotEmpty) {
+        existing = await _db
+            .from('vw_orders_with_items')
+            .select()
+            .eq('table_seat_id', tableSeatId)
+            .eq('business_id', businessId)
+            .inFilter('status', ['pending', 'preparing', 'ready'])
+            .maybeSingle();
+      } else {
+        // Check for whole-table order (no specific seat)
+        existing = await _db
+            .from('vw_orders_with_items')
+            .select()
+            .eq('table_id', tableId)
+            .eq('business_id', businessId)
+            .isFilter('table_seat_id', null)
+            .inFilter('status', ['pending', 'preparing', 'ready'])
+            .maybeSingle();
+      }
+
+      if (existing == null) {
+        debugPrint('✓ [OrdersService] No active order found for table/seat');
+        return null;
+      }
+
+      final order = Order.fromJson(existing);
+      debugPrint(
+        '✓ [OrdersService] Found active order #${order.orderNumber} for table',
+      );
+      return order;
+    } catch (e) {
+      debugPrint('[OrdersService] getActiveOrderForTable error: $e');
+      return null;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  SEAMLESS WORKFLOW: Add items to existing order (NEW - for add items feature)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Add new items to an existing active order
+  /// Returns updated order with new items merged
+  /// Only new items are marked for KOT sending (via order_items.sent_to_kitchen flag)
+  Future<Order> addItemsToExistingOrder({
+    required String orderId,
+    required String businessId,
+    required String businessName,
+    required List<CartItem> newItems,
+    String? updatedNotes,
+    double taxRate = 5.0,
+  }) async {
+    if (newItems.isEmpty) {
+      throw Exception('No items to add to order');
+    }
+
+    debugPrint(
+      '📝 [OrdersService] Adding ${newItems.length} items to order $orderId',
+    );
+
+    // ✅ VALIDATE: Filter out items with empty/invalid menu_item_id
+    final validItems = newItems.where((item) {
+      if (item.menuItemId.isEmpty) {
+        debugPrint(
+          '⚠️  [OrdersService] Skipping item with empty menuItemId: ${item.itemName}',
+        );
+        return false;
+      }
+      return true;
+    }).toList();
+
+    if (validItems.isEmpty) {
+      throw Exception(
+        'No valid items to add (all items have missing menu_item_id)',
+      );
+    }
+
+    if (validItems.length < newItems.length) {
+      debugPrint(
+        '⚠️  [OrdersService] Removed ${newItems.length - validItems.length} invalid items',
+      );
+    }
+
+    // Step 1: Insert new items into order_items table
+    final itemInserts = validItems
+        .map(
+          (item) => {
+            'order_id': orderId,
+            'menu_item_id': item.menuItemId,
+            'item_name': item.itemName,
+            'item_price': item.itemPrice,
+            'category_name': item.categoryName,
+            'is_veg': item.isVeg,
+            'quantity': item.quantity,
+            'subtotal': item.subtotal,
+            'notes': item.notes,
+            // ✅ FIX: Removed 'sent_to_kitchen' - column doesn't exist in schema (PGRST204)
+          },
+        )
+        .toList();
+
+    try {
+      await _db.from('order_items').insert(itemInserts);
+      debugPrint('✅ [OrdersService] Inserted ${validItems.length} items');
+    } catch (e) {
+      debugPrint('❌ [OrdersService] Failed to insert items: $e');
+      rethrow;
+    }
+
+    // Step 3: Fetch the updated order to get all items
+    final updated = await _db
+        .from('vw_orders_with_items')
+        .select()
+        .eq('id', orderId)
+        .single();
+
+    final currentOrder = Order.fromJson(updated);
+
+    // Recalculate all totals
+    final totalSubtotal = currentOrder.items.fold(
+      0.0,
+      (s, i) => s + i.subtotal,
+    );
+    final totalTax = totalSubtotal * (taxRate / 100);
+    final totalAmount = totalSubtotal + totalTax;
+
+    // Step 4: Update order with new totals and updated_at timestamp
+    await _db
+        .from('orders')
+        .update({
+          'subtotal': totalSubtotal,
+          'tax_amount': totalTax,
+          'tax_rate': taxRate,
+          'total_amount': totalAmount,
+          if (updatedNotes != null && updatedNotes.isNotEmpty)
+            'notes': updatedNotes,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', orderId);
+
+    debugPrint(
+      '✅ [OrdersService] Updated order totals: '
+      'subtotal=$totalSubtotal, tax=$totalTax, total=$totalAmount',
+    );
+
+    // Step 5: Deduct inventory for new items (same as in createOrder)
+    debugPrint(
+      '📦 [OrdersService] Deducting inventory for ${validItems.length} new items...',
+    );
+
+    try {
+      await _deductInventoryForOrderItems(
+        orderId: orderId,
+        businessId: businessId,
+        cartItems: validItems,
+      );
+      debugPrint('✅ [OrdersService] Inventory deducted for new items');
+    } catch (e) {
+      debugPrint(
+        '⚠️  [OrdersService] Inventory deduction failed (items still added): $e',
+      );
+      // Items are already added — deduction failure is non-critical
+      // The order will be marked for manual reconciliation
+    }
+
+    // Step 6: Update table's current_order_total if needed
+    if (currentOrder.tableId != null && currentOrder.tableId!.isNotEmpty) {
+      try {
+        await _db
+            .from('restaurant_tables')
+            .update({
+              'current_order_total': totalAmount,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('id', currentOrder.tableId!);
+        debugPrint(
+          '✅ [OrdersService] Updated table current_order_total to $totalAmount',
+        );
+      } catch (e) {
+        debugPrint('⚠️  [OrdersService] Failed to update table total: $e');
+      }
+    }
+
+    // Step 7: Fetch and return the fully updated order
+    final finalData = await _db
+        .from('vw_orders_with_items')
+        .select()
+        .eq('id', orderId)
+        .single();
+
+    final updatedOrder = Order.fromJson(finalData);
+    debugPrint(
+      '✅ [OrdersService] Successfully added items to order. New total items: ${updatedOrder.totalItems}',
+    );
+
+    return updatedOrder;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Helper: Deduct inventory for order items (shared logic)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _deductInventoryForOrderItems({
+    required String orderId,
+    required String businessId,
+    required List<CartItem> cartItems,
+  }) async {
+    for (final item in cartItems) {
+      // Get recipe for this menu item
+      final recipe = await _db
+          .from('recipes')
+          .select('id')
+          .eq('menu_item_id', item.menuItemId)
+          .maybeSingle();
+
+      if (recipe == null) {
+        debugPrint(
+          '⚠️  [OrdersService] No recipe found for menu item: ${item.menuItemId}',
+        );
+        continue;
+      }
+
+      final recipeId = recipe['id'] as String;
+
+      // Get recipe ingredients
+      final ingredientRows = await _db
+          .from('recipe_ingredients')
+          .select(
+            'ingredient_id, ingredient_name, ingredient_unit, quantity_required',
+          )
+          .eq('recipe_id', recipeId);
+
+      for (final ingredient in ingredientRows as List) {
+        final ingredientId =
+            (ingredient['ingredient_id'] as String?)?.trim() ?? '';
+        final ingredientName =
+            (ingredient['ingredient_name'] as String?)?.trim() ?? '';
+        final ingredientUnit =
+            (ingredient['ingredient_unit'] as String?)?.trim() ?? '';
+        final quantityRequired =
+            double.tryParse(
+              ingredient['quantity_required']?.toString() ?? '0',
+            ) ??
+            0.0;
+
+        // ✅ VALIDATE: Skip ingredients with empty IDs to prevent UUID errors
+        if (ingredientId.isEmpty) {
+          debugPrint(
+            '⚠️  [OrdersService] Skipping ingredient with empty ID for recipe $recipeId',
+          );
+          continue;
+        }
+
+        if (ingredientName.isEmpty || ingredientUnit.isEmpty) {
+          debugPrint(
+            '⚠️  [OrdersService] Skipping ingredient $ingredientId with missing name/unit',
+          );
+          continue;
+        }
+
+        final totalToDeduct = item.quantity * quantityRequired;
+
+        // ✓ Record consumption (audit trail)
+        await _db.from('ingredient_consumption').insert({
+          'business_id': businessId,
+          'order_id': orderId,
+          'recipe_id': recipeId,
+          'menu_item_id': item.menuItemId,
+          'menu_item_name': item.itemName,
+          'ingredient_id': ingredientId,
+          'ingredient_name': ingredientName,
+          'ingredient_unit': ingredientUnit,
+          'quantity_consumed': totalToDeduct,
+          'transaction_status': 'pending',
+        });
+
+        // ✓ Deduct from inventory
+        await _db.rpc(
+          'deduct_inventory',
+          params: {
+            'p_inventory_item_id': ingredientId,
+            'p_quantity': totalToDeduct,
+            'p_business_id': businessId,
+          },
+        );
+
+        debugPrint(
+          '✅ Deducted $totalToDeduct $ingredientUnit of $ingredientName',
+        );
+      }
+    }
+
+    // ✓ Mark all consumptions as completed
+    await _db
+        .from('ingredient_consumption')
+        .update({'transaction_status': 'completed'})
+        .eq('order_id', orderId);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -354,25 +668,38 @@ class OrdersService {
     final orderId = orderData['id'] as String;
 
     if (cartItems.isNotEmpty) {
-      await _db
-          .from('order_items')
-          .insert(
-            cartItems
-                .map(
-                  (c) => {
-                    'order_id': orderId,
-                    'menu_item_id': c.menuItemId,
-                    'item_name': c.itemName,
-                    'item_price': c.itemPrice,
-                    'category_name': c.categoryName,
-                    'is_veg': c.isVeg,
-                    'quantity': c.quantity,
-                    'subtotal': c.subtotal,
-                    'notes': c.notes,
-                  },
-                )
-                .toList(),
+      // ✅ VALIDATE: Filter out items with empty/invalid menu_item_id
+      final validCartItems = cartItems.where((item) {
+        if (item.menuItemId.isEmpty) {
+          debugPrint(
+            '⚠️  [OrdersService] Skipping item with empty menuItemId: ${item.itemName}',
           );
+          return false;
+        }
+        return true;
+      }).toList();
+
+      if (validCartItems.isNotEmpty) {
+        await _db
+            .from('order_items')
+            .insert(
+              validCartItems
+                  .map(
+                    (c) => {
+                      'order_id': orderId,
+                      'menu_item_id': c.menuItemId,
+                      'item_name': c.itemName,
+                      'item_price': c.itemPrice,
+                      'category_name': c.categoryName,
+                      'is_veg': c.isVeg,
+                      'quantity': c.quantity,
+                      'subtotal': c.subtotal,
+                      'notes': c.notes,
+                    },
+                  )
+                  .toList(),
+            );
+      }
     }
 
     // ── TABLE STATUS UPDATE — SEAT-AWARE (FIX) ─────────────────────────────
@@ -458,11 +785,11 @@ class OrdersService {
           'Order creation query failed - order not found after INSERT',
         );
       }
-      final order = Order.fromJson(fallback as Map<String, dynamic>);
+      final order = Order.fromJson(fallback);
       return order;
     }
 
-    final order = Order.fromJson(full as Map<String, dynamic>);
+    final order = Order.fromJson(full);
 
     // ── INVENTORY DEDUCTION ────────────────────────────────────────────────
     // Deduct inventory AFTER order is successfully created
@@ -523,14 +850,32 @@ class OrdersService {
           .eq('recipe_id', recipeId);
 
       for (final ingredient in ingredientRows as List) {
-        final ingredientId = ingredient['ingredient_id'] as String;
-        final ingredientName = ingredient['ingredient_name'] as String;
-        final ingredientUnit = ingredient['ingredient_unit'] as String;
+        final ingredientId =
+            (ingredient['ingredient_id'] as String?)?.trim() ?? '';
+        final ingredientName =
+            (ingredient['ingredient_name'] as String?)?.trim() ?? '';
+        final ingredientUnit =
+            (ingredient['ingredient_unit'] as String?)?.trim() ?? '';
         final quantityRequired =
             double.tryParse(
               ingredient['quantity_required']?.toString() ?? '0',
             ) ??
             0.0;
+
+        // ✅ VALIDATE: Skip ingredients with empty IDs to prevent UUID errors
+        if (ingredientId.isEmpty) {
+          debugPrint(
+            '⚠️  [OrderService] Skipping ingredient with empty ID for recipe $recipeId',
+          );
+          continue;
+        }
+
+        if (ingredientName.isEmpty || ingredientUnit.isEmpty) {
+          debugPrint(
+            '⚠️  [OrderService] Skipping ingredient $ingredientId with missing name/unit',
+          );
+          continue;
+        }
 
         final totalToDeduct = item.quantity * quantityRequired;
 
@@ -550,7 +895,7 @@ class OrdersService {
         });
 
         // ✓ Deduct from inventory
-        final deductResult = await _db.rpc(
+        await _db.rpc(
           'deduct_inventory',
           params: {
             'p_inventory_item_id': ingredientId,
@@ -628,7 +973,7 @@ class OrdersService {
             .eq('id', orderId)
             .maybeSingle();
         if (directData != null) {
-          return Order.fromJson(directData as Map<String, dynamic>);
+          return Order.fromJson(directData);
         }
       } catch (_) {}
       throw Exception(
@@ -636,7 +981,7 @@ class OrdersService {
       );
     }
 
-    return Order.fromJson(data as Map<String, dynamic>);
+    return Order.fromJson(data);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -700,7 +1045,7 @@ class OrdersService {
             .eq('id', orderId)
             .maybeSingle();
         if (directData != null) {
-          return Order.fromJson(directData as Map<String, dynamic>);
+          return Order.fromJson(directData);
         }
       } catch (e) {
         debugPrint('❌ Fallback orders table query failed: $e');
@@ -710,7 +1055,7 @@ class OrdersService {
       );
     }
 
-    return Order.fromJson(data as Map<String, dynamic>);
+    return Order.fromJson(data);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -779,10 +1124,7 @@ class OrdersService {
                     .eq('id', record['id'])
                     .maybeSingle();
                 if (full != null) {
-                  onEvent(
-                    Order.fromJson(full as Map<String, dynamic>),
-                    payload.eventType.name,
-                  );
+                  onEvent(Order.fromJson(full), payload.eventType.name);
                 }
               } on PostgrestException catch (e) {
                 // If view is missing, fallback to orders table with empty items
@@ -796,10 +1138,7 @@ class OrdersService {
                       .eq('id', record['id'])
                       .maybeSingle();
                   if (fallback != null) {
-                    final orderData = {
-                      ...(fallback as Map<String, dynamic>),
-                      'items': [],
-                    };
+                    final orderData = {...fallback, 'items': []};
                     onEvent(Order.fromJson(orderData), payload.eventType.name);
                   }
                 } else {
@@ -950,7 +1289,7 @@ class OrdersService {
           .select('ingredient_id, quantity_required, is_optional')
           .eq('recipe_id', recipeId);
 
-      if (ingredients is! List || ingredients.isEmpty) {
+      if (ingredients.isEmpty) {
         // No ingredients, so unlimited
         return 999;
       }

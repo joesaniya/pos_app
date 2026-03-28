@@ -529,6 +529,162 @@ class OrdersRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  ADD ITEMS TO EXISTING ORDER (NEW - for seamless continuation)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Add items to an existing active order (seamless continuation)
+  /// Returns the updated order with new items merged
+  Future<Order> addItemsToExistingOrder({
+    required String orderId,
+    required String businessId,
+    required String businessName,
+    required List<CartItem> newItems,
+    String? updatedNotes,
+    double taxRate = 5.0,
+  }) async {
+    if (_connectivity.isOnline) {
+      // ONLINE: call Supabase directly
+      try {
+        final order = await _remote.addItemsToExistingOrder(
+          orderId: orderId,
+          businessId: businessId,
+          businessName: businessName,
+          newItems: newItems,
+          updatedNotes: updatedNotes,
+          taxRate: taxRate,
+        );
+        // Cache for offline reads
+        await _local.upsertEntity(
+          table: LocalDatabase.tOrders,
+          id: order.id,
+          businessId: businessId,
+          data: order.toSyncMap(),
+          syncStatus: LocalDatabase.syncSynced,
+          action: LocalDatabase.actionUpdate,
+        );
+        return order;
+      } catch (e) {
+        debugPrint(
+          '[OrdersRepo] Online add items failed, falling back to offline: $e',
+        );
+      }
+    }
+
+    // OFFLINE: add items to local cache and queue for sync
+    try {
+      // 1. Get the existing order from local cache
+      final orderRows = await _local.getEntities(
+        table: LocalDatabase.tOrders,
+        businessId: businessId,
+      );
+
+      final orderRow = orderRows.where((r) => r['id'] == orderId).firstOrNull;
+      if (orderRow == null) {
+        throw Exception('Order not found in local cache');
+      }
+
+      // 2. Parse existing order data
+      final orderData =
+          jsonDecode(orderRow['data'] as String? ?? '{}')
+              as Map<String, dynamic>;
+      final existingItems =
+          (orderData['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final currentSubtotal =
+          (orderData['subtotal'] as num?)?.toDouble() ?? 0.0;
+
+      // 3. Calculate new totals
+      final newItemsSubtotal = newItems.fold<double>(
+        0,
+        (s, i) => s + i.subtotal,
+      );
+      final totalSubtotal = currentSubtotal + newItemsSubtotal;
+      final totalTax = totalSubtotal * (taxRate / 100);
+      final newTotalAmount = totalSubtotal + totalTax;
+
+      // 4. Validate and build new items data (filter out items with empty menu_item_id)
+      final validNewItems = newItems.where((item) {
+        if (item.menuItemId.isEmpty) {
+          debugPrint(
+            '⚠️  [OrdersRepo] Skipping item with empty menuItemId: ${item.itemName}',
+          );
+          return false;
+        }
+        return true;
+      }).toList();
+
+      if (validNewItems.isEmpty) {
+        throw Exception(
+          'No valid items to add (all items have missing menu_item_id)',
+        );
+      }
+
+      // 5. Build new items data
+      final newItemsData = validNewItems
+          .map(
+            (item) => {
+              'order_id': orderId,
+              'menu_item_id': item.menuItemId,
+              'item_name': item.itemName,
+              'item_price': item.itemPrice,
+              'category_name': item.categoryName,
+              'is_veg': item.isVeg,
+              'quantity': item.quantity,
+              'subtotal': item.subtotal,
+              'notes': item.notes,
+              // ✅ FIX: Removed 'sent_to_kitchen' - column doesn't exist in schema
+            },
+          )
+          .toList();
+
+      // 5. Merge items
+      final mergedItems = [...existingItems, ...newItemsData];
+
+      // 6. Update order data with new totals and merged items
+      final now = DateTime.now().toUtc().toIso8601String();
+      orderData['id'] = orderId; // ✅ Ensure ID is in orderData
+      orderData['subtotal'] = totalSubtotal;
+      orderData['tax_amount'] = totalTax;
+      orderData['tax_rate'] = taxRate;
+      orderData['total_amount'] = newTotalAmount;
+      orderData['items'] = mergedItems;
+      if (updatedNotes != null && updatedNotes.isNotEmpty) {
+        orderData['notes'] = updatedNotes;
+      }
+      orderData['updated_at'] = now;
+
+      // 7. Update in local cache
+      await _local.upsertEntity(
+        table: LocalDatabase.tOrders,
+        id: orderId,
+        businessId: businessId,
+        data: orderData,
+        syncStatus: LocalDatabase.syncPending,
+        action: LocalDatabase.actionUpdate,
+      );
+
+      // 8. Queue for sync
+      await _local.enqueue(
+        id: _uuid.v4(),
+        entityType: EntityType.order,
+        entityId: orderId,
+        action: LocalDatabase.actionUpdate,
+        payload: orderData,
+        businessId: businessId,
+      );
+
+      // 9. Build and return updated Order object
+      final updatedOrder = Order.fromJson(orderData);
+      debugPrint(
+        '[OrdersRepo] ✨ Offline: Added ${validNewItems.length} items to order $orderId',
+      );
+      return updatedOrder;
+    } catch (e) {
+      debugPrint('[OrdersRepo] addItemsToExistingOrder offline error: $e');
+      rethrow;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  UPDATE ORDER STATUS
   // ══════════════════════════════════════════════════════════════════════════
 

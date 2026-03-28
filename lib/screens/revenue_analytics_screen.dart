@@ -73,7 +73,10 @@ class _CustomDateRangePickerState extends State<CustomDateRangePicker> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: widget.primaryColor.withOpacity(0.25), width: 1.5),
+          border: Border.all(
+            color: widget.primaryColor.withOpacity(0.25),
+            width: 1.5,
+          ),
           boxShadow: [
             BoxShadow(
               color: widget.primaryColor.withOpacity(0.08),
@@ -89,11 +92,18 @@ class _CustomDateRangePickerState extends State<CustomDateRangePicker> {
               padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [widget.primaryColor, widget.primaryColor.withOpacity(0.7)],
+                  colors: [
+                    widget.primaryColor,
+                    widget.primaryColor.withOpacity(0.7),
+                  ],
                 ),
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: const Icon(Icons.calendar_today_rounded, color: Colors.white, size: 14),
+              child: const Icon(
+                Icons.calendar_today_rounded,
+                color: Colors.white,
+                size: 14,
+              ),
             ),
             const SizedBox(width: 10),
             Column(
@@ -117,14 +127,19 @@ class _CustomDateRangePickerState extends State<CustomDateRangePicker> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: start != null ? const Color(0xFF1A1A2E) : Colors.grey,
+                    color: start != null
+                        ? const Color(0xFF1A1A2E)
+                        : Colors.grey,
                   ),
                 ),
               ],
             ),
             const SizedBox(width: 8),
-            Icon(Icons.keyboard_arrow_down_rounded,
-                color: widget.primaryColor.withOpacity(0.5), size: 18),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: widget.primaryColor.withOpacity(0.5),
+              size: 18,
+            ),
           ],
         ),
       ),
@@ -179,9 +194,10 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
     _scaleAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
       CurvedAnimation(parent: _animController, curve: Curves.easeOutBack),
     );
-    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
-    );
+    _fadeAnim = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
   }
 
@@ -238,12 +254,12 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
   void _prevMonth() => setState(() {
-        _viewMonth = DateTime(_viewMonth.year, _viewMonth.month - 1);
-      });
+    _viewMonth = DateTime(_viewMonth.year, _viewMonth.month - 1);
+  });
 
   void _nextMonth() => setState(() {
-        _viewMonth = DateTime(_viewMonth.year, _viewMonth.month + 1);
-      });
+    _viewMonth = DateTime(_viewMonth.year, _viewMonth.month + 1);
+  });
 
   List<Widget> _buildCalendarDays() {
     final firstDay = DateTime(_viewMonth.year, _viewMonth.month, 1);
@@ -275,21 +291,24 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
             decoration: BoxDecoration(
               gradient: (isStart || isEnd)
                   ? LinearGradient(
-                      colors: [widget.primaryColor, widget.primaryColor.withOpacity(0.75)],
+                      colors: [
+                        widget.primaryColor,
+                        widget.primaryColor.withOpacity(0.75),
+                      ],
                     )
                   : null,
               color: inRange
                   ? widget.primaryColor.withOpacity(0.12)
                   : isToday
-                      ? widget.primaryColor.withOpacity(0.08)
-                      : null,
+                  ? widget.primaryColor.withOpacity(0.08)
+                  : null,
               borderRadius: isStart
                   ? const BorderRadius.horizontal(left: Radius.circular(10))
                   : isEnd
-                      ? const BorderRadius.horizontal(right: Radius.circular(10))
-                      : inRange
-                          ? BorderRadius.zero
-                          : BorderRadius.circular(10),
+                  ? const BorderRadius.horizontal(right: Radius.circular(10))
+                  : inRange
+                  ? BorderRadius.zero
+                  : BorderRadius.circular(10),
             ),
             child: Center(
               child: Text(
@@ -302,10 +321,10 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                   color: (isStart || isEnd)
                       ? Colors.white
                       : isFuture
-                          ? Colors.grey.withOpacity(0.35)
-                          : isToday
-                              ? widget.primaryColor
-                              : const Color(0xFF1A1A2E),
+                      ? Colors.grey.withOpacity(0.35)
+                      : isToday
+                      ? widget.primaryColor
+                      : const Color(0xFF1A1A2E),
                 ),
               ),
             ),
@@ -346,11 +365,16 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [widget.primaryColor, widget.primaryColor.withOpacity(0.75)],
+                    colors: [
+                      widget.primaryColor,
+                      widget.primaryColor.withOpacity(0.75),
+                    ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -363,8 +387,11 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                             color: Colors.white.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.date_range_rounded,
-                              color: Colors.white, size: 18),
+                          child: const Icon(
+                            Icons.date_range_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                         const SizedBox(width: 10),
                         const Text(
@@ -385,8 +412,11 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                               color: Colors.white.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Icon(Icons.close_rounded,
-                                color: Colors.white, size: 16),
+                            child: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                           ),
                         ),
                       ],
@@ -402,8 +432,11 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                         ),
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(Icons.arrow_forward_rounded,
-                              color: Colors.white70, size: 16),
+                          child: Icon(
+                            Icons.arrow_forward_rounded,
+                            color: Colors.white70,
+                            size: 16,
+                          ),
                         ),
                         _HeaderDateChip(
                           label: 'To',
@@ -435,7 +468,8 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                       qs = today.add(Duration(days: startOff));
                       qe = today.add(Duration(days: endOff));
                     }
-                    final isActive = _start != null &&
+                    final isActive =
+                        _start != null &&
                         _end != null &&
                         _isSameDay(_start!, qs) &&
                         _isSameDay(_end!, qe);
@@ -445,7 +479,9 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: isActive
                               ? widget.primaryColor
@@ -491,8 +527,11 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                               color: widget.primaryColor.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(Icons.chevron_left_rounded,
-                                color: widget.primaryColor, size: 20),
+                            child: Icon(
+                              Icons.chevron_left_rounded,
+                              color: widget.primaryColor,
+                              size: 20,
+                            ),
                           ),
                         ),
                         Expanded(
@@ -515,8 +554,11 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                               color: widget.primaryColor.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(Icons.chevron_right_rounded,
-                                color: widget.primaryColor, size: 20),
+                            child: Icon(
+                              Icons.chevron_right_rounded,
+                              color: widget.primaryColor,
+                              size: 20,
+                            ),
                           ),
                         ),
                       ],
@@ -528,19 +570,24 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                       physics: const NeverScrollableScrollPhysics(),
                       crossAxisCount: 7,
                       childAspectRatio: 1.1,
-                      children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-                          .map((d) => Center(
-                                child: Text(
-                                  d,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
-                                    color: widget.primaryColor.withOpacity(0.5),
-                                    letterSpacing: 0.5,
+                      children:
+                          ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                              .map(
+                                (d) => Center(
+                                  child: Text(
+                                    d,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: widget.primaryColor.withOpacity(
+                                        0.5,
+                                      ),
+                                      letterSpacing: 0.5,
+                                    ),
                                   ),
                                 ),
-                              ))
-                          .toList(),
+                              )
+                              .toList(),
                     ),
                     // Day grid
                     GridView.count(
@@ -593,7 +640,8 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                         onTap: canConfirm
                             ? () => Navigator.pop(
                                 context,
-                                DateTimeRange(start: _start!, end: _end!))
+                                DateTimeRange(start: _start!, end: _end!),
+                              )
                             : null,
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
@@ -603,22 +651,21 @@ class _DateRangePickerDialogState extends State<_DateRangePickerDialog>
                                 ? LinearGradient(
                                     colors: [
                                       widget.primaryColor,
-                                      widget.primaryColor.withOpacity(0.75)
+                                      widget.primaryColor.withOpacity(0.75),
                                     ],
                                   )
                                 : null,
-                            color: canConfirm
-                                ? null
-                                : const Color(0xFFEAEAF4),
+                            color: canConfirm ? null : const Color(0xFFEAEAF4),
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: canConfirm
                                 ? [
                                     BoxShadow(
-                                      color:
-                                          widget.primaryColor.withOpacity(0.35),
+                                      color: widget.primaryColor.withOpacity(
+                                        0.35,
+                                      ),
                                       blurRadius: 12,
                                       offset: const Offset(0, 6),
-                                    )
+                                    ),
                                   ]
                                 : [],
                           ),
@@ -667,9 +714,7 @@ class _HeaderDateChip extends StatelessWidget {
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: isActive
-            ? Colors.white
-            : Colors.white.withOpacity(0.2),
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.2),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isActive ? Colors.white : Colors.white.withOpacity(0.3),
@@ -712,7 +757,11 @@ class _ShimmerBox extends StatefulWidget {
   final double width;
   final double height;
   final double radius;
-  const _ShimmerBox({required this.width, required this.height, this.radius = 10});
+  const _ShimmerBox({
+    required this.width,
+    required this.height,
+    this.radius = 10,
+  });
   @override
   State<_ShimmerBox> createState() => _ShimmerBoxState();
 }
@@ -725,29 +774,41 @@ class _ShimmerBoxState extends State<_ShimmerBox>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat();
-    _anim = Tween<double>(begin: -2, end: 2).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+    _anim = Tween<double>(
+      begin: -2,
+      end: 2,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
+
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: _anim,
-        builder: (_, __) => Container(
-          width: widget.width,
-          height: widget.height,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(widget.radius),
-            gradient: LinearGradient(
-              begin: Alignment(_anim.value - 1, 0),
-              end: Alignment(_anim.value + 1, 0),
-              colors: const [Color(0xFFEEEEF6), Color(0xFFF8F8FF), Color(0xFFEEEEF6)],
-            ),
-          ),
+    animation: _anim,
+    builder: (_, __) => Container(
+      width: widget.width,
+      height: widget.height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(widget.radius),
+        gradient: LinearGradient(
+          begin: Alignment(_anim.value - 1, 0),
+          end: Alignment(_anim.value + 1, 0),
+          colors: const [
+            Color(0xFFEEEEF6),
+            Color(0xFFF8F8FF),
+            Color(0xFFEEEEF6),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _AnalyticsSkeleton extends StatelessWidget {
@@ -761,40 +822,70 @@ class _AnalyticsSkeleton extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 6))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _ShimmerBox(width: w * 0.4, height: 18, radius: 8),
-            const SizedBox(height: 6),
-            _ShimmerBox(width: w * 0.28, height: 12, radius: 6),
-          ]),
-          _ShimmerBox(width: w * 0.28, height: 38, radius: 12),
-        ]),
-        SizedBox(height: w * 0.05),
-        _ShimmerBox(width: double.infinity, height: 42, radius: 12),
-        SizedBox(height: w * 0.05),
-        Row(children: [
-          for (int i = 0; i < 2; i++) ...[
-            Expanded(child: _ShimmerBox(width: double.infinity, height: w * 0.28, radius: 14)),
-            if (i == 0) SizedBox(width: w * 0.03),
-          ],
-        ]),
-        SizedBox(height: w * 0.03),
-        Row(children: [
-          for (int i = 0; i < 3; i++) ...[
-            Expanded(child: _ShimmerBox(width: double.infinity, height: w * 0.22, radius: 14)),
-            if (i < 2) SizedBox(width: w * 0.03),
-          ],
-        ]),
-        SizedBox(height: w * 0.05),
-        _ShimmerBox(width: double.infinity, height: w * 0.65, radius: 16),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _ShimmerBox(width: w * 0.4, height: 18, radius: 8),
+                  const SizedBox(height: 6),
+                  _ShimmerBox(width: w * 0.28, height: 12, radius: 6),
+                ],
+              ),
+              _ShimmerBox(width: w * 0.28, height: 38, radius: 12),
+            ],
+          ),
+          SizedBox(height: w * 0.05),
+          _ShimmerBox(width: double.infinity, height: 42, radius: 12),
+          SizedBox(height: w * 0.05),
+          Row(
+            children: [
+              for (int i = 0; i < 2; i++) ...[
+                Expanded(
+                  child: _ShimmerBox(
+                    width: double.infinity,
+                    height: w * 0.28,
+                    radius: 14,
+                  ),
+                ),
+                if (i == 0) SizedBox(width: w * 0.03),
+              ],
+            ],
+          ),
+          SizedBox(height: w * 0.03),
+          Row(
+            children: [
+              for (int i = 0; i < 3; i++) ...[
+                Expanded(
+                  child: _ShimmerBox(
+                    width: double.infinity,
+                    height: w * 0.22,
+                    radius: 14,
+                  ),
+                ),
+                if (i < 2) SizedBox(width: w * 0.03),
+              ],
+            ],
+          ),
+          SizedBox(height: w * 0.05),
+          _ShimmerBox(width: double.infinity, height: w * 0.65, radius: 16),
+        ],
+      ),
     );
   }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ENHANCED REVENUE ANALYTICS
@@ -806,10 +897,8 @@ class EnhancedRevenueAnalytics extends StatefulWidget {
   /// Widget handles its own per-period shimmer internally after that.
   final bool isLoading;
 
-  const EnhancedRevenueAnalytics({
-    Key? key,
-    this.isLoading = false,
-  }) : super(key: key);
+  const EnhancedRevenueAnalytics({Key? key, this.isLoading = false})
+    : super(key: key);
 
   @override
   State<EnhancedRevenueAnalytics> createState() =>
@@ -827,12 +916,17 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
-    _fadeAnim = Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
-    _slideAnim =
-        Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(
-            CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _fadeAnim = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.2),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _animCtrl.forward();
   }
 
@@ -869,12 +963,15 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
             position: _slideAnim,
             child: Container(
               margin: EdgeInsets.symmetric(
-                  horizontal: size.width * 0.04, vertical: size.width * 0.02),
+                horizontal: size.width * 0.04,
+                vertical: size.width * 0.02,
+              ),
               padding: EdgeInsets.all(size.width * 0.05),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius:
-                    BorderRadius.circular(AppSizes.borderRadiusXLarge),
+                borderRadius: BorderRadius.circular(
+                  AppSizes.borderRadiusXLarge,
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: AppColors.primary.withOpacity(0.08),
@@ -905,14 +1002,21 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
 
   // ── Header ──────────────────────────────────────────────────────────────
   Widget _buildHeader(BuildContext context, AnalyticsProvider prov) {
-    final now = DateTime.now();
+    // Always use explicit .toLocal() to ensure correct device timezone
+    final now = DateTime.now().toLocal();
+    final currentDateStr = DateFormat('dd MMM').format(now);
+
     final periodLabel = switch (prov.selectedPeriod) {
-      'Monthly' =>
-        DateFormat('MMMM yyyy').format(now),
-      'Yearly' =>
-        now.year.toString(),
-      _ =>
-        'Week of ${DateFormat('dd MMM').format(now.subtract(Duration(days: now.weekday - 1)))}',
+      'Monthly' => DateFormat('MMMM yyyy').format(now),
+      'Yearly' => now.year.toString(),
+      _ => () {
+        // Calculate week start (Monday) in local timezone
+        final weekStart = now.subtract(Duration(days: now.weekday - 1));
+        final weekStartStr = DateFormat('dd MMM').format(weekStart);
+        // Display both week start and current date for clarity
+        // return 'Week of $weekStartStr (Today: $currentDateStr)';
+        return 'Week of  $currentDateStr';
+      }(),
     };
 
     return Row(
@@ -955,9 +1059,11 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.primary.withOpacity(0.15)),
             ),
-            child: Icon(Icons.refresh_rounded,
-                color: AppColors.primary,
-                size: ResponsiveUtils.getFontSize(context, 20)),
+            child: Icon(
+              Icons.refresh_rounded,
+              color: AppColors.primary,
+              size: ResponsiveUtils.getFontSize(context, 20),
+            ),
           ),
         ),
       ],
@@ -989,13 +1095,16 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                 padding: const EdgeInsets.symmetric(vertical: 11),
                 decoration: BoxDecoration(
                   gradient: isSelected
-                      ? LinearGradient(colors: [
-                          AppColors.primary,
-                          AppColors.primary.withOpacity(0.82),
-                        ])
+                      ? LinearGradient(
+                          colors: [
+                            AppColors.primary,
+                            AppColors.primary.withOpacity(0.82),
+                          ],
+                        )
                       : null,
-                  borderRadius:
-                      BorderRadius.circular(AppSizes.borderRadiusMedium),
+                  borderRadius: BorderRadius.circular(
+                    AppSizes.borderRadiusMedium,
+                  ),
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
@@ -1010,11 +1119,8 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                   period,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isSelected
-                        ? Colors.white
-                        : AppColors.textSecondary,
-                    fontWeight:
-                        isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected ? Colors.white : AppColors.textSecondary,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                     fontSize: ResponsiveUtils.getFontSize(context, 13),
                   ),
                 ),
@@ -1027,8 +1133,7 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
   }
 
   // ── Metric cards — 5 real metrics ────────────────────────────────────────
-  Widget _buildMetricCards(
-      BuildContext context, AnalyticsPeriodStats stats) {
+  Widget _buildMetricCards(BuildContext context, AnalyticsPeriodStats stats) {
     final w = MediaQuery.of(context).size.width;
     final spacing = w * 0.03;
 
@@ -1041,70 +1146,77 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
     return Column(
       children: [
         // ── Row 1: two big cards ──────────────────────────────────────────
-        Row(children: [
-          Expanded(
-            flex: 3,
-            child: _MetricCard(
-              icon: Icons.currency_rupee_rounded,
-              label: 'Total Revenue',
-              value: _fmtCurrency(stats.totalRevenue),
-              color: AppColors.primary,
-              isLarge: true,
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: _MetricCard(
+                icon: Icons.currency_rupee_rounded,
+                label: 'Total Revenue',
+                value: _fmtCurrency(stats.totalRevenue),
+                color: AppColors.primary,
+                isLarge: true,
+              ),
             ),
-          ),
-          SizedBox(width: spacing),
-          Expanded(
-            flex: 2,
-            child: _MetricCard(
-              icon: Icons.receipt_long_rounded,
-              label: 'Order Count',
-              value: stats.orderCount.toString(),
-              color: AppColors.info,
-              isLarge: true,
+            SizedBox(width: spacing),
+            Expanded(
+              flex: 2,
+              child: _MetricCard(
+                icon: Icons.receipt_long_rounded,
+                label: 'Order Count',
+                value: stats.orderCount.toString(),
+                color: AppColors.info,
+                isLarge: true,
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
         SizedBox(height: spacing),
         // ── Row 2: three equal cards ──────────────────────────────────────
-        Row(children: [
-          Expanded(
-            child: _MetricCard(
-              icon: Icons.analytics_outlined,
-              label: 'Average',
-              value: _fmtCurrency(stats.averageRevenue),
-              color: AppColors.success,
+        Row(
+          children: [
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.analytics_outlined,
+                label: 'Average',
+                value: _fmtCurrency(stats.averageRevenue),
+                color: AppColors.success,
+              ),
             ),
-          ),
-          SizedBox(width: spacing),
-          Expanded(
-            child: _MetricCard(
-              icon: Icons.emoji_events_rounded,
-              label: 'Highest',
-              value: _fmtCurrency(stats.highestRevenue),
-              color: AppColors.warning,
+            SizedBox(width: spacing),
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.emoji_events_rounded,
+                label: 'Highest',
+                value: _fmtCurrency(stats.highestRevenue),
+                color: AppColors.warning,
+              ),
             ),
-          ),
-          SizedBox(width: spacing),
-          Expanded(
-            child: _MetricCard(
-              icon: growthPositive
-                  ? Icons.trending_up_rounded
-                  : Icons.trending_down_rounded,
-              label: 'Growth',
-              value: growthLabel,
-              color: growthPositive
-                  ? AppColors.success
-                  : const Color(0xFFDC2626),
+            SizedBox(width: spacing),
+            Expanded(
+              child: _MetricCard(
+                icon: growthPositive
+                    ? Icons.trending_up_rounded
+                    : Icons.trending_down_rounded,
+                label: 'Growth',
+                value: growthLabel,
+                color: growthPositive
+                    ? AppColors.success
+                    : const Color(0xFFDC2626),
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
       ],
     );
   }
 
   // ── Chart — real data from provider ─────────────────────────────────────
-  Widget _buildChart(BuildContext context, AnalyticsProvider prov,
-      AnalyticsPeriodStats stats) {
+  Widget _buildChart(
+    BuildContext context,
+    AnalyticsProvider prov,
+    AnalyticsPeriodStats stats,
+  ) {
     final size = MediaQuery.of(context).size;
     final chartHeight = ResponsiveUtils.getResponsiveValue(
       context,
@@ -1133,8 +1245,7 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
     final yPad = (maxY - minY) * 0.25;
     final chartMaxY = maxY + yPad;
     final chartMinY = math.max(0.0, minY - yPad * 0.5);
-    final yInterval =
-        ((chartMaxY - chartMinY) / 4).clamp(1.0, double.infinity);
+    final yInterval = ((chartMaxY - chartMinY) / 4).clamp(1.0, double.infinity);
 
     // Show every label for weekly (7), every 5th for monthly, every for yearly (12)
     final period = prov.selectedPeriod;
@@ -1153,7 +1264,10 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
       decoration: BoxDecoration(
         color: const Color(0xFFFAF8FF),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withOpacity(0.1), width: 1.5),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.1),
+          width: 1.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1176,8 +1290,9 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                 // Dynamic growth pill
                 Container(
                   padding: EdgeInsets.symmetric(
-                      horizontal: size.width * 0.028,
-                      vertical: size.width * 0.013),
+                    horizontal: size.width * 0.028,
+                    vertical: size.width * 0.013,
+                  ),
                   decoration: BoxDecoration(
                     color: growthUp
                         ? AppColors.success.withOpacity(0.12)
@@ -1237,7 +1352,9 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                     getTooltipColor: (_) => AppColors.primary,
                     tooltipBorderRadius: BorderRadius.circular(12),
                     tooltipPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     getTooltipItems: (touchedSpots) {
                       return touchedSpots.map((s) {
                         final idx = s.spotIndex;
@@ -1274,14 +1391,12 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                       getTitlesWidget: (value, _) {
                         final label = _fmtAxisY(value);
                         return Padding(
-                          padding:
-                              EdgeInsets.only(right: size.width * 0.015),
+                          padding: EdgeInsets.only(right: size.width * 0.015),
                           child: Text(
                             label,
                             style: TextStyle(
                               color: AppColors.textSecondary,
-                              fontSize:
-                                  ResponsiveUtils.getFontSize(context, 9),
+                              fontSize: ResponsiveUtils.getFontSize(context, 9),
                               fontWeight: FontWeight.w500,
                             ),
                             textAlign: TextAlign.right,
@@ -1301,8 +1416,7 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                           return const SizedBox();
                         }
                         // For monthly: show every labelInterval-th
-                        if (period == 'Monthly' &&
-                            idx % labelInterval != 0) {
+                        if (period == 'Monthly' && idx % labelInterval != 0) {
                           return const SizedBox();
                         }
                         final isTouched = _touchedIndex == idx;
@@ -1314,8 +1428,7 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                               color: isTouched
                                   ? AppColors.primary
                                   : AppColors.textSecondary,
-                              fontSize:
-                                  ResponsiveUtils.getFontSize(context, 9),
+                              fontSize: ResponsiveUtils.getFontSize(context, 9),
                               fontWeight: isTouched
                                   ? FontWeight.w800
                                   : FontWeight.w500,
@@ -1326,9 +1439,11 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
                     ),
                   ),
                   rightTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
                   topTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
                 ),
                 borderData: FlBorderData(show: false),
                 minX: 0,
@@ -1380,22 +1495,25 @@ class _EnhancedRevenueAnalyticsState extends State<EnhancedRevenueAnalytics>
   }
 
   // ── Empty chart state ─────────────────────────────────────────────────────
-  Widget _buildEmptyChart(
-      BuildContext context, double height, String period) {
+  Widget _buildEmptyChart(BuildContext context, double height, String period) {
     return Container(
       height: height,
       decoration: BoxDecoration(
         color: const Color(0xFFFAF8FF),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: AppColors.primary.withOpacity(0.1), width: 1.5),
+          color: AppColors.primary.withOpacity(0.1),
+          width: 1.5,
+        ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.bar_chart_rounded,
-              size: 48,
-              color: AppColors.primary.withOpacity(0.25)),
+          Icon(
+            Icons.bar_chart_rounded,
+            size: 48,
+            color: AppColors.primary.withOpacity(0.25),
+          ),
           const SizedBox(height: 10),
           Text(
             'No orders yet this ${period.toLowerCase().replaceAll('ly', '')}',
@@ -1478,10 +1596,11 @@ class _MetricCard extends StatelessWidget {
               color: color.withOpacity(0.15),
               borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(icon,
-                color: color,
-                size: ResponsiveUtils.getFontSize(
-                    context, isLarge ? 18 : 16)),
+            child: Icon(
+              icon,
+              color: color,
+              size: ResponsiveUtils.getFontSize(context, isLarge ? 18 : 16),
+            ),
           ),
           SizedBox(height: w * 0.02),
           Text(
@@ -1500,7 +1619,9 @@ class _MetricCard extends StatelessWidget {
               value,
               style: TextStyle(
                 fontSize: ResponsiveUtils.getFontSize(
-                    context, isLarge ? 18 : 15),
+                  context,
+                  isLarge ? 18 : 15,
+                ),
                 fontWeight: FontWeight.w900,
                 color: color,
                 letterSpacing: -0.3,

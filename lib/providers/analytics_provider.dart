@@ -208,7 +208,8 @@ class AnalyticsProvider extends ChangeNotifier {
   Future<void> _fetchPeriod(String period) async {
     try {
       final db = Supabase.instance.client;
-      final nowLocal = DateTime.now(); // Get local time
+      // CRITICAL: Always use .toLocal() to ensure correct device timezone
+      final nowLocal = DateTime.now().toLocal();
 
       // ── Date ranges (calculated in LOCAL timezone, then convert to UTC) ────
       final DateTime curFrom, curTo, prevFrom, prevTo;
@@ -216,6 +217,7 @@ class AnalyticsProvider extends ChangeNotifier {
       switch (period) {
         case 'Monthly':
           // Current month: 1st of this month (00:00 local) → 1st of next month (00:00 local)
+          // NOTE: DateTime() constructor creates in LOCAL timezone, don't call .toLocal() on it!
           final firstOfMonth = DateTime(nowLocal.year, nowLocal.month, 1);
           final firstOfNextMonth = DateTime(
             nowLocal.year,
@@ -237,6 +239,7 @@ class AnalyticsProvider extends ChangeNotifier {
 
         case 'Yearly':
           // Current year: Jan 1 (00:00 local) → Jan 1 of next year (00:00 local)
+          // NOTE: DateTime() constructor creates in LOCAL timezone, don't call .toLocal() on it!
           final firstOfYear = DateTime(nowLocal.year, 1, 1);
           final firstOfNextYear = DateTime(nowLocal.year + 1, 1, 1);
 
@@ -250,12 +253,13 @@ class AnalyticsProvider extends ChangeNotifier {
 
         default: // Weekly
           // ISO week: Monday (00:00 local) → Sunday (00:00 local next day)
-          // weekday: 1=Mon … 7=Sun
+          // CRITICAL: DateTime() constructor creates in LOCAL timezone
+          // Don't call .toLocal() on it - that treats it as UTC and converts it backwards!
           final todayStart = DateTime(
             nowLocal.year,
             nowLocal.month,
             nowLocal.day,
-          );
+          ); // Already in local timezone
           final daysSinceMonday = todayStart.weekday - 1; // 0=Mon, 6=Sun
           final monday = todayStart.subtract(Duration(days: daysSinceMonday));
           final nextMonday = monday.add(const Duration(days: 7));
@@ -278,8 +282,10 @@ class AnalyticsProvider extends ChangeNotifier {
       final prevToUtc = prevTo.toUtc();
 
       debugPrint(
-        '📈 $period date ranges:\n'
+        '📈 $period date ranges (LOCAL timezone):\n'
         '  Current:  ${curFrom.toIso8601String()} → ${curTo.toIso8601String()}\n'
+        '  Previous: ${prevFrom.toIso8601String()} → ${prevTo.toIso8601String()}\n'
+        '  Today: ${nowLocal.toIso8601String()}\n'
         '  UTC:      ${curFromUtc.toIso8601String()} → ${curToUtc.toIso8601String()}',
       );
 

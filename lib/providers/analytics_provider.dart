@@ -199,7 +199,40 @@ class AnalyticsProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh() => fetchAll();
+  Future<void> refresh() {
+    debugPrint('📈 refresh() called - clearing cache and fetching fresh data');
+    // Clear all cached data to force fresh fetch
+    _weeklyStats = const AnalyticsPeriodStats();
+    _monthlyStats = const AnalyticsPeriodStats();
+    _yearlyStats = const AnalyticsPeriodStats();
+    notifyListeners();
+    return fetchAll();
+  }
+
+  /// Force fetch the specified period immediately
+  Future<void> forceFetchPeriod(String period) async {
+    debugPrint('📈 forceFetchPeriod($period) - force refreshing');
+    _isLoading = true;
+    notifyListeners();
+    try {
+      // Clear cached data for this period
+      switch (period) {
+        case 'Monthly':
+          _monthlyStats = const AnalyticsPeriodStats();
+          break;
+        case 'Yearly':
+          _yearlyStats = const AnalyticsPeriodStats();
+          break;
+        default:
+          _weeklyStats = const AnalyticsPeriodStats();
+      }
+
+      await _fetchPeriod(period);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   //  CORE FETCH LOGIC
@@ -211,13 +244,15 @@ class AnalyticsProvider extends ChangeNotifier {
       // CRITICAL: Always use .toLocal() to ensure correct device timezone
       final nowLocal = DateTime.now().toLocal();
 
+      debugPrint(
+        '📈 _fetchPeriod($period) START - businessId=$_businessId, uid=$_uid, role=$_role',
+      );
+
       // ── Date ranges (calculated in LOCAL timezone, then convert to UTC) ────
       final DateTime curFrom, curTo, prevFrom, prevTo;
 
       switch (period) {
         case 'Monthly':
-          // Current month: 1st of this month (00:00 local) → 1st of next month (00:00 local)
-          // NOTE: DateTime() constructor creates in LOCAL timezone, don't call .toLocal() on it!
           final firstOfMonth = DateTime(nowLocal.year, nowLocal.month, 1);
           final firstOfNextMonth = DateTime(
             nowLocal.year,
@@ -227,7 +262,6 @@ class AnalyticsProvider extends ChangeNotifier {
 
           curFrom = firstOfMonth;
           curTo = firstOfNextMonth;
-          // Previous month
           final firstOfPrevMonth = DateTime(
             nowLocal.year,
             nowLocal.month - 1,
@@ -238,86 +272,136 @@ class AnalyticsProvider extends ChangeNotifier {
           break;
 
         case 'Yearly':
-          // Current year: Jan 1 (00:00 local) → Jan 1 of next year (00:00 local)
-          // NOTE: DateTime() constructor creates in LOCAL timezone, don't call .toLocal() on it!
           final firstOfYear = DateTime(nowLocal.year, 1, 1);
           final firstOfNextYear = DateTime(nowLocal.year + 1, 1, 1);
 
           curFrom = firstOfYear;
           curTo = firstOfNextYear;
-          // Previous year
           final firstOfPrevYear = DateTime(nowLocal.year - 1, 1, 1);
           prevFrom = firstOfPrevYear;
           prevTo = firstOfYear;
           break;
 
         default: // Weekly
-          // ISO week: Monday (00:00 local) → Sunday (00:00 local next day)
-          // CRITICAL: DateTime() constructor creates in LOCAL timezone
-          // Don't call .toLocal() on it - that treats it as UTC and converts it backwards!
           final todayStart = DateTime(
             nowLocal.year,
             nowLocal.month,
             nowLocal.day,
-          ); // Already in local timezone
-          final daysSinceMonday = todayStart.weekday - 1; // 0=Mon, 6=Sun
+          );
+          final daysSinceMonday = todayStart.weekday - 1;
           final monday = todayStart.subtract(Duration(days: daysSinceMonday));
           final nextMonday = monday.add(const Duration(days: 7));
 
           curFrom = monday;
           curTo = nextMonday;
-          // Previous week
           prevFrom = monday.subtract(const Duration(days: 7));
           prevTo = monday;
           break;
       }
 
-      // ──═════════════════════════════════════════════════════════════════════
-      // CRITICAL FIX: Convert LOCAL date boundaries to UTC for database query
-      // This ensures orders in the local timezone are correctly included/excluded
-      // ──═════════════════════════════════════════════════════════════════════
       final curFromUtc = curFrom.toUtc();
       final curToUtc = curTo.toUtc();
       final prevFromUtc = prevFrom.toUtc();
       final prevToUtc = prevTo.toUtc();
 
+      final curFromStr = curFromUtc.toIso8601String();
+      final curToStr = curToUtc.toIso8601String();
+      final prevFromStr = prevFromUtc.toIso8601String();
+      final prevToStr = prevToUtc.toIso8601String();
+
       debugPrint(
-        '📈 $period date ranges (LOCAL timezone):\n'
-        '  Current:  ${curFrom.toIso8601String()} → ${curTo.toIso8601String()}\n'
-        '  Previous: ${prevFrom.toIso8601String()} → ${prevTo.toIso8601String()}\n'
-        '  Today: ${nowLocal.toIso8601String()}\n'
-        '  UTC:      ${curFromUtc.toIso8601String()} → ${curToUtc.toIso8601String()}',
+        '📈 $period date ranges:\n'
+        '  Current:  $curFromStr → $curToStr\n'
+        '  Previous: $prevFromStr → $prevToStr',
       );
 
-      // ── Fetch current period orders ──────────────────────────────────────
+      // ──═════════════════════════════════════════════════════════════════════
+      // CRITICAL: Use fn_revenue_summary RPC
+      // ──═════════════════════════════════════════════════════════════════════
+
+      Map<String, dynamic> curResult = {};
+      Map<String, dynamic> prevResult = {};
+
+      try {
+        debugPrint(
+          '📈 $period calling RPC: fn_revenue_summary(${"'" + _businessId + "'"}, $curFromStr, $curToStr)',
+        );
+
+        final curRaw = await db.rpc(
+          'fn_revenue_summary',
+          params: {
+            'p_business_id': _businessId,
+            'p_from': curFromStr,
+            'p_to': curToStr,
+          },
+        );
+
+        debugPrint(
+          '📈 $period RPC current result (raw type=${curRaw.runtimeType}): $curRaw',
+        );
+
+        if (curRaw is List && curRaw.isNotEmpty) {
+          curResult = Map<String, dynamic>.from(curRaw[0] as Map);
+        } else if (curRaw is Map<String, dynamic>) {
+          curResult = curRaw;
+        } else if (curRaw == null) {
+          debugPrint('📈 $period WARNING: RPC returned null');
+        }
+
+        debugPrint('📈 $period parsed current result: $curResult');
+      } catch (e, st) {
+        debugPrint('📈 $period current RPC ERROR: $e\n$st');
+      }
+
+      try {
+        debugPrint(
+          '📈 $period calling RPC prev: fn_revenue_summary(${"'" + _businessId + "'"}, $prevFromStr, $prevToStr)',
+        );
+
+        final prevRaw = await db.rpc(
+          'fn_revenue_summary',
+          params: {
+            'p_business_id': _businessId,
+            'p_from': prevFromStr,
+            'p_to': prevToStr,
+          },
+        );
+
+        debugPrint(
+          '📈 $period RPC previous result (raw type=${prevRaw.runtimeType}): $prevRaw',
+        );
+
+        if (prevRaw is List && prevRaw.isNotEmpty) {
+          prevResult = Map<String, dynamic>.from(prevRaw[0] as Map);
+        } else if (prevRaw is Map<String, dynamic>) {
+          prevResult = prevRaw;
+        } else if (prevRaw == null) {
+          debugPrint('📈 $period WARNING: RPC returned null');
+        }
+
+        debugPrint('📈 $period parsed previous result: $prevResult');
+      } catch (e, st) {
+        debugPrint('📈 $period previous RPC ERROR: $e\n$st');
+      }
+
+      // Also fetch raw order data for chart points
       final curRows =
           await db
                   .from('orders')
                   .select('status, payment_status, total_amount, created_at')
                   .eq('business_id', _businessId)
-                  .gte('created_at', curFromUtc.toIso8601String())
-                  .lt('created_at', curToUtc.toIso8601String())
+                  .gte('created_at', curFromStr)
+                  .lt('created_at', curToStr)
               as List;
 
-      // ── Fetch previous period orders (for growth rate) ───────────────────
-      final prevRows =
-          await db
-                  .from('orders')
-                  .select('status, payment_status, total_amount, created_at')
-                  .eq('business_id', _businessId)
-                  .gte('created_at', prevFromUtc.toIso8601String())
-                  .lt('created_at', prevToUtc.toIso8601String())
-              as List;
+      debugPrint('📈 $period raw orders: ${curRows.length} rows fetched');
 
-      debugPrint(
-        '📈 $period fetch: cur=${curRows.length} prev=${prevRows.length}',
-      );
-
-      // ── Compute stats ────────────────────────────────────────────────────
+      // ── Compute stats using RPC results + raw data for charts ──────────────
       final stats = _computeStats(
         period: period,
+        rpcResult: curResult,
+        prevRpcResult: prevResult,
         curRows: curRows,
-        prevRows: prevRows,
         curFrom: curFrom,
         curTo: curTo,
         now: nowLocal,
@@ -337,41 +421,77 @@ class AnalyticsProvider extends ChangeNotifier {
       }
 
       debugPrint(
-        '📈 $period stats: total=₹${stats.totalRevenue.toStringAsFixed(0)} '
-        'avg=₹${stats.averageRevenue.toStringAsFixed(0)} '
-        'highest=₹${stats.highestRevenue.toStringAsFixed(0)} '
-        'growth=${stats.growthRate.toStringAsFixed(1)}% '
-        'orders=${stats.orderCount}',
+        '📈 $period FINAL stats: revenue=₹${stats.totalRevenue.toStringAsFixed(0)} '
+        'orders=${stats.orderCount} avg=₹${stats.averageRevenue.toStringAsFixed(0)} '
+        'growth=${stats.growthRate.toStringAsFixed(1)}%',
       );
-    } catch (e) {
-      debugPrint('📈 _fetchPeriod($period) ERROR: $e');
+    } catch (e, st) {
+      debugPrint('📈 _fetchPeriod($period) EXCEPTION: $e\n$st');
     }
   }
 
-  // ── Compute all metrics + chart points from raw rows ─────────────────────
+  // ── Compute all metrics + chart points from RPC results + raw rows ────────
   AnalyticsPeriodStats _computeStats({
     required String period,
+    required Map<String, dynamic> rpcResult,
+    required Map<String, dynamic> prevRpcResult,
     required List curRows,
-    required List prevRows,
     required DateTime curFrom,
     required DateTime curTo,
     required DateTime now,
   }) {
-    // ── Build bucket map ─────────────────────────────────────────────────
-    // bucket key → {revenue, orders}
+    // ──═════════════════════════════════════════════════════════════════════
+    // IMPORTANT: Use RPC results as authoritative metrics
+    // This ensures consistency with the dashboard
+    // ──═════════════════════════════════════════════════════════════════════
+
+    // ✅ FIX: Safely extract metrics from RPC results with detailed logging
+    debugPrint(
+      '📈 $period _computeStats RPC input:\n'
+      '  rpcResult keys: ${rpcResult.keys.toList()}\n'
+      '  rpcResult: $rpcResult\n'
+      '  prevRpcResult keys: ${prevRpcResult.keys.toList()}\n'
+      '  prevRpcResult: $prevRpcResult',
+    );
+
+    final totalRevenue = _parseDecimal(rpcResult['total_revenue']) ?? 0.0;
+    final totalOrders = _parseInt(rpcResult['total_orders']) ?? 0;
+    // Note: 'avg_order' from RPC is avg per order; we calculate average per bucket (day/month)
+    final completed = _parseInt(rpcResult['completed']) ?? 0;
+    final cancelled = _parseInt(rpcResult['cancelled']) ?? 0;
+    final cancelRate = _parseDecimal(rpcResult['cancel_rate']) ?? 0.0;
+
+    debugPrint(
+      '📈 $period extracted metrics:\n'
+      '  totalRevenue: $totalRevenue (from ${rpcResult['total_revenue']})\n'
+      '  totalOrders: $totalOrders (from ${rpcResult['total_orders']})\n'
+      '  completed: $completed (from ${rpcResult['completed']})\n'
+      '  cancelled: $cancelled (from ${rpcResult['cancelled']})\n'
+      '  cancelRate: $cancelRate (from ${rpcResult['cancel_rate']})',
+    );
+
+    // Extract previous period revenue for growth rate calculation
+    final prevTotalRevenue =
+        _parseDecimal(prevRpcResult['total_revenue']) ?? 0.0;
+
+    // ── Growth rate calculation ─────────────────────────────────────────────
+    final growthRate = prevTotalRevenue > 0
+        ? ((totalRevenue - prevTotalRevenue) / prevTotalRevenue * 100)
+        : (totalRevenue > 0 ? 100.0 : 0.0);
+
+    // ── Build bucket map for chart ──────────────────────────────────────────
+    // Use raw order data to show per-day/per-month breakdown
     final Map<String, _Bucket> buckets = {};
 
     // Initialise ALL expected buckets to 0 so the chart always has the
     // right number of points even for days/months with no orders.
     _initBuckets(buckets, period, curFrom, curTo, now);
 
-    // Populate from order rows
-    int totalOrders = 0;
+    // Populate from order rows (for visualizing daily/monthly patterns)
     for (final r in curRows) {
-      totalOrders++;
-
       // ✅ FIX: Only count completed + PAID orders for revenue
-      final amount = (r['status'] == 'completed')
+      final amount =
+          (r['status'] == 'completed' && r['payment_status'] == 'paid')
           ? (r['total_amount'] as num? ?? 0).toDouble()
           : 0.0;
 
@@ -392,31 +512,6 @@ class AnalyticsProvider extends ChangeNotifier {
       }
     }
 
-    // ── Derived metrics ──────────────────────────────────────────────────
-    final revenues = buckets.values.map((b) => b.revenue).toList();
-    final totalRevenue = revenues.fold(0.0, (a, b) => a + b);
-
-    // Average = total ÷ number of buckets that have at least 1 order
-    final activeBuckets = buckets.values.where((b) => b.orders > 0).length;
-    final averageRevenue = activeBuckets > 0
-        ? totalRevenue / activeBuckets
-        : 0.0;
-
-    final highestRevenue = revenues.isEmpty
-        ? 0.0
-        : revenues.reduce((a, b) => a > b ? a : b);
-
-    // ✅ FIX: Growth rate calculation — only count completed orders for both periods
-    double prevTotal = 0;
-    for (final r in prevRows) {
-      if (r['status'] == 'completed') {
-        prevTotal += (r['total_amount'] as num? ?? 0).toDouble();
-      }
-    }
-    final growthRate = prevTotal > 0
-        ? ((totalRevenue - prevTotal) / prevTotal * 100)
-        : (totalRevenue > 0 ? 100.0 : 0.0);
-
     // ── Build ordered chart points ───────────────────────────────────────
     final List<AnalyticsChartPoint> chartPoints = buckets.entries
         .map(
@@ -428,13 +523,26 @@ class AnalyticsProvider extends ChangeNotifier {
         )
         .toList();
 
+    // Calculate average from active buckets (for dashboard consistency)
+    final activeBuckets = buckets.values.where((b) => b.orders > 0).length;
+    final averageRevenue = activeBuckets > 0
+        ? totalRevenue / activeBuckets
+        : 0.0;
+
+    // Find highest revenue bucket
+    final revenues = buckets.values.map((b) => b.revenue).toList();
+    final highestRevenue = revenues.isEmpty
+        ? 0.0
+        : revenues.reduce((a, b) => a > b ? a : b);
+
     debugPrint(
-      '📈 $period stats computed:\n'
-      '  totalRevenue: ₹${totalRevenue.toStringAsFixed(2)}\n'
+      '📈 $period stats computed from RPC:\n'
+      '  totalRevenue: ₹${totalRevenue.toStringAsFixed(2)} (from RPC)\n'
       '  averageRevenue: ₹${averageRevenue.toStringAsFixed(2)}\n'
       '  highestRevenue: ₹${highestRevenue.toStringAsFixed(2)}\n'
       '  growthRate: ${growthRate.toStringAsFixed(1)}%\n'
-      '  orderCount: $totalOrders\n'
+      '  orderCount: $totalOrders (from RPC)\n'
+      '  completed: $completed, cancelled: $cancelled, cancelRate: $cancelRate%\n'
       '  activeBuckets: $activeBuckets',
     );
 
@@ -446,6 +554,45 @@ class AnalyticsProvider extends ChangeNotifier {
       orderCount: totalOrders,
       chartPoints: chartPoints,
     );
+  }
+
+  // ── Safe parsing helpers with logging ────────────────────────────────────
+  double? _parseDecimal(dynamic value) {
+    try {
+      if (value == null) return null;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) {
+        final parsed = double.tryParse(value);
+        if (parsed != null) return parsed;
+      }
+      debugPrint(
+        '📈 _parseDecimal WARNING: Could not parse "$value" (type: ${value.runtimeType})',
+      );
+      return null;
+    } catch (e) {
+      debugPrint('📈 _parseDecimal ERROR: $e for value "$value"');
+      return null;
+    }
+  }
+
+  int? _parseInt(dynamic value) {
+    try {
+      if (value == null) return null;
+      if (value is int) return value;
+      if (value is double) return value.toInt();
+      if (value is String) {
+        final parsed = int.tryParse(value);
+        if (parsed != null) return parsed;
+      }
+      debugPrint(
+        '📈 _parseInt WARNING: Could not parse "$value" (type: ${value.runtimeType})',
+      );
+      return null;
+    } catch (e) {
+      debugPrint('📈 _parseInt ERROR: $e for value "$value"');
+      return null;
+    }
   }
 
   // ── Initialise all expected buckets ──────────────────────────────────────

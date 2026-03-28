@@ -1,4 +1,5 @@
 // lib/providers/inventory_provider.dart
+import 'dart:async';
 import 'dart:developer';
 
 import 'package:flutter/material.dart';
@@ -31,6 +32,10 @@ class InventoryProvider extends ChangeNotifier {
   // ── FIX: UUID generator ────────────────────────────────────────────────────
   final _uuid = const Uuid();
 
+  // ── Fallback mechanisms ────────────────────────────────────────────────────
+  Timer? _periodicRefreshTimer;
+  StreamSubscription? _connectivitySubscription;
+
   static const _allowedRoles = ['owner', 'system', 'manager', 'admin'];
   bool get canManageStock => _allowedRoles.contains(_userRole.toLowerCase());
   bool get isInitialized => _isInitialized;
@@ -61,6 +66,8 @@ class InventoryProvider extends ChangeNotifier {
       if (_businessId.isNotEmpty) {
         await fetchItems();
         _subscribeRealtime();
+        _setupPeriodicRefresh();
+        _setupConnectivityMonitoring();
       } else {
         log('local item seed');
         // _seedLocal();
@@ -73,6 +80,40 @@ class InventoryProvider extends ChangeNotifier {
     _isInitialized = true;
     _isLoading = false;
     notifyListeners();
+  }
+
+  /// Setup periodic refresh every 30 seconds as a fallback for realtime listener
+  void _setupPeriodicRefresh() {
+    if (_periodicRefreshTimer != null) return; // Already setup
+
+    _periodicRefreshTimer = Timer.periodic(const Duration(seconds: 30), (
+      _,
+    ) async {
+      if (_businessId.isNotEmpty) {
+        try {
+          debugPrint('[InventoryProvider] 🔄 Periodic refresh triggered');
+          await fetchItems();
+        } catch (e) {
+          debugPrint('[InventoryProvider] Periodic refresh error: $e');
+        }
+      }
+    });
+    debugPrint('[InventoryProvider] ✅ Periodic refresh setup (30s interval)');
+  }
+
+  /// Monitor network connectivity and re-subscribe when coming online
+  void _setupConnectivityMonitoring() {
+    final connectivity = ConnectivityService.instance;
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = connectivity.onStatusChange.listen((status) {
+      if (status == NetworkStatus.online) {
+        debugPrint(
+          '[InventoryProvider] 📡 Back online — re-subscribing to realtime',
+        );
+        _subscribeRealtime(); // Re-subscribe when coming back online
+        fetchItems(); // Force refresh to catch missed updates
+      }
+    });
   }
 
   // ── Getters ────────────────────────────────────────────────────────────────
@@ -547,5 +588,24 @@ class InventoryProvider extends ChangeNotifier {
       ),
     ]);
     notifyListeners();
+  }
+
+  // ── Cleanup ────────────────────────────────────────────────────────────────
+  @override
+  void dispose() {
+    // Cancel periodic refresh timer
+    _periodicRefreshTimer?.cancel();
+    _periodicRefreshTimer = null;
+    debugPrint('[InventoryProvider] ✅ Periodic refresh timer cancelled');
+
+    // Cancel connectivity monitoring subscription
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+    debugPrint('[InventoryProvider] ✅ Connectivity subscription cancelled');
+
+    // Cleanup realtime subscriptions
+    InventoryRepository.instance.unsubscribeAll();
+
+    super.dispose();
   }
 }

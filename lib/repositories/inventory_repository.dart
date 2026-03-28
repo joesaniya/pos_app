@@ -341,25 +341,76 @@ class InventoryRepository {
     );
   }
 
+  // ── Realtime subscription tracking ────────────────────────────────────────
+  final Map<String, RealtimeChannel> _subscriptions = {};
+  DateTime? _lastRefreshTime;
+
   // ══════════════════════════════════════════════════════════════════════════
-  //  REALTIME SUBSCRIPTION
+  //  REALTIME SUBSCRIPTION — With debouncing & reconnection support
   // ══════════════════════════════════════════════════════════════════════════
 
   void subscribeRealtime(String businessId, VoidCallback onRefresh) {
-    _sb
-        .channel('inventory_realtime_$businessId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'inventory_items',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'business_id',
-            value: businessId,
-          ),
-          callback: (_) => onRefresh(),
-        )
-        .subscribe();
+    // Prevent duplicate subscriptions
+    final channelName = 'inventory_realtime_$businessId';
+    if (_subscriptions.containsKey(channelName)) {
+      debugPrint('[InventoryRepo] Already subscribed to $channelName');
+      return;
+    }
+
+    try {
+      final channel = _sb
+          .channel(channelName)
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'inventory_items',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'business_id',
+              value: businessId,
+            ),
+            callback: (payload) {
+              // ✨ Debounce: Prevent excessive refreshes within 500ms
+              final now = DateTime.now();
+              if (_lastRefreshTime != null &&
+                  now.difference(_lastRefreshTime!).inMilliseconds < 500) {
+                debugPrint(
+                  '[InventoryRepo] Debouncing refresh (${now.difference(_lastRefreshTime!).inMilliseconds}ms since last)',
+                );
+                return;
+              }
+              _lastRefreshTime = now;
+              debugPrint(
+                '[InventoryRepo] 🔄 Realtime change detected — refreshing',
+              );
+              onRefresh();
+            },
+          )
+          .subscribe();
+
+      _subscriptions[channelName] = channel;
+      debugPrint('[InventoryRepo] ✅ Realtime subscribed to $channelName');
+    } catch (e) {
+      debugPrint('[InventoryRepo] ❌ Failed to subscribe to realtime: $e');
+      // Attempt to re-subscribe with delay
+      Future.delayed(
+        const Duration(seconds: 3),
+        () => subscribeRealtime(businessId, onRefresh),
+      );
+    }
+  }
+
+  /// Cleanup: Unsubscribe from all realtime channels
+  Future<void> unsubscribeAll() async {
+    for (final channel in _subscriptions.values) {
+      try {
+        await channel.unsubscribe();
+      } catch (e) {
+        debugPrint('[InventoryRepo] Error unsubscribing: $e');
+      }
+    }
+    _subscriptions.clear();
+    debugPrint('[InventoryRepo] ✅ All realtime subscriptions cleaned up');
   }
 
   // ── Helper ────────────────────────────────────────────────────────────────

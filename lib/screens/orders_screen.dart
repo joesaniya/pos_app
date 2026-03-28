@@ -8,6 +8,7 @@ import 'package:pos_app/screens/sheet/payment_sheet.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/models/order_modal.dart';
 import '../../providers/orders_provider.dart';
+import '../../providers/inventory_provider.dart';
 import 'new_order_screen.dart';
 
 // ── Color palette ──────────────────────────────────────────────────────────────
@@ -160,7 +161,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
         ],
       ),
     );
-    if (confirm == true) await prov.cancelOrder(order.id);
+    if (confirm == true) {
+      final inventoryProv = context.read<InventoryProvider>();
+      await prov.cancelOrder(order.id, inventoryProvider: inventoryProv);
+    }
   }
 
   Future<void> _openPaymentSheet(Order order) async {

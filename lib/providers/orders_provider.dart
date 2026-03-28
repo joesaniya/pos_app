@@ -290,8 +290,27 @@ class OrdersProvider extends ChangeNotifier {
     await _updateStatus(orderId, next);
   }
 
-  Future<void> cancelOrder(String orderId) async {
+  /// Cancel an order with optional inventory refresh
+  ///
+  /// If [inventoryProvider] is passed, inventory will be refreshed after
+  /// successful cancellation (for reversible status orders).
+  Future<void> cancelOrder(String orderId, {dynamic inventoryProvider}) async {
     await _updateStatus(orderId, OrderStatus.cancelled);
+
+    // ✅ Refresh inventory if provider passed (for real-time UI updates)
+    if (inventoryProvider != null) {
+      try {
+        // Dynamically call fetchItems() on the provider
+        // This works with InventoryProvider without needing explicit import
+        await inventoryProvider.fetchItems();
+        debugPrint('✅ InventoryProvider refreshed after order cancellation');
+      } catch (e) {
+        debugPrint(
+          '⚠️  Failed to refresh InventoryProvider after cancellation: $e',
+        );
+        // Non-critical — real-time listeners will catch updates
+      }
+    }
   }
 
   Future<void> _updateStatus(String orderId, OrderStatus newStatus) async {

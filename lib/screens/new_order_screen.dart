@@ -14,6 +14,7 @@ import 'package:pos_app/utils/ist_utils.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../providers/orders_provider.dart';
+import '../../providers/inventory_provider.dart';
 import '../../services/connectivity_service.dart';
 import '../../database/local_database.dart';
 import '../../services/inventory_deduction_service.dart';
@@ -948,6 +949,20 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         debugPrint(
           '⚠️  Offline mode: Inventory deduction will be performed when online',
         );
+      }
+
+      // ✓ STEP 4: Refresh InventoryProvider to show updated quantities immediately
+      if (mounted && _isOnline) {
+        try {
+          final inventoryProv = context.read<InventoryProvider>();
+          await inventoryProv.fetchItems();
+          debugPrint(
+            '✅ InventoryProvider refreshed — UI will show updated quantities',
+          );
+        } catch (e) {
+          debugPrint('⚠️  Failed to refresh InventoryProvider UI: $e');
+          // Failure is non-critical — real-time listeners will catch updates
+        }
       }
 
       if (mounted) {

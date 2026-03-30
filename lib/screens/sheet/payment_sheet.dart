@@ -13,6 +13,7 @@ import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/screens/orders_bill_preview_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/qr_code_provider.dart';
+import 'package:pos_app/widgets/payment_qr_code_display.dart';
 
 // ── Design tokens ─────────────────────────────────────────────
 class PC {
@@ -224,11 +225,12 @@ class _PaymentSheetState extends State<PaymentSheet>
                               Text(
                                 [
                                   'Order #${order.orderNumber}',
-                                  if (order.billNumber != null && order.billNumber!.isNotEmpty)
+                                  if (order.billNumber != null &&
+                                      order.billNumber!.isNotEmpty)
                                     order.billNumber!,
                                   if (order.tableNumber != null)
                                     'Table ${order.tableNumber}'
-                                    '${order.seatLabel != null ? " • ${order.seatLabel}" : ""}',
+                                        '${order.seatLabel != null ? " • ${order.seatLabel}" : ""}',
                                 ].join(' · '),
                                 style: const TextStyle(
                                   fontSize: 12,
@@ -407,59 +409,35 @@ class _PaymentSheetState extends State<PaymentSheet>
                     // ── QR Code Section ─────────────────────────────
                     if (_mode == OrderPaymentMode.upi)
                       Consumer<QrCodeProvider>(
-                        builder: (context, prov, child) {
-                          if (prov.isFetching) {
-                            return const Padding(
-                              padding: EdgeInsets.only(top: 24),
-                              child: Center(
-                                child: SizedBox(
-                                  height: 24,
-                                  width: 24,
-                                  child: CircularProgressIndicator(
-                                      color: PC.primary, strokeWidth: 2),
-                                ),
-                              ),
-                            );
-                          }
-
-                          if (prov.hasQrCode) {
+                        builder: (context, qrProv, child) {
+                          // Check if UPI ID is available
+                          if (!qrProv.hasUpiId) {
                             return Padding(
                               padding: const EdgeInsets.only(top: 24),
-                              child: Center(
-                                child: Column(
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF2F2),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: PC.danger.withValues(alpha: 77),
+                                  ),
+                                ),
+                                child: Row(
                                   children: [
-                                    const Text(
-                                      'Scan to Pay',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w800,
-                                        color: PC.textPri,
-                                        letterSpacing: 0.5,
-                                      ),
+                                    const Icon(
+                                      Icons.warning_rounded,
+                                      color: PC.danger,
+                                      size: 16,
                                     ),
-                                    const SizedBox(height: 12),
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                            color: PC.border, width: 2),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.04),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Image.network(
-                                          prov.qrCodeUrl,
-                                          width: 140,
-                                          height: 140,
-                                          fit: BoxFit.cover,
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'UPI ID not configured in business profile',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: PC.danger,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                     ),
@@ -469,7 +447,18 @@ class _PaymentSheetState extends State<PaymentSheet>
                             );
                           }
 
-                          return const SizedBox.shrink();
+                          // Display payment QR code (clean QR image only)
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 24),
+                            child: PaymentQrCodeDisplay(
+                              orderId: widget.order.id,
+                              upiId: qrProv.upiId,
+                              payeeName: widget.order.businessId,
+                              orderAmount: _grandTotal,
+                              orderDescription:
+                                  'Order #${widget.order.tableNumber}',
+                            ),
+                          );
                         },
                       ),
 
@@ -683,10 +672,7 @@ class _BillSummaryCard extends StatelessWidget {
           if (order.items.isNotEmpty) ...[
             Row(
               children: [
-                const Text(
-                  '🍽️',
-                  style: TextStyle(fontSize: 13),
-                ),
+                const Text('🍽️', style: TextStyle(fontSize: 13)),
                 const SizedBox(width: 6),
                 Text(
                   'ORDERED ITEMS (${order.totalItems})',
@@ -749,8 +735,9 @@ class _ItemLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final vegColor =
-        item.isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+    final vegColor = item.isVeg
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFB71C1C);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -813,7 +800,6 @@ class _ItemLine extends StatelessWidget {
     );
   }
 }
-
 
 class _Row extends StatelessWidget {
   final String label;

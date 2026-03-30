@@ -81,6 +81,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
   }
 
   /// Extract bill data from selected file and auto-fill form fields
+  /// Uses intelligent context-based extraction with confidence scoring
   Future<void> _extractBillData() async {
     if (_selectedFile == null) return;
 
@@ -105,53 +106,78 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
         _isExtracting = false;
         _autoFilledFields.clear();
 
-        // Check if any data was extracted (successful or partial)
-        final hasExtractedData =
-            result.vendorName != null ||
-            result.amount != null ||
-            result.gstAmount != null ||
-            result.invoiceNumber != null ||
-            result.invoiceDate != null;
+        // Check if any data was extracted with reasonable confidence
+        final hasExtractedData = <bool>[
+          result.vendorName != null,
+          result.amount != null,
+          result.gstAmount != null,
+          result.invoiceNumber != null,
+          result.invoiceDate != null,
+        ].any((element) => element);
 
         if (hasExtractedData) {
-          // Auto-fill vendor name
-          if (result.vendorName != null && result.vendorName!.isNotEmpty) {
+          // Auto-fill vendor name if confidence is reasonable (>= 0.5)
+          if (result.vendorName != null &&
+              result.vendorName!.isNotEmpty &&
+              (result.vendorNameConfidence ?? 0) >= 0.5) {
             _vendorNameController.text = result.vendorName!;
             _autoFilledFields.add('vendor');
           }
 
-          // Auto-fill amount
-          if (result.amount != null && result.amount! > 0) {
+          // Auto-fill amount if confidence is reasonable (>= 0.6)
+          if (result.amount != null &&
+              result.amount! > 0 &&
+              (result.amountConfidence ?? 0) >= 0.6) {
             _amountController.text = result.amount!.toStringAsFixed(2);
             _autoFilledFields.add('amount');
           }
 
-          // Auto-fill GST amount
-          if (result.gstAmount != null && result.gstAmount! > 0) {
+          // Auto-fill GST amount if present and confidence reasonable
+          if (result.gstAmount != null &&
+              result.gstAmount! > 0 &&
+              (result.gstAmountConfidence ?? 0) >= 0.6) {
             _gstController.text = result.gstAmount!.toStringAsFixed(2);
             _autoFilledFields.add('gst');
           }
 
-          // Auto-fill invoice number
+          // Auto-fill invoice number if confidence is reasonable (>= 0.6)
           if (result.invoiceNumber != null &&
-              result.invoiceNumber!.isNotEmpty) {
+              result.invoiceNumber!.isNotEmpty &&
+              (result.invoiceNumberConfidence ?? 0) >= 0.6) {
             _invoiceNumberController.text = result.invoiceNumber!;
             _autoFilledFields.add('invoice');
           }
 
-          // Auto-fill invoice date
-          if (result.invoiceDate != null) {
+          // Auto-fill invoice date if present
+          if (result.invoiceDate != null &&
+              (result.invoiceDateConfidence ?? 0) >= 0.6) {
             _selectedInvoiceDate = result.invoiceDate;
             _autoFilledFields.add('invoiceDate');
           }
 
-          _extractionStatus = result.isSuccessful
-              ? '✅ Bill data extracted - ${_autoFilledFields.length} fields locked'
-              : '⚠️ Partial extraction - ${_autoFilledFields.length} fields extracted, others are editable';
+          // Build extraction status message with confidence info
+          if (_autoFilledFields.isNotEmpty) {
+            if ((result.amountConfidence ?? 0) >= 0.85 &&
+                (result.invoiceNumberConfidence ?? 0) >= 0.75) {
+              _extractionStatus =
+                  '✅ High confidence extraction - ${_autoFilledFields.length} fields locked';
+            } else if ((result.amountConfidence ?? 0) >= 0.6) {
+              _extractionStatus =
+                  '✔️ Bill data extracted - ${_autoFilledFields.length} fields locked. Review auto-filled data.';
+            } else {
+              _extractionStatus =
+                  '⚠️ Partial extraction - ${_autoFilledFields.length} fields extracted, review before submitting';
+            }
+          } else {
+            _extractionStatus =
+                result.errorMessage ??
+                'Could not extract with sufficient confidence - Please fill manually';
+          }
         } else {
           // No data extracted
           _extractionStatus =
-              '${result.errorMessage ?? 'Could not extract bill data - Please fill manually'}';
+              result.errorMessage ??
+              'Could not extract bill data - Please fill manually';
           _autoFilledFields.clear();
         }
       });
@@ -644,7 +670,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
               SizedBox(width: 12.w),
               Expanded(
                 child: Text(
-                  'Upload a bill and we\'ll automatically extract details',
+                  'Intelligent Bill Extraction',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success,
                     fontWeight: FontWeight.w600,
@@ -656,10 +682,60 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
           ),
           SizedBox(height: 8.h),
           Text(
-            '💡 Tip: Name your file using pattern: vendor_amount_invoice.pdf (e.g., amazon_500_INV001.pdf) for automatic data extraction',
+            '🤖 Our system intelligently parses bills in any format:',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppColors.success.withAlpha((0.8 * 255).toInt()),
+              fontSize: 11.sp,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          SizedBox(height: 6.h),
+          Padding(
+            padding: EdgeInsets.only(left: 16.w),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '• Detects invoice numbers (any reference format)',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.success.withAlpha((0.7 * 255).toInt()),
+                    fontSize: 10.sp,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  'Identifies monetary amounts (₹, \$, rupees, etc.)',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.success.withAlpha((0.7 * 255).toInt()),
+                    fontSize: 10.sp,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  '• Extracts dates in any common format',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.success.withAlpha((0.7 * 255).toInt()),
+                    fontSize: 10.sp,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  '• Identifies vendor/company names contextually',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.success.withAlpha((0.7 * 255).toInt()),
+                    fontSize: 10.sp,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            '✓ Fields locked with high confidence can be edited if needed',
             style: AppTheme.bodySmall.copyWith(
               color: AppColors.success.withAlpha((0.7 * 255).toInt()),
-              fontSize: 11.sp,
+              fontSize: 10.sp,
+              fontStyle: FontStyle.italic,
             ),
           ),
         ],

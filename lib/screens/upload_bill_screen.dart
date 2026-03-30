@@ -1,12 +1,12 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:intl/intl.dart';
 import 'package:pos_app/providers/expense_provider.dart';
-import 'package:pos_app/services/bill_extraction_service.dart';
+import 'package:pos_app/services/excel_validation_service.dart';
 import 'package:pos_app/theme/app_colors.dart';
 import 'package:pos_app/theme/app_theme.dart';
+import 'package:pos_app/models/expense_model.dart';
 
 class UploadBillScreen extends StatefulWidget {
   const UploadBillScreen({super.key});
@@ -16,38 +16,24 @@ class UploadBillScreen extends StatefulWidget {
 }
 
 class _UploadBillScreenState extends State<UploadBillScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _vendorNameController = TextEditingController();
-  final _amountController = TextEditingController();
-  final _invoiceNumberController = TextEditingController();
-  final _gstController = TextEditingController();
+  String? _selectedFilePath;
+  String? _selectedFileName;
 
-  PlatformFile? _selectedFile;
-  String? _selectedCategoryId;
-  DateTime _selectedExpenseDate = DateTime.now();
-  DateTime? _selectedInvoiceDate;
-
-  bool _isLoading = false;
+  bool _isProcessing = false;
+  bool _isImporting = false;
   double _uploadProgress = 0;
 
-  // Track which fields were auto-filled from bill extraction
-  final Set<String> _autoFilledFields = {};
-  String _extractionStatus = '';
-  bool _isExtracting = false;
+  // Validation results
+  List<ValidatedExpenseData> _validatedExpenses = [];
+  List<ExcelValidationError> _validationErrors = [];
+  String _validationSummary = '';
+  bool _showValidationResults = false;
+  bool _hasValidationErrors = false;
 
   @override
   void initState() {
     super.initState();
     _loadCategories();
-  }
-
-  @override
-  void dispose() {
-    _vendorNameController.dispose();
-    _amountController.dispose();
-    _invoiceNumberController.dispose();
-    _gstController.dispose();
-    super.dispose();
   }
 
   void _loadCategories() {
@@ -57,210 +43,212 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
     }
   }
 
-  Future<void> _pickFile() async {
+  /// Pick Excel file from device
+  Future<void> _pickExcelFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'],
+        allowedExtensions: ['xlsx', 'xls'],
         allowMultiple: false,
       );
 
       if (result != null && result.files.isNotEmpty) {
-        setState(() {
-          _selectedFile = result.files.first;
-          _isExtracting = true;
-          _extractionStatus = 'Analyzing bill...';
-        });
+        final filePath = result.files.first.path;
+        final fileName = result.files.first.name;
 
-        // Extract bill data immediately after file selection
-        await _extractBillData();
+        if (filePath != null) {
+          setState(() {
+            _selectedFilePath = filePath;
+            _selectedFileName = fileName;
+            _showValidationResults = false;
+            _validatedExpenses = [];
+            _validationErrors = [];
+            _validationSummary = '';
+          });
+
+          // Automatically validate after selection
+          await _validateExcelFile();
+        }
       }
     } catch (e) {
       _showErrorSnackBar('Failed to pick file: $e');
     }
   }
 
-  /// Extract bill data from selected file and auto-fill form fields
-  /// Uses intelligent context-based extraction with confidence scoring
-  Future<void> _extractBillData() async {
-    if (_selectedFile == null) return;
+  /// Validate selected Excel file
+  Future<void> _validateExcelFile() async {
+    if (_selectedFilePath == null) {
+      _showErrorSnackBar('Please select a file first');
+      return;
+    }
 
     try {
-      final extractionService = BillExtractionService();
-      final filePath = _selectedFile!.path;
+      setState(() => _isProcessing = true);
 
-      // Ensure file path is not null before extraction
-      if (filePath == null || filePath.isEmpty) {
-        setState(() {
-          _isExtracting = false;
-          _extractionStatus =
-              'ℹ️ Auto-extraction not available - Please fill data manually';
-          _autoFilledFields.clear();
-        });
-        return;
+      final provider = context.read<ExpenseProvider>();
+
+      // Build category name -> ID map
+      final categoryMap = <String, String>{};
+      for (final category in provider.categories) {
+        categoryMap[category.name] = category.id;
       }
 
-      final result = await extractionService.extractBillData(filePath);
+      // Validate Excel file
+      final validationResult =
+          await ExcelValidationService.parseAndValidateExcelFile(
+            filePath: _selectedFilePath!,
+            categoryMap: categoryMap,
+          );
 
-      setState(() {
-        _isExtracting = false;
-        _autoFilledFields.clear();
+      if (mounted) {
+        setState(() {
+          _validatedExpenses = validationResult['data'] ?? [];
+          _validationErrors = validationResult['errors'] ?? [];
+          _validationSummary = validationResult['summary'] ?? '';
+          _hasValidationErrors = (_validationErrors.isNotEmpty);
+          _showValidationResults = true;
+          _isProcessing = false;
+        });
 
-        // Check if any data was extracted with reasonable confidence
-        final hasExtractedData = <bool>[
-          result.vendorName != null,
-          result.amount != null,
-          result.gstAmount != null,
-          result.invoiceNumber != null,
-          result.invoiceDate != null,
-        ].any((element) => element);
-
-        if (hasExtractedData) {
-          // Auto-fill vendor name if confidence is reasonable (>= 0.5)
-          if (result.vendorName != null &&
-              result.vendorName!.isNotEmpty &&
-              (result.vendorNameConfidence ?? 0) >= 0.5) {
-            _vendorNameController.text = result.vendorName!;
-            _autoFilledFields.add('vendor');
-          }
-
-          // Auto-fill amount if confidence is reasonable (>= 0.6)
-          if (result.amount != null &&
-              result.amount! > 0 &&
-              (result.amountConfidence ?? 0) >= 0.6) {
-            _amountController.text = result.amount!.toStringAsFixed(2);
-            _autoFilledFields.add('amount');
-          }
-
-          // Auto-fill GST amount if present and confidence reasonable
-          if (result.gstAmount != null &&
-              result.gstAmount! > 0 &&
-              (result.gstAmountConfidence ?? 0) >= 0.6) {
-            _gstController.text = result.gstAmount!.toStringAsFixed(2);
-            _autoFilledFields.add('gst');
-          }
-
-          // Auto-fill invoice number if confidence is reasonable (>= 0.6)
-          if (result.invoiceNumber != null &&
-              result.invoiceNumber!.isNotEmpty &&
-              (result.invoiceNumberConfidence ?? 0) >= 0.6) {
-            _invoiceNumberController.text = result.invoiceNumber!;
-            _autoFilledFields.add('invoice');
-          }
-
-          // Auto-fill invoice date if present
-          if (result.invoiceDate != null &&
-              (result.invoiceDateConfidence ?? 0) >= 0.6) {
-            _selectedInvoiceDate = result.invoiceDate;
-            _autoFilledFields.add('invoiceDate');
-          }
-
-          // Build extraction status message with confidence info
-          if (_autoFilledFields.isNotEmpty) {
-            if ((result.amountConfidence ?? 0) >= 0.85 &&
-                (result.invoiceNumberConfidence ?? 0) >= 0.75) {
-              _extractionStatus =
-                  '✅ High confidence extraction - ${_autoFilledFields.length} fields locked';
-            } else if ((result.amountConfidence ?? 0) >= 0.6) {
-              _extractionStatus =
-                  '✔️ Bill data extracted - ${_autoFilledFields.length} fields locked. Review auto-filled data.';
-            } else {
-              _extractionStatus =
-                  '⚠️ Partial extraction - ${_autoFilledFields.length} fields extracted, review before submitting';
-            }
-          } else {
-            _extractionStatus =
-                result.errorMessage ??
-                'Could not extract with sufficient confidence - Please fill manually';
-          }
-        } else {
-          // No data extracted
-          _extractionStatus =
-              result.errorMessage ??
-              'Could not extract bill data - Please fill manually';
-          _autoFilledFields.clear();
+        // Show validation summary
+        if (_hasValidationErrors && _validationErrors.isNotEmpty) {
+          _showWarningSnackBar(
+            'Validation issues found: ${_validationErrors.length}',
+          );
+        } else if (_validatedExpenses.isNotEmpty) {
+          _showSuccessSnackBar(
+            '✅ Ready to import ${_validatedExpenses.length} expenses',
+          );
         }
-      });
+      }
     } catch (e) {
-      setState(() {
-        _isExtracting = false;
-        _extractionStatus = '⚠️ Extraction error: $e';
-        _autoFilledFields.clear();
-      });
+      if (mounted) {
+        setState(() => _isProcessing = false);
+        _showErrorSnackBar('Validation error: $e');
+      }
     }
   }
 
-  Future<void> _showDatePicker(
-    DateTime currentDate,
-    Function(DateTime) onDateSelected,
-  ) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: currentDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked != null) {
-      onDateSelected(picked);
-      setState(() {});
-    }
-  }
-
-  Future<void> _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_selectedCategoryId == null) {
-      _showErrorSnackBar('Please select a category');
-      return;
-    }
-    if (_selectedFile == null) {
-      _showErrorSnackBar('Please select a bill file');
+  /// Direct import of validated expenses
+  Future<void> _uploadAndImportExpenses() async {
+    if (_validatedExpenses.isEmpty) {
+      _showErrorSnackBar('No valid expenses to import');
       return;
     }
 
-    setState(() => _isLoading = true);
+    // Read provider before any async operations to avoid BuildContext across async gaps warning
+    final provider = context.read<ExpenseProvider>();
+
+    if (_hasValidationErrors) {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('⚠️ Validation Warnings'),
+          content: Text(
+            'There are ${_validationErrors.length} validation issues.\n\n'
+            'Import the valid rows anyway?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue Import'),
+            ),
+          ],
+        ),
+      );
+
+      if (result != true) return;
+    }
+
+    setState(() => _isImporting = true);
     _uploadProgress = 0;
 
     try {
-      final provider = context.read<ExpenseProvider>();
+      int importedCount = 0;
+      int totalCount = _validatedExpenses.length;
 
-      // Simulate file upload progress
-      await Future.delayed(const Duration(milliseconds: 500));
-      setState(() => _uploadProgress = 0.3);
-      await Future.delayed(const Duration(milliseconds: 500));
-      setState(() => _uploadProgress = 0.6);
+      // Import each expense
+      for (int i = 0; i < _validatedExpenses.length; i++) {
+        final expense = _validatedExpenses[i];
 
-      // Create expense from bill
-      final newExpense = await provider.createExpenseFromBill(
-        categoryId: _selectedCategoryId!,
-        vendorName: _vendorNameController.text.trim(),
-        amount: double.parse(_amountController.text),
-        billFilePath: 'bills/${_selectedFile!.name}', // Simulated path
-        billFileName: _selectedFile!.name,
-        billFileSize: _selectedFile!.size,
-        invoiceNumber: _invoiceNumberController.text.trim().isNotEmpty
-            ? _invoiceNumberController.text.trim()
-            : null,
-        expenseDate: _selectedExpenseDate,
-        gstAmount: _gstController.text.trim().isNotEmpty
-            ? double.parse(_gstController.text.trim())
-            : null,
-      );
+        try {
+          // Check if expense already exists by invoice number
+          Expense? existing;
+          try {
+            existing = provider.expenses.firstWhere(
+              (e) => e.invoiceNumber == expense.invoiceNumber,
+            );
+          } catch (e) {
+            existing = null;
+          }
 
-      setState(() => _uploadProgress = 1.0);
-      await Future.delayed(const Duration(milliseconds: 300));
+          if (existing != null) {
+            // Update existing expense
+            await provider.updateExpense(
+              expenseId: existing.id,
+              title: expense.title,
+              categoryId: expense.categoryId,
+              vendorName: expense.vendorName,
+              amount: expense.amount,
+              expenseDate: expense.expenseDate,
+              invoiceNumber: expense.invoiceNumber,
+              invoiceDate: expense.invoiceDate,
+              notes: expense.notes,
+            );
+          } else {
+            // Create new expense
+            await provider.createExpense(
+              title: expense.title,
+              expenseNumber: (provider.expenses.length + 1),
+              categoryId: expense.categoryId,
+              categoryName: expense.categoryName,
+              vendorName: expense.vendorName,
+              amount: expense.amount,
+              expenseDate: expense.expenseDate,
+              invoiceNumber: expense.invoiceNumber,
+              invoiceDate: expense.invoiceDate,
+              gstAmount: expense.gstAmount,
+              gstNumber: expense.gstNumber,
+              description: expense.description,
+            );
+          }
 
-      if (newExpense != null && mounted) {
-        _showSuccessSnackBar('Bill uploaded and expense created successfully!');
-        Navigator.pop(context);
+          importedCount++;
+          if (mounted) {
+            setState(() => _uploadProgress = (i + 1) / totalCount);
+          }
+        } catch (e) {
+          // Log error but continue with other expenses
+          debugPrint('Error importing expense: $e');
+        }
+      }
+
+      setState(() => _isImporting = false);
+
+      if (mounted) {
+        if (importedCount == totalCount) {
+          _showSuccessSnackBar(
+            '✅ Successfully imported $importedCount expenses!',
+          );
+          // Clear and go back after short delay
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (mounted) {
+            Navigator.pop(context);
+          }
+        } else {
+          _showWarningSnackBar(
+            '⚠️ Imported $importedCount of $totalCount expenses',
+          );
+        }
       }
     } catch (e) {
-      _showErrorSnackBar('Failed to upload bill: $e');
-    } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _uploadProgress = 0;
-        });
+        setState(() => _isImporting = false);
+        _showErrorSnackBar('Import failed: $e');
       }
     }
   }
@@ -270,6 +258,17 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
+      ),
+    );
+  }
+
+  void _showWarningSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.warning,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
       ),
@@ -297,331 +296,44 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Upload Bill', style: AppTheme.headlineSmall),
+            Text('📊 Direct Excel Upload', style: AppTheme.headlineSmall),
             Text(
-              'Auto-generate expense from bill',
+              'One-step: Upload → Auto Database Insert',
               style: AppTheme.bodySmall.copyWith(fontSize: 12.sp),
             ),
           ],
         ),
       ),
-      body: Consumer<ExpenseProvider>(
-        builder: (context, provider, _) {
-          return SingleChildScrollView(
-            padding: EdgeInsets.all(16.w),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(16.w),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Info Banner
+            _buildInfoBanner(),
+            SizedBox(height: 20.h),
+
+            // File Upload Section
+            _buildFileUploadBox(),
+            SizedBox(height: 16.h),
+
+            // Validation Progress (while processing)
+            if (_isProcessing)
+              _buildProcessingCard()
+            else if (_showValidationResults)
+              // Validation Results
+              _buildValidationResultsCard(),
+
+            // Import Progress (while importing)
+            if (_isImporting) _buildImportProgressCard(),
+
+            SizedBox(height: 24.h),
+
+            // Action Buttons
+            if (!_isImporting)
+              Row(
                 children: [
-                  // Info Banner
-                  _buildInfoBanner(),
-                  SizedBox(height: 24.h),
-
-                  // File Upload Section
-                  _buildSectionTitle('📤 Select Bill File'),
-                  SizedBox(height: 12.h),
-                  _buildFileUploadBox(),
-                  SizedBox(height: 12.h),
-
-                  // Extraction Status Message
-                  if (_extractionStatus.isNotEmpty)
-                    Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        color: _autoFilledFields.isNotEmpty
-                            ? AppColors.success.withValues(alpha: 0.1)
-                            : AppColors.warning.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8.r),
-                        border: Border.all(
-                          color: _autoFilledFields.isNotEmpty
-                              ? AppColors.success
-                              : AppColors.warning,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _isExtracting
-                                ? Icons.hourglass_bottom
-                                : _autoFilledFields.isNotEmpty
-                                ? Icons.check_circle
-                                : Icons.info_outline,
-                            color: _autoFilledFields.isNotEmpty
-                                ? AppColors.success
-                                : AppColors.warning,
-                            size: 18.sp,
-                          ),
-                          SizedBox(width: 12.w),
-                          Expanded(
-                            child: Text(
-                              _extractionStatus,
-                              style: AppTheme.bodySmall.copyWith(
-                                color: _autoFilledFields.isNotEmpty
-                                    ? AppColors.success
-                                    : AppColors.warning,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  SizedBox(height: 24.h),
-
-                  // Expense Details Section
-                  _buildSectionTitle('📝 Expense Details'),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _vendorNameController,
-                    label: 'Vendor / Supplier Name',
-                    hint: 'Who issued this bill?',
-                    isLocked: _autoFilledFields.contains('vendor'),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Vendor name is required';
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: 12.h),
-
-                  // Category Dropdown
-                  _buildCategoryDropdown(provider),
-                  SizedBox(height: 12.h),
-
-                  // Amount Section
-                  _buildSectionTitle('💰 Amount'),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _amountController,
-                    label: 'Bill Amount',
-                    hint: '0.00',
-                    keyboardType: TextInputType.number,
-                    prefixText: '₹ ',
-                    isLocked: _autoFilledFields.contains('amount'),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Amount is required';
-                      }
-                      try {
-                        double.parse(value);
-                        return null;
-                      } catch (e) {
-                        return 'Invalid amount';
-                      }
-                    },
-                  ),
-                  SizedBox(height: 12.h),
-
-                  // GST Amount (optional)
-                  _buildTextField(
-                    controller: _gstController,
-                    label: 'GST Amount (Optional)',
-                    hint: '0.00',
-                    keyboardType: TextInputType.number,
-                    prefixText: '₹ ',
-                    isLocked: _autoFilledFields.contains('gst'),
-                    validator: (value) {
-                      if (value != null && value.isNotEmpty) {
-                        try {
-                          double.parse(value);
-                          return null;
-                        } catch (e) {
-                          return 'Invalid GST amount';
-                        }
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: 16.h),
-
-                  // Invoice Details
-                  _buildSectionTitle('🧾 Invoice Information'),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _invoiceNumberController,
-                    label: 'Invoice Number',
-                    hint: 'e.g., INV-2026-001',
-                    isLocked: _autoFilledFields.contains('invoice'),
-                  ),
-                  SizedBox(height: 12.h),
-
-                  GestureDetector(
-                    onTap: () => _showDatePicker(
-                      _selectedInvoiceDate ?? DateTime.now(),
-                      (date) => setState(() => _selectedInvoiceDate = date),
-                    ),
-                    child: Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.lightNeutral300),
-                        borderRadius: BorderRadius.circular(8.r),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Invoice Date',
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12.sp,
-                                ),
-                              ),
-                              SizedBox(height: 4.h),
-                              Text(
-                                _selectedInvoiceDate == null
-                                    ? 'Not selected'
-                                    : DateFormat(
-                                        'dd MMM yyyy',
-                                      ).format(_selectedInvoiceDate!),
-                                style: AppTheme.labelMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13.sp,
-                                  color: _selectedInvoiceDate == null
-                                      ? AppColors.textSecondary
-                                      : AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Icon(
-                            Icons.calendar_today,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 16.h),
-
-                  // Date Section
-                  _buildSectionTitle('📅 Expense Date'),
-                  SizedBox(height: 12.h),
-
-                  GestureDetector(
-                    onTap: () => _showDatePicker(_selectedExpenseDate, (date) {
-                      setState(() => _selectedExpenseDate = date);
-                    }),
-                    child: Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.lightNeutral300),
-                        borderRadius: BorderRadius.circular(8.r),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'When did this expense occur?',
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12.sp,
-                                ),
-                              ),
-                              SizedBox(height: 4.h),
-                              Text(
-                                DateFormat(
-                                  'dd MMM yyyy',
-                                ).format(_selectedExpenseDate),
-                                style: AppTheme.labelMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13.sp,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Icon(
-                            Icons.calendar_today,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 24.h),
-
-                  // Upload Progress
-                  if (_uploadProgress > 0 && _uploadProgress < 1)
-                    Column(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4.r),
-                          child: LinearProgressIndicator(
-                            value: _uploadProgress,
-                            minHeight: 6.h,
-                            backgroundColor: AppColors.lightNeutral200,
-                            valueColor: AlwaysStoppedAnimation(
-                              AppColors.success,
-                            ),
-                          ),
-                        ),
-                        SizedBox(height: 8.h),
-                        Text(
-                          'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppColors.success,
-                            fontSize: 11.sp,
-                          ),
-                        ),
-                        SizedBox(height: 24.h),
-                      ],
-                    ),
-
-                  // Submit Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _submitForm,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 14.h),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.r),
-                        ),
-                        disabledBackgroundColor: AppColors.lightNeutral300,
-                      ),
-                      child: _isLoading
-                          ? SizedBox(
-                              height: 20.h,
-                              width: 20.h,
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation(
-                                  Colors.white,
-                                ),
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.cloud_upload_outlined, size: 18.sp),
-                                SizedBox(width: 8.w),
-                                Text(
-                                  'Upload & Create Expense',
-                                  style: AppTheme.labelMedium.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14.sp,
-                                  ),
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                  SizedBox(height: 12.h),
-
-                  // Cancel Button
-                  SizedBox(
-                    width: double.infinity,
+                  Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
@@ -641,12 +353,46 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                       ),
                     ),
                   ),
-                  SizedBox(height: 24.h),
+                  SizedBox(width: 12.w),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed:
+                          (_validatedExpenses.isEmpty ||
+                              _isProcessing ||
+                              _selectedFilePath == null)
+                          ? null
+                          : _uploadAndImportExpenses,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.success,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(vertical: 14.h),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8.r),
+                        ),
+                        disabledBackgroundColor: AppColors.lightNeutral300,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.cloud_upload_outlined, size: 18.sp),
+                          SizedBox(width: 8.w),
+                          Text(
+                            'Upload Now',
+                            style: AppTheme.labelMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14.sp,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            ),
-          );
-        },
+
+            SizedBox(height: 16.h),
+          ],
+        ),
       ),
     );
   }
@@ -670,7 +416,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
               SizedBox(width: 12.w),
               Expanded(
                 child: Text(
-                  'Intelligent Bill Extraction',
+                  'Seamless Excel Workflow',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success,
                     fontWeight: FontWeight.w600,
@@ -682,7 +428,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
           ),
           SizedBox(height: 8.h),
           Text(
-            '🤖 Our system intelligently parses bills in any format:',
+            '🚀 How it works:',
             style: AppTheme.bodySmall.copyWith(
               color: AppColors.success.withAlpha((0.8 * 255).toInt()),
               fontSize: 11.sp,
@@ -696,7 +442,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '• Detects invoice numbers (any reference format)',
+                  '1. Upload pre-filled Excel template',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success.withAlpha((0.7 * 255).toInt()),
                     fontSize: 10.sp,
@@ -704,7 +450,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                 ),
                 SizedBox(height: 4.h),
                 Text(
-                  'Identifies monetary amounts (₹, \$, rupees, etc.)',
+                  '2. System validates all data',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success.withAlpha((0.7 * 255).toInt()),
                     fontSize: 10.sp,
@@ -712,7 +458,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                 ),
                 SizedBox(height: 4.h),
                 Text(
-                  '• Extracts dates in any common format',
+                  '3. Click Upload → Direct database insertion',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success.withAlpha((0.7 * 255).toInt()),
                     fontSize: 10.sp,
@@ -720,10 +466,11 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                 ),
                 SizedBox(height: 4.h),
                 Text(
-                  '• Identifies vendor/company names contextually',
+                  '4. No manual form entry needed!',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppColors.success.withAlpha((0.7 * 255).toInt()),
                     fontSize: 10.sp,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -731,7 +478,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
           ),
           SizedBox(height: 8.h),
           Text(
-            '✓ Fields locked with high confidence can be edited if needed',
+            '✓ Duplicates are updated, new data is inserted',
             style: AppTheme.bodySmall.copyWith(
               color: AppColors.success.withAlpha((0.7 * 255).toInt()),
               fontSize: 10.sp,
@@ -745,26 +492,26 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
 
   Widget _buildFileUploadBox() {
     return GestureDetector(
-      onTap: _isLoading ? null : _pickFile,
+      onTap: (_isProcessing || _isImporting) ? null : _pickExcelFile,
       child: Container(
         padding: EdgeInsets.symmetric(vertical: 32.h, horizontal: 16.w),
         decoration: BoxDecoration(
           border: Border.all(
-            color: _selectedFile != null
+            color: _selectedFilePath != null
                 ? AppColors.success
                 : AppColors.lightNeutral300,
             style: BorderStyle.solid,
-            width: _selectedFile != null ? 2 : 1,
+            width: _selectedFilePath != null ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(12.r),
-          color: _selectedFile != null
+          color: _selectedFilePath != null
               ? AppColors.success.withAlpha((0.05 * 255).toInt())
               : AppColors.lightNeutral100,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (_selectedFile == null)
+            if (_selectedFilePath == null)
               Column(
                 children: [
                   Icon(
@@ -774,7 +521,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                   ),
                   SizedBox(height: 12.h),
                   Text(
-                    'Choose a bill file',
+                    'Choose an Excel File',
                     style: AppTheme.labelMedium.copyWith(
                       fontWeight: FontWeight.w600,
                       fontSize: 14.sp,
@@ -782,7 +529,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                   ),
                   SizedBox(height: 4.h),
                   Text(
-                    'PDF, JPG, PNG, DOC (Max 10MB)',
+                    'XLSX or XLS format only',
                     style: AppTheme.bodySmall.copyWith(
                       color: AppColors.textSecondary,
                       fontSize: 12.sp,
@@ -800,7 +547,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                   ),
                   SizedBox(height: 12.h),
                   Text(
-                    _selectedFile!.name,
+                    _selectedFileName ?? 'File Selected',
                     style: AppTheme.labelMedium.copyWith(
                       fontWeight: FontWeight.w600,
                       fontSize: 13.sp,
@@ -809,17 +556,33 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 4.h),
-                  Text(
-                    '${((_selectedFile!.size / 1024) / 1024).toStringAsFixed(2)} MB',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppColors.textSecondary,
-                      fontSize: 11.sp,
+                  if (_showValidationResults &&
+                      _validatedExpenses.isNotEmpty) ...[
+                    SizedBox(height: 8.h),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 12.w,
+                        vertical: 6.h,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withAlpha((0.1 * 255).toInt()),
+                        borderRadius: BorderRadius.circular(6.r),
+                      ),
+                      child: Text(
+                        '✓ ${_validatedExpenses.length} valid expenses',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppColors.success,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11.sp,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                   SizedBox(height: 12.h),
                   GestureDetector(
-                    onTap: _isLoading ? null : _pickFile,
+                    onTap: (_isProcessing || _isImporting)
+                        ? null
+                        : _pickExcelFile,
                     child: Text(
                       'Change file',
                       style: AppTheme.labelSmall.copyWith(
@@ -837,147 +600,252 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
     );
   }
 
+  Widget _buildProcessingCard() {
+    return Container(
+      padding: EdgeInsets.all(16.w),
+      decoration: BoxDecoration(
+        color: AppColors.primaryPurple.withAlpha((0.1 * 255).toInt()),
+        border: Border.all(
+          color: AppColors.primaryPurple.withAlpha((0.3 * 255).toInt()),
+        ),
+        borderRadius: BorderRadius.circular(8.r),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            height: 24.h,
+            width: 24.h,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(AppColors.primaryPurple),
+            ),
+          ),
+          SizedBox(width: 12.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Validating Excel file...',
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.sp,
+                    color: AppColors.primaryPurple,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  'Checking data format and contents',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.primaryPurple.withAlpha(
+                      (0.7 * 255).toInt(),
+                    ),
+                    fontSize: 10.sp,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildValidationResultsCard() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Summary
+        Container(
+          padding: EdgeInsets.all(12.w),
+          decoration: BoxDecoration(
+            color: _hasValidationErrors
+                ? AppColors.warning.withAlpha((0.1 * 255).toInt())
+                : AppColors.success.withAlpha((0.1 * 255).toInt()),
+            border: Border.all(
+              color: _hasValidationErrors
+                  ? AppColors.warning.withAlpha((0.3 * 255).toInt())
+                  : AppColors.success.withAlpha((0.3 * 255).toInt()),
+            ),
+            borderRadius: BorderRadius.circular(8.r),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _hasValidationErrors ? Icons.warning : Icons.check_circle,
+                color: _hasValidationErrors
+                    ? AppColors.warning
+                    : AppColors.success,
+                size: 20.sp,
+              ),
+              SizedBox(width: 12.w),
+              Expanded(
+                child: Text(
+                  _validationSummary.isNotEmpty
+                      ? _validationSummary
+                      : '${_validatedExpenses.length} expenses ready to import',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: _hasValidationErrors
+                        ? AppColors.warning
+                        : AppColors.success,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11.sp,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Errors (if any)
+        if (_validationErrors.isNotEmpty) ...[
+          SizedBox(height: 12.h),
+          _buildSectionTitle('⚠️ Validation Issues'),
+          SizedBox(height: 8.h),
+          Container(
+            constraints: BoxConstraints(maxHeight: 200.h),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColors.lightNeutral300),
+              borderRadius: BorderRadius.circular(8.r),
+            ),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _validationErrors.length,
+              itemBuilder: (context, index) {
+                final error = _validationErrors[index];
+                return Padding(
+                  padding: EdgeInsets.all(8.w),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: AppColors.error,
+                        size: 16.sp,
+                      ),
+                      SizedBox(width: 8.w),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Row ${error.rowNumber}',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppColors.error,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10.sp,
+                              ),
+                            ),
+                            Text(
+                              error.error,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppColors.textSecondary,
+                                fontSize: 9.sp,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+
+        // Valid Data Count
+        SizedBox(height: 12.h),
+        _buildSectionTitle('📋 Valid Expenses'),
+        SizedBox(height: 8.h),
+        Container(
+          padding: EdgeInsets.all(12.w),
+          decoration: BoxDecoration(
+            color: AppColors.lightNeutral100,
+            border: Border.all(color: AppColors.lightNeutral300),
+            borderRadius: BorderRadius.circular(8.r),
+          ),
+          child: Text(
+            '${_validatedExpenses.length} expense records ready to import '
+            '${_hasValidationErrors ? '(with ${_validationErrors.length} issues)' : '(no issues)'}',
+            style: AppTheme.labelMedium.copyWith(
+              fontWeight: FontWeight.w600,
+              fontSize: 12.sp,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImportProgressCard() {
+    return Container(
+      padding: EdgeInsets.all(16.w),
+      decoration: BoxDecoration(
+        color: AppColors.success.withAlpha((0.1 * 255).toInt()),
+        border: Border.all(
+          color: AppColors.success.withAlpha((0.3 * 255).toInt()),
+        ),
+        borderRadius: BorderRadius.circular(8.r),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                height: 24.h,
+                width: 24.h,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(AppColors.success),
+                ),
+              ),
+              SizedBox(width: 12.w),
+              Expanded(
+                child: Text(
+                  'Importing to database...',
+                  style: AppTheme.labelMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.sp,
+                    color: AppColors.success,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12.h),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4.r),
+            child: LinearProgressIndicator(
+              value: _uploadProgress,
+              minHeight: 6.h,
+              backgroundColor: AppColors.lightNeutral200,
+              valueColor: AlwaysStoppedAnimation(AppColors.success),
+            ),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            '${(_uploadProgress * 100).toStringAsFixed(0)}% complete',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppColors.success,
+              fontSize: 11.sp,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSectionTitle(String title) {
     return Text(
       title,
       style: AppTheme.labelLarge.copyWith(
         fontWeight: FontWeight.w700,
-        fontSize: 14.sp,
+        fontSize: 13.sp,
       ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-    String? prefixText,
-    String? Function(String?)? validator,
-    bool isLocked = false,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextFormField(
-          controller: controller,
-          keyboardType: keyboardType,
-          maxLines: maxLines,
-          validator: validator,
-          enabled: !isLocked, // Disable if locked
-          decoration: InputDecoration(
-            labelText: label,
-            hintText: hint,
-            prefixText: prefixText,
-            suffixIcon: isLocked
-                ? Tooltip(
-                    message: 'Auto-filled from bill - Cannot be edited',
-                    child: Icon(
-                      Icons.lock,
-                      color: AppColors.success,
-                      size: 18.sp,
-                    ),
-                  )
-                : null,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(
-                color: isLocked ? AppColors.success : AppColors.lightNeutral300,
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(
-                color: isLocked ? AppColors.success : AppColors.lightNeutral300,
-              ),
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(
-                color: AppColors.success.withValues(alpha: 0.5),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(
-                color: isLocked ? AppColors.success : AppColors.primaryPurple,
-                width: 2,
-              ),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(color: AppColors.error),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.r),
-              borderSide: BorderSide(color: AppColors.error, width: 2),
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 12.w,
-              vertical: 12.h,
-            ),
-          ),
-        ),
-        if (isLocked) ...[
-          SizedBox(height: 4.h),
-          Row(
-            children: [
-              Icon(Icons.check_circle, color: AppColors.success, size: 12.sp),
-              SizedBox(width: 6.w),
-              Text(
-                'Auto-filled from bill (locked)',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppColors.success,
-                  fontSize: 10.sp,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildCategoryDropdown(ExpenseProvider provider) {
-    return DropdownButtonFormField<String>(
-      initialValue: _selectedCategoryId,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: 'Category',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
-      ),
-      items: provider.categories.map((category) {
-        return DropdownMenuItem(
-          value: category.id,
-          child: Row(
-            children: [
-              Icon(Icons.category, size: 16.sp, color: AppColors.primaryPurple),
-              SizedBox(width: 8.w),
-              Text(category.name),
-            ],
-          ),
-        );
-      }).toList(),
-      onChanged: (value) {
-        setState(() => _selectedCategoryId = value);
-      },
-      validator: (_) {
-        if (_selectedCategoryId == null) return 'Please select a category';
-        return null;
-      },
     );
   }
 }

@@ -766,6 +766,130 @@ class ExpenseProvider extends ChangeNotifier {
     }
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // BATCH IMPORT FROM EXCEL
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /// Import multiple expenses from Excel validation results
+  /// Returns map with success count, failed count, and error details
+  Future<Map<String, dynamic>> importExpensesFromExcel({
+    required List<dynamic> validatedExpenses, // List of ValidatedExpenseData
+  }) async {
+    try {
+      await _ensureInitialized();
+      _clearError();
+
+      int successCount = 0;
+      int failureCount = 0;
+      final List<String> errors = [];
+
+      // Get current user credentials from storage
+      final userData = await StorageService.instance.getUserData();
+      final createdByUid = userData['uid'] ?? '';
+      final createdByName = userData['name'] ?? 'Unknown';
+
+      log('📊 Starting batch import: ${validatedExpenses.length} expenses');
+
+      for (int index = 0; index < validatedExpenses.length; index++) {
+        try {
+          final expenseData = validatedExpenses[index];
+
+          // Generate expense number
+          final expenseNumber =
+              DateTime.now().millisecondsSinceEpoch ~/ 1000 + index;
+
+          // Create the expense
+          final newExpense = await _repository.createExpense(
+            businessId: _businessId,
+            expenseNumber: expenseNumber,
+            title: expenseData.title,
+            categoryId: expenseData.categoryId,
+            categoryName: expenseData.categoryName,
+            vendorName: expenseData.vendorName,
+            amount: expenseData.amount,
+            expenseDate: expenseData.expenseDate,
+            createdByUid: createdByUid,
+            createdByName: createdByName,
+            description: expenseData.description,
+            invoiceNumber: expenseData.invoiceNumber,
+            invoiceDate: expenseData.invoiceDate,
+            gstAmount: expenseData.gstAmount,
+            gstNumber: expenseData.gstNumber,
+          );
+
+          if (newExpense != null) {
+            _expenses.add(newExpense);
+            successCount++;
+            log('✅ Imported expense ${index + 1}: ${expenseData.title}');
+          } else {
+            failureCount++;
+            errors.add(
+              'Row ${index + 1}: Failed to create expense - ${expenseData.title}',
+            );
+            log(
+              '❌ Failed to import expense ${index + 1}: ${expenseData.title}',
+            );
+          }
+        } catch (e) {
+          failureCount++;
+          errors.add('Row ${index + 1}: $e');
+          log('❌ Import error for row ${index + 1}: $e');
+        }
+      }
+
+      // Sort expenses
+      _sortExpenses();
+      notifyListeners();
+
+      final summary =
+          '✅ Import Complete: $successCount successful, $failureCount failed';
+      log(summary);
+
+      return {
+        'success': successCount,
+        'failed': failureCount,
+        'errors': errors,
+        'summary': summary,
+        'total': validatedExpenses.length,
+      };
+    } catch (e) {
+      _setError('Batch import failed: $e');
+      log('❌ Batch import error: $e');
+      return {
+        'success': 0,
+        'failed': 0,
+        'errors': ['Failed to process batch: $e'],
+        'summary': '❌ Batch import failed: $e',
+        'total': 0,
+      };
+    }
+  }
+
+  /// Generate Excel template for bulk expense import
+  Future<String?> generateExcelTemplate() async {
+    try {
+      log('📋 Generating Excel template...');
+
+      // Convert categories to map format for template
+      final categoryMaps = _categories.map((cat) {
+        return {
+          'id': cat.id,
+          'name': cat.name,
+          'description': cat.description ?? '',
+        };
+      }).toList();
+
+      // Import template service dynamically
+      // This assumes ExcelTemplateService is available
+      // You may need to adjust based on your actual import
+      return null; // Will be implemented with proper service injection
+    } catch (e) {
+      _setError('Failed to generate template: $e');
+      log('❌ Template generation error: $e');
+      return null;
+    }
+  }
+
   /// Get payment history for an expense
   Future<List<ExpensePayment>> getPaymentHistory(String expenseId) async {
     try {

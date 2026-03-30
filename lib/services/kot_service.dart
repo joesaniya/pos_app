@@ -487,45 +487,20 @@ class KOTService {
         return _kotCache[kotId];
       }
 
-      // Fetch from database
+      // Fetch from database with nested relations (more efficient)
       final kotResponse = await supabase
           .from('kot_orders')
-          .select()
+          .select('*, kot_item_batches(*, kot_items(*))')
           .eq('id', kotId)
           .eq('business_id', businessId)
           .single();
 
       final kot = KOTOrder.fromJson(kotResponse);
 
-      // Fetch batches
-      final batchesResponse = await supabase
-          .from('kot_item_batches')
-          .select()
-          .eq('kot_id', kotId)
-          .order('batch_number');
-
-      final batches = <KOTBatch>[];
-      for (final batchData in batchesResponse) {
-        // Fetch items for this batch
-        final itemsResponse = await supabase
-            .from('kot_items')
-            .select()
-            .eq('batch_id', batchData['id']);
-
-        final items = (itemsResponse as List)
-            .map((i) => KOTItem.fromJson(i))
-            .toList();
-
-        final batch = KOTBatch.fromJson(batchData);
-        batches.add(batch.copyWith(items: items));
-      }
-
-      final kotWithBatches = kot.copyWith(batches: batches);
-
       // Cache
-      _kotCache[kotId] = kotWithBatches;
+      _kotCache[kotId] = kot;
 
-      return kotWithBatches;
+      return kot;
     } catch (e) {
       debugPrint('❌ Error getting KOT: $e');
       return null;
@@ -545,10 +520,10 @@ class KOTService {
 
       // Validate kitchenId - handle "all" or empty
       if (kitchenId.isEmpty || kitchenId.toLowerCase() == 'all') {
-        // Get all active KOTs for the business (any kitchen)
+        // Get all active KOTs for the business (any kitchen) with nested items
         final response = await supabase
             .from('kot_orders')
-            .select()
+            .select('*, kot_item_batches(*, kot_items(*))')
             .eq('business_id', businessId);
 
         final allOrders = (response as List)
@@ -567,7 +542,7 @@ class KOTService {
       // If kitchenId is provided and not "all", query specific kitchen
       final response = await supabase
           .from('kot_orders')
-          .select()
+          .select('*, kot_item_batches(*, kot_items(*))')
           .eq('business_id', businessId)
           .eq('primary_kitchen_id', kitchenId);
 

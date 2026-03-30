@@ -400,6 +400,167 @@ class InventoryRepository {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  BULK INSERT ITEMS — For Excel import
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Bulk insert multiple inventory items (e.g., from Excel import)
+  /// Uses transaction to ensure all-or-nothing insertion
+  /// Returns (successCount, failureCount, errors)
+  Future<(int, int, List<String>)> bulkInsertItems({
+    required List<InventoryItem> items,
+    required String businessId,
+    required String userUid,
+    required String userName,
+    required String userRole,
+  }) async {
+    int successCount = 0;
+    int failureCount = 0;
+    final List<String> errors = [];
+
+    if (items.isEmpty) {
+      return (0, 0, ['No items to insert']);
+    }
+
+    debugPrint('[InventoryRepo] Starting bulk insert: ${items.length} items');
+
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      // Prepare ALL items with IDs and timestamps
+      final itemsToInsert = items.map((item) {
+        final id = _uuid.v4();
+        return {
+          ...item.toJson(businessId),
+          'id': id,
+          'created_at': now,
+          'last_updated': now,
+          'is_active': true,
+        };
+      }).toList();
+
+      // ── Offline-first: Save to local database ──────────────────────────────
+      for (final itemData in itemsToInsert) {
+        try {
+          await _local.upsertEntity(
+            table: LocalDatabase.tInventory,
+            id: itemData['id'] as String,
+            businessId: businessId,
+            data: itemData,
+            syncStatus: _connectivity.isOnline
+                ? LocalDatabase.syncSynced
+                : LocalDatabase.syncPending,
+            action: LocalDatabase.actionCreate,
+          );
+          successCount++;
+        } catch (e) {
+          failureCount++;
+          errors.add(
+            'Failed to save locally: ${itemData['name'] ?? 'Unknown'} - $e',
+          );
+          debugPrint(
+            '[InventoryRepo] Local save error for ${itemData['name']}: $e',
+          );
+        }
+      }
+
+      // ── Online: Try to sync to Supabase ────────────────────────────────────
+      if (_connectivity.isOnline && successCount > 0) {
+        try {
+          // Insert all items in bulk
+          await _sb.from('inventory_items').insert(itemsToInsert);
+
+          // Create initial stock transactions for all items
+          final transactions = itemsToInsert.map((item) {
+            return {
+              'item_id': item['id'],
+              'business_id': businessId,
+              'transaction_type': 'stock_in',
+              'quantity': item['current_stock'],
+              'stock_before': 0,
+              'stock_after': item['current_stock'],
+              'unit': item['unit'],
+              'note': 'Bulk import initial stock',
+              'updated_by_uid': userUid,
+              'updated_by_name': userName,
+              'updated_by_role': userRole,
+              'supplier_id': isValidSupplierId(item['supplier_id'] as String?)
+                  ? item['supplier_id']
+                  : null,
+            };
+          }).toList();
+
+          await _sb.from('stock_transactions').insert(transactions);
+
+          debugPrint(
+            '[InventoryRepo] ✅ Successfully synced $successCount items to Supabase',
+          );
+
+          // Mark all as synced
+          for (final itemData in itemsToInsert) {
+            await _local.upsertEntity(
+              table: LocalDatabase.tInventory,
+              id: itemData['id'] as String,
+              businessId: businessId,
+              data: itemData,
+              syncStatus: LocalDatabase.syncSynced,
+              action: LocalDatabase.actionCreate,
+            );
+          }
+        } catch (e) {
+          debugPrint(
+            '[InventoryRepo] ⚠️ Online sync failed, items queued locally: $e',
+          );
+          errors.add('Online sync partial failure: $e (items saved locally)');
+
+          // Queue all items for sync retry
+          for (final itemData in itemsToInsert) {
+            try {
+              await _local.enqueue(
+                id: _uuid.v4(),
+                entityType: EntityType.inventoryItem,
+                entityId: itemData['id'] as String,
+                action: LocalDatabase.actionCreate,
+                payload: itemData,
+                businessId: businessId,
+              );
+            } catch (qe) {
+              debugPrint('[InventoryRepo] Queue error: $qe');
+            }
+          }
+        }
+      } else if (successCount > 0) {
+        // Offline: Queue all for sync
+        for (final itemData in itemsToInsert) {
+          try {
+            await _local.enqueue(
+              id: _uuid.v4(),
+              entityType: EntityType.inventoryItem,
+              entityId: itemData['id'] as String,
+              action: LocalDatabase.actionCreate,
+              payload: itemData,
+              businessId: businessId,
+            );
+          } catch (e) {
+            debugPrint('[InventoryRepo] Queue error: $e');
+          }
+        }
+      }
+
+      debugPrint(
+        '[InventoryRepo] Bulk insert complete: $successCount succeeded, $failureCount failed',
+      );
+      return (successCount, failureCount, errors);
+    } catch (e) {
+      debugPrint('[InventoryRepo] ❌ Bulk insert failed catastrophically: $e');
+      return (
+        successCount,
+        failureCount,
+        [...errors, 'Bulk insert failed: $e'],
+      );
+    }
+  }
+
   /// Cleanup: Unsubscribe from all realtime channels
   Future<void> unsubscribeAll() async {
     for (final channel in _subscriptions.values) {

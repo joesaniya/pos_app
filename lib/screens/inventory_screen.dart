@@ -9,6 +9,7 @@ import 'package:pos_app/providers/inventory_provider.dart';
 import 'package:pos_app/providers/supplier_provider.dart';
 import 'package:pos_app/screens/stock_notification_history_screen.dart';
 import 'package:pos_app/screens/supplier_screen.dart';
+import 'package:pos_app/screens/inventory_bulk_upload_screen.dart';
 import 'package:pos_app/screens/widgets/inventory_widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -185,6 +186,22 @@ class _InventoryBodyState extends State<_InventoryBody>
                       builder: (_) => const NotificationHistoryScreen(),
                     ),
                   ),
+                  onBulkUploadTap: () {
+                    final invProvider = context.read<InventoryProvider>();
+                    final suppProvider = context.read<SupplierProvider>();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MultiProvider(
+                          providers: [
+                            ChangeNotifierProvider.value(value: invProvider),
+                            ChangeNotifierProvider.value(value: suppProvider),
+                          ],
+                          child: const InventoryBulkUploadScreen(),
+                        ),
+                      ),
+                    );
+                  },
                   onSupplierTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SuppliersScreen()),
@@ -422,10 +439,12 @@ class _Header extends StatelessWidget {
   final int alertCount;
   final VoidCallback onNotifTap;
   final VoidCallback onSupplierTap;
+  final VoidCallback onBulkUploadTap;
   const _Header({
     required this.alertCount,
     required this.onNotifTap,
     required this.onSupplierTap,
+    required this.onBulkUploadTap,
   });
 
   @override
@@ -450,14 +469,39 @@ class _Header extends StatelessWidget {
         ),
         const Spacer(),
         GestureDetector(
-          onTap: onSupplierTap,
+          onTap: onBulkUploadTap,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
+              color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.upload_file_outlined, color: Colors.white, size: 15),
+                SizedBox(width: 5),
+                Text(
+                  'Bulk Upload',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: onSupplierTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: const Row(
               children: [

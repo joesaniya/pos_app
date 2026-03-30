@@ -932,12 +932,15 @@ class OrdersService {
     double? tipAmount,
     double? discountAmount,
   }) async {
+    final now = DateTime.now().toUtc().toIso8601String();
     final updateMap = <String, dynamic>{
+      'status': 'completed',
       'payment_status': 'paid',
       'payment_mode': mode.value,
       'paid_by_uid': paidByUid,
       'paid_by_name': paidByName,
-      'paid_at': DateTime.now().toUtc().toIso8601String(),
+      'paid_at': now,
+      'completed_at': now,
     };
 
     if (paymentRef != null && paymentRef.isNotEmpty) {

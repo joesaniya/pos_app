@@ -126,7 +126,9 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
                       pw.Text(
-                        _fmtDate(order.paidAt ?? order.completedAt ?? order.createdAt),
+                        _fmtDate(
+                          order.paidAt ?? order.completedAt ?? order.createdAt,
+                        ),
                         style: const pw.TextStyle(
                           fontSize: 10,
                           color: PdfColors.grey600,
@@ -214,44 +216,46 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               pw.Divider(color: PdfColors.grey300),
 
               // ── Items list ──────────────────────────────────────
-              ...order.items.map((item) => pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 3),
-                    child: pw.Row(
-                      children: [
-                        pw.Expanded(
-                          flex: 5,
-                          child: pw.Text(
-                            item.itemName,
-                            style: const pw.TextStyle(fontSize: 10),
-                          ),
+              ...order.items.map(
+                (item) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(vertical: 3),
+                  child: pw.Row(
+                    children: [
+                      pw.Expanded(
+                        flex: 5,
+                        child: pw.Text(
+                          item.itemName,
+                          style: const pw.TextStyle(fontSize: 10),
                         ),
-                        pw.Expanded(
-                          flex: 1,
-                          child: pw.Text(
-                            '${item.quantity}',
-                            textAlign: pw.TextAlign.center,
-                            style: const pw.TextStyle(fontSize: 10),
-                          ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Text(
+                          '${item.quantity}',
+                          textAlign: pw.TextAlign.center,
+                          style: const pw.TextStyle(fontSize: 10),
                         ),
-                        pw.Expanded(
-                          flex: 2,
-                          child: pw.Text(
-                            _fmt(item.itemPrice),
-                            textAlign: pw.TextAlign.right,
-                            style: const pw.TextStyle(fontSize: 10),
-                          ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Text(
+                          _fmt(item.itemPrice),
+                          textAlign: pw.TextAlign.right,
+                          style: const pw.TextStyle(fontSize: 10),
                         ),
-                        pw.Expanded(
-                          flex: 2,
-                          child: pw.Text(
-                            _fmt(item.subtotal),
-                            textAlign: pw.TextAlign.right,
-                            style: const pw.TextStyle(fontSize: 10),
-                          ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Text(
+                          _fmt(item.subtotal),
+                          textAlign: pw.TextAlign.right,
+                          style: const pw.TextStyle(fontSize: 10),
                         ),
-                      ],
-                    ),
-                  )),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
               pw.Divider(color: PdfColors.grey300),
               pw.SizedBox(height: 4),
@@ -259,8 +263,7 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               // ── Totals ──────────────────────────────────────────
               _pdfRow('Subtotal', _fmt(order.subtotal)),
               pw.SizedBox(height: 3),
-              _pdfRow(
-                  'Tax (${order.taxRate.toInt()}%)', _fmt(order.taxAmount)),
+              _pdfRow('Tax (${order.taxRate.toInt()}%)', _fmt(order.taxAmount)),
               if (order.discountAmount > 0) ...[
                 pw.SizedBox(height: 3),
                 _pdfRow('Discount', '- ${_fmt(order.discountAmount)}'),
@@ -383,13 +386,14 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       final bytes = await _generatePdf();
       await Printing.layoutPdf(
         onLayout: (_) async => bytes,
-        name: '${widget.order.billNumber ?? "Bill"}_${widget.order.orderNumber}',
+        name:
+            '${widget.order.billNumber ?? "Bill"}_${widget.order.orderNumber}',
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Print failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _generatingPdf = false);
@@ -407,13 +411,54 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Share failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Share failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _generatingPdf = false);
     }
+  }
+
+  Future<void> _handleRebill() async {
+    // Show payment sheet to generate new QR for additional payment
+    if (!mounted) return;
+
+    Navigator.pop(context); // Close bill preview
+
+    // Allow staff to collect additional payment
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Generate New Payment QR',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          'This will create a new payment QR for this order. Useful if customer needs to pay additional amount or if previous payment failed.',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Return to orders page
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: BC.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Go Back to Orders'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ══════════════════════════════════════════════════════════
@@ -546,24 +591,48 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
                     const SizedBox(height: 12),
 
-                    // New order button
+                    // Rebill button (for completed/paid orders)
+                    if (order.paymentStatus == 'paid' &&
+                        order.status.value == 'completed')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _handleRebill(),
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text(
+                            'Generate New Payment QR',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: BC.primary,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 12),
+
+                    // Back to Orders button
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         onPressed: () {
-                          Navigator.of(context)
-                              .popUntil((route) => route.isFirst);
+                          Navigator.of(
+                            context,
+                          ).popUntil((route) => route.isFirst);
                         },
-                        icon: const Icon(Icons.add_rounded, size: 18),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 18),
                         label: const Text(
                           'Back to Orders',
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          side: BorderSide(
-                            color: BC.primary.withOpacity(0.4),
-                          ),
+                          side: BorderSide(color: BC.primary.withOpacity(0.4)),
                           foregroundColor: BC.primary,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -766,16 +835,10 @@ class _ReceiptCard extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: BC.textSec),
                   ),
                   if (order.customerPhone != null) ...[
-                    const Text(
-                      ' · ',
-                      style: TextStyle(color: BC.textMute),
-                    ),
+                    const Text(' · ', style: TextStyle(color: BC.textMute)),
                     Text(
                       order.customerPhone!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: BC.textMute,
-                      ),
+                      style: const TextStyle(fontSize: 12, color: BC.textMute),
                     ),
                   ],
                 ],
@@ -783,7 +846,12 @@ class _ReceiptCard extends StatelessWidget {
             ),
           ],
 
-          const Divider(height: 1, color: BC.divider, indent: 16, endIndent: 16),
+          const Divider(
+            height: 1,
+            color: BC.divider,
+            indent: 16,
+            endIndent: 16,
+          ),
 
           // ── Items ────────────────────────────────────────────
           Padding(
@@ -832,9 +900,7 @@ class _ReceiptCard extends StatelessWidget {
             ),
           ),
 
-          ...order.items.map(
-            (item) => _ItemRow(item: item, fmtFn: fmtFn),
-          ),
+          ...order.items.map((item) => _ItemRow(item: item, fmtFn: fmtFn)),
 
           const Divider(height: 1, color: BC.divider),
 
@@ -869,11 +935,7 @@ class _ReceiptCard extends StatelessWidget {
                   ),
                 ],
                 const Divider(height: 16, color: BC.divider),
-                _TotalRow(
-                  'Grand Total',
-                  '₹ ${fmtFn(order.grandTotal)}',
-                  true,
-                ),
+                _TotalRow('Grand Total', '₹ ${fmtFn(order.grandTotal)}', true),
               ],
             ),
           ),
@@ -951,10 +1013,7 @@ class _ReceiptCard extends StatelessWidget {
                     const SizedBox(width: 4),
                     Text(
                       'Served by ${order.createdByName}',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: BC.textMute,
-                      ),
+                      style: const TextStyle(fontSize: 10, color: BC.textMute),
                     ),
                     if (order.paidByName != null) ...[
                       const Text(
@@ -981,7 +1040,7 @@ class _ReceiptCard extends StatelessWidget {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                
+
                 // ── QR Code Section ─────────────────────────────
                 Consumer<QrCodeProvider>(
                   builder: (context, prov, child) {
@@ -991,11 +1050,14 @@ class _ReceiptCard extends StatelessWidget {
                         child: SizedBox(
                           height: 24,
                           width: 24,
-                          child: CircularProgressIndicator(color: BC.primary, strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            color: BC.primary,
+                            strokeWidth: 2,
+                          ),
                         ),
                       );
                     }
-                    
+
                     if (prov.hasQrCode) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 24),
@@ -1039,7 +1101,7 @@ class _ReceiptCard extends StatelessWidget {
                         ),
                       );
                     }
-                    
+
                     return const SizedBox.shrink();
                   },
                 ),
@@ -1061,8 +1123,9 @@ class _ItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final vegColor =
-        item.isVeg ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C);
+    final vegColor = item.isVeg
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFB71C1C);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1274,10 +1337,7 @@ class _BigActionButton extends StatelessWidget {
           ),
           Text(
             sublabel,
-            style: TextStyle(
-              fontSize: 10,
-              color: color.withOpacity(0.6),
-            ),
+            style: TextStyle(fontSize: 10, color: color.withOpacity(0.6)),
           ),
         ],
       ),

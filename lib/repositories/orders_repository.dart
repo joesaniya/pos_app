@@ -796,11 +796,13 @@ class OrdersRepository {
     final now = DateTime.now().toUtc().toIso8601String();
     final payload = <String, dynamic>{
       'id': orderId,
+      'status': 'completed',//bill payment
       'payment_status': 'paid',
       'payment_mode': mode.value,
       'paid_by_uid': paidByUid,
       'paid_by_name': paidByName,
       'paid_at': now,
+      'completed_at': now,
       'updated_at': now,
       if (paymentRef != null) 'payment_ref': paymentRef,
       if (tipAmount != null) 'tip_amount': tipAmount,

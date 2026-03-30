@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
@@ -409,7 +411,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           return _ExpenseListItem(
             expense: expenses[index],
             onTap: () {
-              // Navigate to expense detail (read-only view)
+              log('Tapped on expense: ${expenses[index].toJson()}');
               Navigator.push(
                 context,
                 MaterialPageRoute(

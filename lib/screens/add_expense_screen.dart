@@ -32,6 +32,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   DateTime _selectedExpenseDate = DateTime.now();
   DateTime? _selectedInvoiceDate;
   String _selectedExpenseType = 'general';
+  ExpensePaymentStatus _selectedPaymentStatus = ExpensePaymentStatus.unpaid;
 
   bool _isLoading = false;
   Expense? _existingExpense; // For edit mode
@@ -100,6 +101,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     _selectedExpenseDate = expense.expenseDate;
     _selectedInvoiceDate = expense.invoiceDate;
     _selectedExpenseType = expense.expenseType.dbValue;
+    _selectedPaymentStatus = expense.paymentStatus;
   }
 
   @override
@@ -204,6 +206,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         if (success && mounted) {
           _showSuccessSnackBar('Expense updated successfully!');
           log('✅ Expense updated: ${_existingExpense!.id}');
+
+          // Update payment status if changed
+          if (_existingExpense!.paymentStatus != _selectedPaymentStatus) {
+            await provider.updateExpensePaymentStatus(
+              expenseId: _existingExpense!.id,
+              newStatus: _selectedPaymentStatus,
+            );
+          }
+
           Navigator.pop(context);
         } else if (mounted) {
           _showErrorSnackBar('Failed to update expense');
@@ -253,6 +264,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         if (newExpense != null && mounted) {
           _showSuccessSnackBar('Expense added successfully!');
           log('✅ New expense created: ${newExpense.id}');
+
+          // Set payment status if not unpaid (default)
+          if (_selectedPaymentStatus != ExpensePaymentStatus.unpaid) {
+            await provider.updateExpensePaymentStatus(
+              expenseId: newExpense.id,
+              newStatus: _selectedPaymentStatus,
+            );
+          }
+
           Navigator.pop(context);
         } else if (mounted) {
           _showErrorSnackBar('Failed to add expense');
@@ -389,6 +409,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       ),
                     ],
                   ),
+                  SizedBox(height: 16.h),
+
+                  // Payment Status
+                  _buildSectionTitle('Payment Status'),
+                  SizedBox(height: 12.h),
+                  _buildPaymentStatusDropdown(),
                   SizedBox(height: 16.h),
 
                   // Date Section
@@ -753,6 +779,60 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       }).toList(),
       onChanged: (value) {
         setState(() => _selectedExpenseType = value ?? 'general');
+      },
+    );
+  }
+
+  Widget _buildPaymentStatusDropdown() {
+    final statuses = [
+      (ExpensePaymentStatus.unpaid, 'Unpaid (Red)', AppColors.error),
+      (ExpensePaymentStatus.partial, 'Partial (Orange)', AppColors.warning),
+      (ExpensePaymentStatus.paid, 'Paid (Green)', AppColors.success),
+    ];
+
+    return DropdownButtonFormField<ExpensePaymentStatus>(
+      initialValue: _selectedPaymentStatus,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: 'Payment Status',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.r),
+          borderSide: BorderSide(color: AppColors.lightNeutral300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.r),
+          borderSide: BorderSide(color: AppColors.lightNeutral300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.r),
+          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
+        ),
+        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
+      ),
+      items: statuses.map((item) {
+        final (status, label, color) = item;
+        return DropdownMenuItem(
+          value: status,
+          child: Row(
+            children: [
+              Container(
+                width: 12.w,
+                height: 12.h,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2.r),
+                ),
+              ),
+              SizedBox(width: 8.w),
+              Text(label, style: AppTheme.bodySmall),
+            ],
+          ),
+        );
+      }).toList(),
+      onChanged: (value) {
+        setState(
+          () => _selectedPaymentStatus = value ?? ExpensePaymentStatus.unpaid,
+        );
       },
     );
   }

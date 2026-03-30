@@ -23,6 +23,8 @@ class ExpenseDetailScreen extends StatefulWidget {
 }
 
 class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
+  bool _isUpdatingStatus = false;
+
   @override
   void initState() {
     super.initState();
@@ -32,6 +34,36 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   void _loadExpenseDetails() {
     final provider = context.read<ExpenseProvider>();
     provider.loadExpenseDetails(widget.expenseId);
+  }
+
+  Future<void> _updatePaymentStatus(
+    ExpenseProvider provider,
+    ExpensePaymentStatus newStatus,
+  ) async {
+    setState(() => _isUpdatingStatus = true);
+    try {
+      final success = await provider.updateExpensePaymentStatus(
+        expenseId: widget.expenseId,
+        newStatus: newStatus,
+      );
+
+      if (success && mounted) {
+        // Reload expense details to ensure UI fully syncs with updated status
+        await provider.loadExpenseDetails(widget.expenseId);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Status updated to ${newStatus.label}'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+      }
+    }
   }
 
   @override
@@ -112,7 +144,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 SizedBox(height: 16.h),
 
                 // Details Section
-                _buildDetailsSection(expense, dateFormat),
+                _buildDetailsSection(expense, dateFormat.format),
                 SizedBox(height: 16.h),
 
                 // Additional Info
@@ -222,35 +254,184 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   // ════════════════════════════════════════════════════════════════════════════
 
   Widget _buildStatusSection(Expense expense) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16.w),
-      padding: EdgeInsets.all(16.w),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.r),
-        border: Border.all(color: AppColors.lightNeutral300),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Status Information',
-            style: AppTheme.labelLarge.copyWith(fontWeight: FontWeight.w600),
+    return Consumer<ExpenseProvider>(
+      builder: (context, provider, _) {
+        final isPaid = expense.paymentStatus == ExpensePaymentStatus.paid;
+        final isPartial = expense.paymentStatus == ExpensePaymentStatus.partial;
+
+        return Container(
+          margin: EdgeInsets.symmetric(horizontal: 16.w),
+          padding: EdgeInsets.all(16.w),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12.r),
+            border: Border.all(color: AppColors.lightNeutral300),
           ),
-          SizedBox(height: 12.h),
-          _buildInfoRow(
-            'Payment Status',
-            expense.paymentStatus.label,
-            expense.paymentStatus.color,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Payment Status',
+                style: AppTheme.labelLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 12.h),
+              // Current Status Display - Shows Completed when paid
+              Container(
+                padding: EdgeInsets.all(12.w),
+                decoration: BoxDecoration(
+                  color: isPaid
+                      ? AppColors.success.withValues(alpha: 0.1)
+                      : expense.paymentStatus.color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8.r),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isPaid ? Icons.check_circle : Icons.pending,
+                      color: isPaid
+                          ? AppColors.success
+                          : expense.paymentStatus.color,
+                      size: 20.sp,
+                    ),
+                    SizedBox(width: 8.w),
+                    Expanded(
+                      child: Text(
+                        'Current: ${isPaid ? "Completed" : expense.paymentStatus.label}',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: isPaid
+                              ? AppColors.success
+                              : expense.paymentStatus.color,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Only show action buttons if NOT paid
+              if (!isPaid) ...[
+                SizedBox(height: 12.h),
+                // Status Change Buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isUpdatingStatus
+                            ? null
+                            : () => _updatePaymentStatus(
+                                provider,
+                                ExpensePaymentStatus.paid,
+                              ),
+                        icon: const Icon(Icons.done),
+                        label: Text(
+                          _isUpdatingStatus &&
+                                  expense.paymentStatus ==
+                                      ExpensePaymentStatus.paid
+                              ? 'Updating...'
+                              : 'Mark Paid',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.success,
+                          foregroundColor: Colors.white,
+                          disabledForegroundColor: AppColors.textTertiary,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 8.w),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isUpdatingStatus
+                            ? null
+                            : () => _updatePaymentStatus(
+                                provider,
+                                ExpensePaymentStatus.unpaid,
+                              ),
+                        icon: const Icon(Icons.close),
+                        label: Text(
+                          _isUpdatingStatus &&
+                                  expense.paymentStatus ==
+                                      ExpensePaymentStatus.unpaid
+                              ? 'Updating...'
+                              : 'Mark Unpaid',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.error,
+                          foregroundColor: Colors.white,
+                          disabledForegroundColor: AppColors.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Show "Complete Payment" only for partial payments
+                if (isPartial) ...[
+                  SizedBox(height: 12.h),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _isUpdatingStatus
+                          ? null
+                          : () => _updatePaymentStatus(
+                              provider,
+                              ExpensePaymentStatus.paid,
+                            ),
+                      icon: const Icon(Icons.check_circle),
+                      label: const Text('Complete Payment'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.warning,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ] else ...[
+                // When paid, show completion info
+                SizedBox(height: 12.h),
+                Container(
+                  padding: EdgeInsets.all(12.w),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8.r),
+                    border: Border.all(color: AppColors.success),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        color: AppColors.success,
+                        size: 20.sp,
+                      ),
+                      SizedBox(width: 8.w),
+                      Expanded(
+                        child: Text(
+                          'Payment completed - Expense is finalized',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              SizedBox(height: 12.h),
+              Divider(color: AppColors.lightNeutral300),
+              SizedBox(height: 12.h),
+              _buildInfoRow(
+                'Expense Status',
+                isPaid ? 'Completed' : expense.status.label,
+                expense.status.color,
+              ),
+            ],
           ),
-          SizedBox(height: 12.h),
-          _buildInfoRow(
-            'Expense Status',
-            expense.status.label,
-            expense.status.color,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -502,7 +683,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           ),
           if (expense.updatedByName != null) ...[
             SizedBox(height: 12.h),
-            _buildDetailRow('Updated By', expense.updatedByName!),
+            _buildDetailRow('Updated By', expense.updatedByName ?? ''),
             SizedBox(height: 12.h),
             _buildDetailRow(
               'Updated At',

@@ -200,6 +200,9 @@ class ExpenseProvider extends ChangeNotifier {
       _clearError();
       _expenses = await _repository.getExpensesByBusiness(businessId);
 
+      // Sync mismatched payment and expense statuses for data consistency
+      await _syncMismatchedStatuses();
+
       // Client-side filtering if needed
       if (filterStatus != null) {
         _expenses = _expenses
@@ -239,11 +242,92 @@ class ExpenseProvider extends ChangeNotifier {
       _setLoading(true);
       _clearError();
       _selectedExpense = await _repository.getExpenseById(expenseId);
+
+      // Sync mismatch if payment is paid but expense status is not
+      if (_selectedExpense != null &&
+          _selectedExpense!.paymentStatus == ExpensePaymentStatus.paid &&
+          _selectedExpense!.status != ExpenseStatus.paid) {
+        log('🔄 Syncing expense status: ${_selectedExpense!.id}');
+
+        try {
+          final updates = <String, dynamic>{
+            'status': ExpenseStatus.paid.dbValue,
+          };
+          await _repository.updateExpense(
+            expenseId: _selectedExpense!.id,
+            updates: updates,
+          );
+
+          // Update selected expense
+          _selectedExpense = _selectedExpense!.copyWith(
+            status: ExpenseStatus.paid,
+          );
+
+          // Also update in main list if present
+          final index = _expenses.indexWhere(
+            (e) => e.id == _selectedExpense!.id,
+          );
+          if (index >= 0) {
+            _expenses[index] = _selectedExpense!;
+          }
+
+          log('✅ Expense status synchronized: ${_selectedExpense!.id}');
+        } catch (e) {
+          log('⚠️ Failed to sync expense status: $e');
+        }
+      }
+
       notifyListeners();
     } catch (e) {
       _setError('Failed to load expense details: $e');
     } finally {
       _setLoading(false);
+    }
+  }
+
+  /// Sync mismatched payment and expense statuses for data consistency
+  /// If payment_status = Paid but status != Paid, update status to Paid
+  Future<void> _syncMismatchedStatuses() async {
+    final mismatched = <Expense>[];
+
+    for (final expense in _expenses) {
+      // Check if payment is paid but expense status is not paid
+      if (expense.paymentStatus == ExpensePaymentStatus.paid &&
+          expense.status != ExpenseStatus.paid) {
+        mismatched.add(expense);
+      }
+    }
+
+    // If mismatches found, sync them
+    if (mismatched.isNotEmpty) {
+      log(
+        '🔄 Found ${mismatched.length} expenses with mismatched statuses - syncing...',
+      );
+
+      for (final expense in mismatched) {
+        try {
+          // Update in database
+          final updates = <String, dynamic>{
+            'status': ExpenseStatus.paid.dbValue,
+          };
+          await _repository.updateExpense(
+            expenseId: expense.id,
+            updates: updates,
+          );
+
+          // Update local cache
+          final index = _expenses.indexWhere((e) => e.id == expense.id);
+          if (index >= 0) {
+            _expenses[index] = _expenses[index].copyWith(
+              status: ExpenseStatus.paid,
+            );
+          }
+
+          log('✅ Synced expense status: ${expense.id}');
+        } catch (e) {
+          log('⚠️ Failed to sync expense ${expense.id}: $e');
+        }
+      }
     }
   }
 
@@ -280,7 +364,7 @@ class ExpenseProvider extends ChangeNotifier {
       // Get current user credentials from storage
       final userData = await StorageService.instance.getUserData();
       final createdByUid = userData['uid'] ?? '';
-      final createdByName = userData['displayName'] ?? 'Unknown';
+      final createdByName = userData['name'] ?? 'Unknown';
 
       log('👤 Created by: $createdByName ($createdByUid)');
 
@@ -383,6 +467,124 @@ class ExpenseProvider extends ChangeNotifier {
     }
   }
 
+  /// Update expense payment status with automatic expense status synchronization
+  Future<bool> updateExpensePaymentStatus({
+    required String expenseId,
+    required ExpensePaymentStatus newStatus,
+  }) async {
+    try {
+      await _ensureInitialized();
+      _clearError();
+
+      // Determine automatic expense status based on payment status
+      final expenseStatus = newStatus == ExpensePaymentStatus.paid
+          ? ExpenseStatus.paid
+          : ExpenseStatus.pending;
+
+      // Find the expense to get its amount
+      final expenseIndex = _expenses.indexWhere((e) => e.id == expenseId);
+      final expense = expenseIndex >= 0
+          ? _expenses[expenseIndex]
+          : _selectedExpense;
+
+      // Prepare updates with payment amount and progress
+      final updates = <String, dynamic>{
+        'payment_status': newStatus.dbValue,
+        'status': expenseStatus.dbValue,
+      };
+
+      // When payment is marked as paid, set paid_amount to full amount
+      if (newStatus == ExpensePaymentStatus.paid && expense != null) {
+        updates['paid_amount'] = expense.amount;
+        updates['remaining_amount'] = 0.0;
+        log('💰 Setting paid_amount: ${expense.amount}, remaining: 0.0');
+      } else if (newStatus == ExpensePaymentStatus.unpaid && expense != null) {
+        // When marked as unpaid, reset payment amounts
+        updates['paid_amount'] = 0.0;
+        updates['remaining_amount'] = expense.amount;
+        log('💰 Resetting paid_amount to 0.0, remaining: ${expense.amount}');
+      }
+
+      await _repository.updateExpense(expenseId: expenseId, updates: updates);
+
+      // Update local cache
+      if (expenseIndex >= 0) {
+        _expenses[expenseIndex] = _expenses[expenseIndex].copyWith(
+          paymentStatus: newStatus,
+          status: expenseStatus,
+          paidAmount: newStatus == ExpensePaymentStatus.paid
+              ? _expenses[expenseIndex].amount
+              : 0.0,
+          remainingAmount: newStatus == ExpensePaymentStatus.paid
+              ? 0.0
+              : _expenses[expenseIndex].amount,
+        );
+        notifyListeners();
+      }
+
+      // Update selected expense if viewing
+      if (_selectedExpense?.id == expenseId) {
+        _selectedExpense = _selectedExpense?.copyWith(
+          paymentStatus: newStatus,
+          status: expenseStatus,
+          paidAmount: newStatus == ExpensePaymentStatus.paid
+              ? _selectedExpense!.amount
+              : 0.0,
+          remainingAmount: newStatus == ExpensePaymentStatus.paid
+              ? 0.0
+              : _selectedExpense!.amount,
+        );
+        notifyListeners();
+      }
+
+      log('✅ Payment status updated: ${newStatus.label}');
+      log('✅ Expense status auto-synced: ${expenseStatus.label}');
+      log(
+        '✅ Progress bar updated: ${_selectedExpense?.progressPercentage ?? 0}%',
+      );
+      return true;
+    } catch (e) {
+      _setError('Failed to update payment status: $e');
+      log('❌ Status update error: $e');
+      return false;
+    }
+  }
+
+  /// Update expense status (pending/approved)
+  Future<bool> updateExpenseStatus({
+    required String expenseId,
+    required ExpenseStatus newStatus,
+  }) async {
+    try {
+      await _ensureInitialized();
+      _clearError();
+
+      final updates = <String, dynamic>{'status': newStatus.dbValue};
+
+      await _repository.updateExpense(expenseId: expenseId, updates: updates);
+
+      // Update local cache
+      final index = _expenses.indexWhere((e) => e.id == expenseId);
+      if (index >= 0) {
+        _expenses[index] = _expenses[index].copyWith(status: newStatus);
+        notifyListeners();
+      }
+
+      // Update selected expense if viewing
+      if (_selectedExpense?.id == expenseId) {
+        _selectedExpense = _selectedExpense?.copyWith(status: newStatus);
+        notifyListeners();
+      }
+
+      log('✅ Expense status updated: ${newStatus.label}');
+      return true;
+    } catch (e) {
+      _setError('Failed to update expense status: $e');
+      log('❌ Status update error: $e');
+      return false;
+    }
+  }
+
   /// Update an existing expense
   Future<bool> updateExpense({
     required String expenseId,
@@ -404,7 +606,8 @@ class ExpenseProvider extends ChangeNotifier {
         updates['title'] = title;
       }
       if (categoryId != null) {
-        updates['category_id'] = categoryId;
+        updates['expense_category_id'] =
+            categoryId; // Fixed: column name is expense_category_id
       }
       if (vendorName != null) {
         updates['vendor_name'] = vendorName;
@@ -500,7 +703,7 @@ class ExpenseProvider extends ChangeNotifier {
       // Get current user credentials from storage
       final userData = await StorageService.instance.getUserData();
       final recordedByUid = userData['uid'] ?? '';
-      final recordedByName = userData['displayName'] ?? 'Unknown';
+      final recordedByName = userData['name'] ?? 'Unknown';
 
       final payment = await _repository.recordPayment(
         expenseId: expenseId,

@@ -706,6 +706,9 @@ class Expense {
     double? amount,
     DateTime? expenseDate,
     ExpenseStatus? status,
+    ExpensePaymentStatus? paymentStatus,
+    double? paidAmount,
+    double? remainingAmount,
     String? notes,
   }) {
     return Expense(
@@ -723,9 +726,9 @@ class Expense {
       dueDate: dueDate,
       paymentDate: paymentDate,
       status: status ?? this.status,
-      paymentStatus: paymentStatus,
-      paidAmount: paidAmount,
-      remainingAmount: remainingAmount,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paidAmount: paidAmount ?? this.paidAmount,
+      remainingAmount: remainingAmount ?? this.remainingAmount,
       invoiceNumber: invoiceNumber,
       invoiceDate: invoiceDate,
       gstAmount: gstAmount,

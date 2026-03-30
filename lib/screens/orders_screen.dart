@@ -111,6 +111,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
             ),
           ),
           floatingActionButton: FloatingActionButton.extended(
+            heroTag: null,
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const NewOrderScreen()),

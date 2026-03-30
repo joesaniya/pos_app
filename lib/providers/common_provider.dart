@@ -3,6 +3,7 @@ import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/create_account_provider.dart';
 import 'package:pos_app/providers/dashboard_provider.dart';
 import 'package:pos_app/providers/employee_management_provider.dart';
+import 'package:pos_app/providers/expense_provider.dart';
 import 'package:pos_app/providers/inventory_provider.dart';
 import 'package:pos_app/providers/menu_provider.dart';
 import 'package:pos_app/providers/onboard_provider.dart';
@@ -49,6 +50,7 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => SupabaseMenuProvider()),
     ChangeNotifierProvider(create: (_) => InventoryProvider()),
     ChangeNotifierProvider(create: (_) => EmployeeManagementProvider()),
+    ChangeNotifierProvider(create: (_) => ExpenseProvider()),
     ChangeNotifierProvider(create: (_) => ProfileProvider()),
     ChangeNotifierProvider(create: (_) => CreateAccountProvider()),
     ChangeNotifierProvider(create: (_) => QrCodeProvider()),

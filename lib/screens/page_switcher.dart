@@ -13,6 +13,7 @@ import 'orders_screen.dart';
 import 'package:pos_app/screens/subscription_expired_screen.dart';
 import 'menu_screen.dart';
 import 'inventory_screen.dart';
+import 'expenses_screen.dart';
 
 class PageSwitcher extends StatefulWidget {
   const PageSwitcher({Key? key}) : super(key: key);
@@ -38,7 +39,9 @@ class _PageSwitcherState extends State<PageSwitcher> {
         if (authProvider.subscriptionExpired) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => const SubscriptionExpiredScreen()),
+            MaterialPageRoute(
+              builder: (_) => const SubscriptionExpiredScreen(),
+            ),
             (route) => false,
           );
           return;
@@ -117,7 +120,8 @@ class _PageSwitcherState extends State<PageSwitcher> {
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const SubscriptionExpiredScreen()),
+                  builder: (_) => const SubscriptionExpiredScreen(),
+                ),
                 (route) => false,
               );
             }
@@ -154,6 +158,10 @@ class _PageSwitcherState extends State<PageSwitcher> {
                         const MenuScreen(),
                         if (navigationProvider.canAccessInventory)
                           const InventoryScreen()
+                        else
+                          const SizedBox.shrink(),
+                        if (navigationProvider.canAccessExpenses)
+                          const ExpensesScreen()
                         else
                           const SizedBox.shrink(),
                         const ProfileScreen(),
@@ -237,12 +245,20 @@ class BottomNavBar extends StatelessWidget {
                       isSelected: navigationProvider.selectedIndex == 4,
                       onTap: () => navigationProvider.setSelectedIndex(4),
                     ),
+                  if (navigationProvider.canAccessExpenses)
+                    _NavItem(
+                      index: 5,
+                      icon: Icons.receipt,
+                      label: 'Expenses',
+                      isSelected: navigationProvider.selectedIndex == 5,
+                      onTap: () => navigationProvider.setSelectedIndex(5),
+                    ),
                   _NavItem(
-                    index: 5,
+                    index: 6,
                     icon: Icons.person,
                     label: 'Profile',
-                    isSelected: navigationProvider.selectedIndex == 5,
-                    onTap: () => navigationProvider.setSelectedIndex(5),
+                    isSelected: navigationProvider.selectedIndex == 6,
+                    onTap: () => navigationProvider.setSelectedIndex(6),
                   ),
                 ],
               ),
@@ -304,8 +320,7 @@ class _NavItem extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontSize: 9,
-                  fontWeight:
-                      isSelected ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                   color: isSelected ? AppColors.primary : Colors.grey,
                 ),
                 overflow: TextOverflow.ellipsis,

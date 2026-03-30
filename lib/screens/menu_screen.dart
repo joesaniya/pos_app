@@ -83,6 +83,7 @@ class _MenuScreenState extends State<MenuScreen> {
           log('User role: ${provider.userRole}');
           if (!_canEdit(provider.userRole)) return const SizedBox.shrink();
           return FloatingActionButton.extended(
+            heroTag: null,
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const AddCategoryScreen()),

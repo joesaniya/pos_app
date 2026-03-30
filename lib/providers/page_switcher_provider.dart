@@ -16,7 +16,21 @@ class PageSwitcherProvider extends ChangeNotifier {
     'owner',
   ];
 
-  bool get canAccessInventory => _inventoryAllowedRoles.contains(_role.toLowerCase());
+  // Roles that can access Expenses
+  static const List<String> _expensesAllowedRoles = [
+    'system',
+    'admin',
+    'manager',
+    'owner',
+    'accountant',
+    'finance',
+  ];
+
+  bool get canAccessInventory =>
+      _inventoryAllowedRoles.contains(_role.toLowerCase());
+
+  bool get canAccessExpenses =>
+      _expensesAllowedRoles.contains(_role.toLowerCase());
 
   Future<void> loadRole() async {
     final data = await StorageService.instance.getUserData();
@@ -27,6 +41,8 @@ class PageSwitcherProvider extends ChangeNotifier {
   void setSelectedIndex(int index) {
     // Guard: if server tries to go to inventory (index 4), block it
     if (index == 4 && !canAccessInventory) return;
+    // Guard: if server tries to go to expenses (index 5), block it
+    if (index == 5 && !canAccessExpenses) return;
     _selectedIndex = index;
     notifyListeners();
   }

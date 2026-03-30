@@ -8,9 +8,11 @@ import 'package:pos_app/screens/orders_bill_preview_screen.dart';
 import 'package:pos_app/screens/sheet/payment_sheet.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/inventory_provider.dart';
 import 'new_order_screen.dart';
+import 'package:pos_app/screens/kitchen_display_screen.dart';
 
 // ── Color palette ──────────────────────────────────────────────────────────────
 class OC {
@@ -84,6 +86,44 @@ class _OrdersScreenState extends State<OrdersScreen> {
     });
   }
 
+  Future<void> _navigateToKitchenDisplay() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final businessId = prefs.getString('businessId') ?? '';
+
+      if (businessId.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Business ID not found. Please log in again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => KitchenDisplayScreen(
+              businessId: businessId,
+              kitchenId: 'all', // or fetch from settings
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error navigating to KDS: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<OrdersProvider>(
@@ -93,7 +133,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           body: SafeArea(
             child: Column(
               children: [
-                _Header(prov: prov),
+                _Header(prov: prov, onNavigateToKDS: _navigateToKitchenDisplay),
                 // Payment alert banner
                 if (prov.pendingPaymentCount > 0)
                   _PaymentAlertBanner(count: prov.pendingPaymentCount),
@@ -227,7 +267,8 @@ class _PaymentAlertBanner extends StatelessWidget {
 // ── Header ─────────────────────────────────────────────────────────────────────
 class _Header extends StatelessWidget {
   final OrdersProvider prov;
-  const _Header({required this.prov});
+  final VoidCallback onNavigateToKDS;
+  const _Header({required this.prov, required this.onNavigateToKDS});
 
   @override
   Widget build(BuildContext context) {
@@ -270,6 +311,41 @@ class _Header extends StatelessWidget {
                   style: const TextStyle(fontSize: 11, color: OC.textSec),
                 ),
               ],
+            ),
+          ),
+          // Kitchen Display System button
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onNavigateToKDS,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('🍳', style: TextStyle(fontSize: 18)),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'KDS',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ],

@@ -407,7 +407,7 @@ class ExpenseProvider extends ChangeNotifier {
     }
   }
 
-  /// Create expense from bill upload
+  /// Create expense from bill upload with auto payment marking
   Future<Expense?> createExpenseFromBill({
     required String categoryId,
     required String vendorName,
@@ -417,6 +417,8 @@ class ExpenseProvider extends ChangeNotifier {
     required int billFileSize,
     String? invoiceNumber,
     DateTime? expenseDate,
+    String? description,
+    double? gstAmount,
   }) async {
     try {
       // Get category name from categories list
@@ -445,21 +447,49 @@ class ExpenseProvider extends ChangeNotifier {
           : 'Bill from $vendorName';
 
       // Create description with bill info
-      final description =
+      final billDescription =
+          description ??
           'Bill: $billFileName (${(billFileSize / 1024).toStringAsFixed(2)} KB)';
 
-      // Delegate to createExpense
-      return createExpense(
+      // 1️⃣ Create the expense (initially unpaid)
+      final newExpense = await createExpense(
         title: title,
         expenseNumber: expenseNumber,
         categoryId: categoryId,
         categoryName: selectedCategory.name,
         vendorName: vendorName,
         amount: amount,
-        expenseDate: expenseDate,
-        description: description,
+        expenseDate: expenseDate ?? DateTime.now(),
+        description: billDescription,
         invoiceNumber: invoiceNumber,
+        gstAmount: gstAmount,
       );
+
+      if (newExpense == null) {
+        log('❌ Failed to create expense during bill upload');
+        return null;
+      }
+
+      // 2️⃣ Automatically mark as PAID since bill is uploaded
+      log('💳 Auto-marking bill expense as paid: ${newExpense.id}');
+
+      final paymentUpdated = await updateExpensePaymentStatus(
+        expenseId: newExpense.id,
+        newStatus: ExpensePaymentStatus.paid,
+      );
+
+      if (!paymentUpdated) {
+        log('⚠️ Warning: Failed to auto-mark expense as paid');
+        // Still return the expense even if payment update failed
+      } else {
+        log(
+          '✅ Bill expense auto-marked as paid and status synced to completed',
+        );
+      }
+
+      // 3️⃣ Return the updated expense from cache (with paid status)
+      final index = _expenses.indexWhere((e) => e.id == newExpense.id);
+      return index >= 0 ? _expenses[index] : newExpense;
     } catch (e) {
       _setError('Failed to create expense from bill: $e');
       log('❌ Error creating expense from bill: $e');

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:pos_app/providers/expense_provider.dart';
+import 'package:pos_app/services/bill_extraction_service.dart';
 import 'package:pos_app/theme/app_colors.dart';
 import 'package:pos_app/theme/app_theme.dart';
 
@@ -19,6 +20,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
   final _vendorNameController = TextEditingController();
   final _amountController = TextEditingController();
   final _invoiceNumberController = TextEditingController();
+  final _gstController = TextEditingController();
 
   PlatformFile? _selectedFile;
   String? _selectedCategoryId;
@@ -27,6 +29,11 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
 
   bool _isLoading = false;
   double _uploadProgress = 0;
+
+  // Track which fields were auto-filled from bill extraction
+  final Set<String> _autoFilledFields = {};
+  String _extractionStatus = '';
+  bool _isExtracting = false;
 
   @override
   void initState() {
@@ -39,6 +46,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
     _vendorNameController.dispose();
     _amountController.dispose();
     _invoiceNumberController.dispose();
+    _gstController.dispose();
     super.dispose();
   }
 
@@ -60,10 +68,99 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
       if (result != null && result.files.isNotEmpty) {
         setState(() {
           _selectedFile = result.files.first;
+          _isExtracting = true;
+          _extractionStatus = 'Analyzing bill...';
         });
+
+        // Extract bill data immediately after file selection
+        await _extractBillData();
       }
     } catch (e) {
       _showErrorSnackBar('Failed to pick file: $e');
+    }
+  }
+
+  /// Extract bill data from selected file and auto-fill form fields
+  Future<void> _extractBillData() async {
+    if (_selectedFile == null) return;
+
+    try {
+      final extractionService = BillExtractionService();
+      final filePath = _selectedFile!.path;
+
+      // Ensure file path is not null before extraction
+      if (filePath == null || filePath.isEmpty) {
+        setState(() {
+          _isExtracting = false;
+          _extractionStatus =
+              'ℹ️ Auto-extraction not available - Please fill data manually';
+          _autoFilledFields.clear();
+        });
+        return;
+      }
+
+      final result = await extractionService.extractBillData(filePath);
+
+      setState(() {
+        _isExtracting = false;
+        _autoFilledFields.clear();
+
+        // Check if any data was extracted (successful or partial)
+        final hasExtractedData =
+            result.vendorName != null ||
+            result.amount != null ||
+            result.gstAmount != null ||
+            result.invoiceNumber != null ||
+            result.invoiceDate != null;
+
+        if (hasExtractedData) {
+          // Auto-fill vendor name
+          if (result.vendorName != null && result.vendorName!.isNotEmpty) {
+            _vendorNameController.text = result.vendorName!;
+            _autoFilledFields.add('vendor');
+          }
+
+          // Auto-fill amount
+          if (result.amount != null && result.amount! > 0) {
+            _amountController.text = result.amount!.toStringAsFixed(2);
+            _autoFilledFields.add('amount');
+          }
+
+          // Auto-fill GST amount
+          if (result.gstAmount != null && result.gstAmount! > 0) {
+            _gstController.text = result.gstAmount!.toStringAsFixed(2);
+            _autoFilledFields.add('gst');
+          }
+
+          // Auto-fill invoice number
+          if (result.invoiceNumber != null &&
+              result.invoiceNumber!.isNotEmpty) {
+            _invoiceNumberController.text = result.invoiceNumber!;
+            _autoFilledFields.add('invoice');
+          }
+
+          // Auto-fill invoice date
+          if (result.invoiceDate != null) {
+            _selectedInvoiceDate = result.invoiceDate;
+            _autoFilledFields.add('invoiceDate');
+          }
+
+          _extractionStatus = result.isSuccessful
+              ? '✅ Bill data extracted - ${_autoFilledFields.length} fields locked'
+              : '⚠️ Partial extraction - ${_autoFilledFields.length} fields extracted, others are editable';
+        } else {
+          // No data extracted
+          _extractionStatus =
+              '${result.errorMessage ?? 'Could not extract bill data - Please fill manually'}';
+          _autoFilledFields.clear();
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isExtracting = false;
+        _extractionStatus = '⚠️ Extraction error: $e';
+        _autoFilledFields.clear();
+      });
     }
   }
 
@@ -118,6 +215,9 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
             ? _invoiceNumberController.text.trim()
             : null,
         expenseDate: _selectedExpenseDate,
+        gstAmount: _gstController.text.trim().isNotEmpty
+            ? double.parse(_gstController.text.trim())
+            : null,
       );
 
       setState(() => _uploadProgress = 1.0);
@@ -196,6 +296,50 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                   _buildSectionTitle('📤 Select Bill File'),
                   SizedBox(height: 12.h),
                   _buildFileUploadBox(),
+                  SizedBox(height: 12.h),
+
+                  // Extraction Status Message
+                  if (_extractionStatus.isNotEmpty)
+                    Container(
+                      padding: EdgeInsets.all(12.w),
+                      decoration: BoxDecoration(
+                        color: _autoFilledFields.isNotEmpty
+                            ? AppColors.success.withValues(alpha: 0.1)
+                            : AppColors.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8.r),
+                        border: Border.all(
+                          color: _autoFilledFields.isNotEmpty
+                              ? AppColors.success
+                              : AppColors.warning,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _isExtracting
+                                ? Icons.hourglass_bottom
+                                : _autoFilledFields.isNotEmpty
+                                ? Icons.check_circle
+                                : Icons.info_outline,
+                            color: _autoFilledFields.isNotEmpty
+                                ? AppColors.success
+                                : AppColors.warning,
+                            size: 18.sp,
+                          ),
+                          SizedBox(width: 12.w),
+                          Expanded(
+                            child: Text(
+                              _extractionStatus,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: _autoFilledFields.isNotEmpty
+                                    ? AppColors.success
+                                    : AppColors.warning,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   SizedBox(height: 24.h),
 
                   // Expense Details Section
@@ -206,6 +350,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                     controller: _vendorNameController,
                     label: 'Vendor / Supplier Name',
                     hint: 'Who issued this bill?',
+                    isLocked: _autoFilledFields.contains('vendor'),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Vendor name is required';
@@ -229,6 +374,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                     hint: '0.00',
                     keyboardType: TextInputType.number,
                     prefixText: '₹ ',
+                    isLocked: _autoFilledFields.contains('amount'),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Amount is required';
@@ -241,6 +387,28 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                       }
                     },
                   ),
+                  SizedBox(height: 12.h),
+
+                  // GST Amount (optional)
+                  _buildTextField(
+                    controller: _gstController,
+                    label: 'GST Amount (Optional)',
+                    hint: '0.00',
+                    keyboardType: TextInputType.number,
+                    prefixText: '₹ ',
+                    isLocked: _autoFilledFields.contains('gst'),
+                    validator: (value) {
+                      if (value != null && value.isNotEmpty) {
+                        try {
+                          double.parse(value);
+                          return null;
+                        } catch (e) {
+                          return 'Invalid GST amount';
+                        }
+                      }
+                      return null;
+                    },
+                  ),
                   SizedBox(height: 16.h),
 
                   // Invoice Details
@@ -251,6 +419,7 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
                     controller: _invoiceNumberController,
                     label: 'Invoice Number',
                     hint: 'e.g., INV-2026-001',
+                    isLocked: _autoFilledFields.contains('invoice'),
                   ),
                   SizedBox(height: 12.h),
 
@@ -466,17 +635,31 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
         ),
         borderRadius: BorderRadius.circular(8.r),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, color: AppColors.success, size: 20.sp),
-          SizedBox(width: 12.w),
-          Expanded(
-            child: Text(
-              'Upload a bill and we\'ll automatically create an expense entry with the details from the bill.',
-              style: AppTheme.bodySmall.copyWith(
-                color: AppColors.success,
-                fontSize: 12.sp,
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: AppColors.success, size: 20.sp),
+              SizedBox(width: 12.w),
+              Expanded(
+                child: Text(
+                  'Upload a bill and we\'ll automatically extract details',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppColors.success,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.sp,
+                  ),
+                ),
               ),
+            ],
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            '💡 Tip: Name your file using pattern: vendor_amount_invoice.pdf (e.g., amazon_500_INV001.pdf) for automatic data extraction',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppColors.success.withAlpha((0.7 * 255).toInt()),
+              fontSize: 11.sp,
             ),
           ),
         ],
@@ -596,38 +779,87 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
     int maxLines = 1,
     String? prefixText,
     String? Function(String?)? validator,
+    bool isLocked = false,
   }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
-      validator: validator,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixText: prefixText,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          maxLines: maxLines,
+          validator: validator,
+          enabled: !isLocked, // Disable if locked
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            prefixText: prefixText,
+            suffixIcon: isLocked
+                ? Tooltip(
+                    message: 'Auto-filled from bill - Cannot be edited',
+                    child: Icon(
+                      Icons.lock,
+                      color: AppColors.success,
+                      size: 18.sp,
+                    ),
+                  )
+                : null,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(
+                color: isLocked ? AppColors.success : AppColors.lightNeutral300,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(
+                color: isLocked ? AppColors.success : AppColors.lightNeutral300,
+              ),
+            ),
+            disabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(
+                color: AppColors.success.withValues(alpha: 0.5),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(
+                color: isLocked ? AppColors.success : AppColors.primaryPurple,
+                width: 2,
+              ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(color: AppColors.error),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8.r),
+              borderSide: BorderSide(color: AppColors.error, width: 2),
+            ),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 12.w,
+              vertical: 12.h,
+            ),
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error, width: 2),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
-      ),
+        if (isLocked) ...[
+          SizedBox(height: 4.h),
+          Row(
+            children: [
+              Icon(Icons.check_circle, color: AppColors.success, size: 12.sp),
+              SizedBox(width: 6.w),
+              Text(
+                'Auto-filled from bill (locked)',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppColors.success,
+                  fontSize: 10.sp,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 

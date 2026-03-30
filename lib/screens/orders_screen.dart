@@ -3,6 +3,7 @@
 // Completed orders show "View Bill" button.
 
 import 'package:flutter/material.dart';
+import 'package:pos_app/screens/kitchen_order_Taken.dart';
 import 'package:pos_app/screens/new_orders_work.dart';
 import 'package:pos_app/screens/orders_bill_preview_screen.dart';
 import 'package:pos_app/screens/sheet/payment_sheet.dart';
@@ -12,7 +13,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/inventory_provider.dart';
 import 'new_order_screen.dart';
-import 'package:pos_app/screens/kitchen_display_screen.dart';
 
 // ── Color palette ──────────────────────────────────────────────────────────────
 class OC {
@@ -107,12 +107,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => KitchenDisplayScreen(
+            builder: (_) => KitchenOrderTaken(
               businessId: businessId,
               kitchenId: 'all', // or fetch from settings
             ),
           ),
         );
+        /* Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => KitchenDisplayScreen(
+              businessId: businessId,
+              kitchenId: 'all', // or fetch from settings
+            ),
+          ),
+        );*/
       }
     } catch (e) {
       debugPrint('Error navigating to KDS: $e');
@@ -316,8 +325,12 @@ class _Header extends StatelessWidget {
           // Kitchen Display System button
           Container(
             decoration: BoxDecoration(
-              color: const Color(0xFF2563EB),
-              borderRadius: BorderRadius.circular(12),
+              gradient: const LinearGradient(
+                colors: [OC.primary, OC.primaryDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Material(
               color: Colors.transparent,
@@ -329,11 +342,11 @@ class _Header extends StatelessWidget {
                     horizontal: 10,
                     vertical: 8,
                   ),
-                  child: Column(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text('🍳', style: TextStyle(fontSize: 18)),
-                      const SizedBox(height: 2),
+                      const SizedBox(width: 4),
                       const Text(
                         'KDS',
                         style: TextStyle(

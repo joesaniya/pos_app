@@ -69,13 +69,74 @@ class OrdersRepository {
   }
 
   /// Pull orders from Supabase and update local cache.
+  /// FIX: Prevents overwriting completed orders with ready status.
   Future<void> refreshOrdersFromRemote({required String businessId}) async {
     try {
       final remoteOrders = await _remote.fetchTodayOrders(
         businessId: businessId,
       );
       for (final order in remoteOrders) {
-        // FIX: include session_id in the sync map so offline filtering works
+        // FIX: Check if local order has higher status that shouldn't be downgraded
+        final existingRows = await _local.getEntities(
+          table: LocalDatabase.tOrders,
+          businessId: businessId,
+        );
+        final existingOrder = existingRows
+            .where((r) => r['id'] == order.id)
+            .firstOrNull;
+
+        // Status hierarchy: pending < preparing < ready < completed
+        // Never downgrade completed orders
+        if (existingOrder != null) {
+          final localStatus = existingOrder['status'] as String? ?? '';
+          final remoteStatus = order.status.value;
+
+          // If local is completed and we're trying to change it, keep completed
+          if (localStatus == 'completed' && remoteStatus != 'completed') {
+            log(
+              '[OrdersRepo] ✅ Protected completed order from being downgraded to $remoteStatus: ${order.id}',
+            );
+            // Merge remote data but preserve completed status and payment info
+            final data = order.toSyncMap();
+            data['status'] = 'completed';
+            // Preserve payment and bill info if not in remote
+            if (existingOrder['payment_status'] != null) {
+              data['payment_status'] = existingOrder['payment_status'];
+            }
+            if (existingOrder['payment_mode'] != null) {
+              data['payment_mode'] = existingOrder['payment_mode'];
+            }
+            if (existingOrder['paid_by_uid'] != null) {
+              data['paid_by_uid'] = existingOrder['paid_by_uid'];
+            }
+            if (existingOrder['paid_by_name'] != null) {
+              data['paid_by_name'] = existingOrder['paid_by_name'];
+            }
+            if (existingOrder['paid_at'] != null) {
+              data['paid_at'] = existingOrder['paid_at'];
+            }
+            if (existingOrder['completed_at'] != null) {
+              data['completed_at'] = existingOrder['completed_at'];
+            }
+            if (existingOrder['bill_number'] != null) {
+              data['bill_number'] = existingOrder['bill_number'];
+            }
+            if (existingOrder['bill_generated_at'] != null) {
+              data['bill_generated_at'] = existingOrder['bill_generated_at'];
+            }
+            await _local.upsertEntity(
+              table: LocalDatabase.tOrders,
+              id: order.id,
+              businessId: businessId,
+              data: data,
+              syncStatus: LocalDatabase.syncSynced,
+              action: LocalDatabase.actionUpdate,
+            );
+            continue;
+          }
+        }
+
+        // Normal sync for non-completed orders
         final data = order.toSyncMap();
         await _local.upsertEntity(
           table: LocalDatabase.tOrders,
@@ -790,19 +851,26 @@ class OrdersRepository {
   }) async {
     // ── OPTIMISTIC UPDATE (IMMEDIATE) ──────────────────────────────────────
     // 1. Update locally right away
-    // 2. Return immediately
-    // 3. Sync in background
+    // 2. Generate bill automatically
+    // 3. Return immediately
+    // 4. Sync in background
 
     final now = DateTime.now().toUtc().toIso8601String();
+
+    // ✅ FIX: Auto-generate bill number when order is completed
+    final billNumber = _generateBillNumber(now);
+
     final payload = <String, dynamic>{
       'id': orderId,
-      'status': 'completed',//bill payment
+      'status': 'completed',
       'payment_status': 'paid',
       'payment_mode': mode.value,
       'paid_by_uid': paidByUid,
       'paid_by_name': paidByName,
       'paid_at': now,
       'completed_at': now,
+      'bill_number': billNumber,
+      'bill_generated_at': now,
       'updated_at': now,
       if (paymentRef != null) 'payment_ref': paymentRef,
       if (tipAmount != null) 'tip_amount': tipAmount,
@@ -836,13 +904,27 @@ class OrdersRepository {
         paymentRef,
         tipAmount,
         discountAmount,
+        billNumber,
       );
     }
 
     log(
-      '[OrdersRepo] ✅ Payment confirmed locally: $orderId (sync in background)',
+      '[OrdersRepo] ✅ Payment confirmed + Bill generated: $orderId → Bill#$billNumber (sync in background)',
     );
     return result; // Return IMMEDIATELY!
+  }
+
+  /// Generate unique bill number: YYYY/MM/DD + 3-digit sequence
+  String _generateBillNumber(String isoDateString) {
+    final date = DateTime.parse(isoDateString);
+    final dateStr =
+        '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}';
+    // Use timestamp milliseconds mod 1000 for a 3-digit sequence
+    final sequence = (date.millisecondsSinceEpoch % 1000).toString().padLeft(
+      3,
+      '0',
+    );
+    return '$dateStr-$sequence';
   }
 
   /// Sync payment confirmation to backend in background (non-blocking)
@@ -855,6 +937,7 @@ class OrdersRepository {
     String? paymentRef,
     double? tipAmount,
     double? discountAmount,
+    String? billNumber,
   ) {
     Future.microtask(() async {
       try {
@@ -868,7 +951,9 @@ class OrdersRepository {
           tipAmount: tipAmount,
           discountAmount: discountAmount,
         );
-        log('[OrdersRepo] ✅ Payment synced to backend: $orderId');
+        log(
+          '[OrdersRepo] ✅ Payment synced to backend: $orderId (Bill#$billNumber)',
+        );
       } catch (e) {
         log('[OrdersRepo] ⚠️ Payment sync failed, will retry from queue: $e');
         // Will be retried by OfflineSyncService
@@ -968,8 +1053,9 @@ extension OrderSyncMap on Order {
     'table_number': tableNumber,
     'table_seat_id': tableSeatId,
     'seat_label': seatLabel,
-    'session_id': sessionId, // FIX: always include session_id in sync map
+    'session_id': sessionId,
     'order_number': orderNumber,
+    'bill_number': billNumber,
     'customer_name': customerName,
     'customer_phone': customerPhone,
     'subtotal': subtotal,
@@ -984,6 +1070,17 @@ extension OrderSyncMap on Order {
     'created_by_role': createdByRole,
     'created_at': createdAt.toUtc().toIso8601String(),
     'updated_at': (updatedAt ?? createdAt).toUtc().toIso8601String(),
+    // ✅ FIX: Include all payment fields to preserve during sync
+    'payment_mode': paymentMode?.value,
+    'payment_ref': paymentRef,
+    'paid_by_uid': paidByUid,
+    'paid_by_name': paidByName,
+    'paid_at': paidAt?.toUtc().toIso8601String(),
+    'completed_at': completedAt?.toUtc().toIso8601String(),
+    'bill_generated_at': billGeneratedAt?.toUtc().toIso8601String(),
+    'started_at': startedAt?.toUtc().toIso8601String(),
+    'ready_at': readyAt?.toUtc().toIso8601String(),
+    'cancelled_at': cancelledAt?.toUtc().toIso8601String(),
     'items': items
         .map(
           (i) => {

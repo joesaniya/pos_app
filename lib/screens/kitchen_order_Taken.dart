@@ -1,6 +1,6 @@
 // lib/screens/kitchen_display_screen.dart
 // ══════════════════════════════════════════════════════════════════════════════
-//  KITCHEN DISPLAY SYSTEM (KDS)  — Light Theme  (mirrors orders_screen.dart)
+//  KITCHEN DISPLAY SYSTEM (KDS) — Strict Order Lifecycle  (Light Theme)
 //
 //  Design language: matches OrdersScreen exactly:
 //    • Same OC-style color palette (light bg, white cards, purple primary)
@@ -8,19 +8,24 @@
 //    • Same card anatomy (header bg tinted by status, item rows, action row)
 //    • Same _StatChip, _StatusBadge, divider, floating action button style
 //
-//  KDS-specific additions on top:
+//  KDS-specific features:
+//    ✅ Strict Order Lifecycle: Pending → Preparing → Ready → Completed
 //    ✅ Live elapsed timer per card (amber → red urgency)
 //    ✅ Item-level instruction box (CHEF NOTE) shown per OrderItem.notes
 //    ✅ Per-item completion checkbox toggle + progress bar
 //    ✅ Allergen & spicy auto-detection badges
-//    ✅ Bump (→ ready) button   |   Recall sheet (last 5 bumped)
+//    ✅ Context-aware action buttons (different per status)
+//    ✅ Swipe-to-advance gesture (respecting order lifecycle)
 //    ✅ Station filter tabs (All / Hot / Cold / Grill / Dessert / Drinks)
-//    ✅ Swipe-to-bump dismiss gesture
 //    ✅ Realtime Supabase subscription + haptic on new order
 //    ✅ Offline-safe (reads same Order model as OrdersRepository)
+//    ✅ Waiting Orders = Pending + Preparing ONLY (real-time calculated)
+//    ✅ Completed orders removed from KDS
+//    ✅ Cancelled orders removed from KDS
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
+import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -100,6 +105,20 @@ Color _statusBg(OrderStatus s) {
       return KC.completedBg;
     case OrderStatus.cancelled:
       return KC.cancelledBg;
+  }
+}
+
+// ✅ KDS-specific next label (overrides POS "Collect Payment" for ready orders)
+String _kdsNextLabel(OrderStatus status) {
+  switch (status) {
+    case OrderStatus.pending:
+      return 'Start Preparing';
+    case OrderStatus.preparing:
+      return 'Mark as Ready';
+    case OrderStatus.ready:
+      return 'Completed'; // KDS doesn't collect payment
+    default:
+      return '';
   }
 }
 
@@ -224,6 +243,9 @@ Color _stationColor(KStation s) {
 enum _Urgency { normal, warning, overdue }
 
 _Urgency _urgencyOf(Order o, DateTime now) {
+  // ✅ Ready orders don't show urgency/timer/rush warnings
+  if (o.status == OrderStatus.ready) return _Urgency.normal;
+
   final mins = now.difference(o.createdAt).inMinutes;
   if (mins >= 20) return _Urgency.overdue;
   if (mins >= 12) return _Urgency.warning;
@@ -282,12 +304,41 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
   DateTime _now = DateTime.now();
 
   KStation _station = KStation.all;
+  OrderStatus?
+  _selectedStatus; // null = Show all active statuses (Pending, Preparing, Ready, Cancelled)
 
   // { orderId → Set of itemKey strings that are done }
   final Map<String, Set<String>> _doneItems = {};
 
-  // Recall queue — last 5 bumped
-  final List<Order> _recalled = [];
+  // Recall queue removed — strict order lifecycle enforced
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TODAY-BASED FILTERING & TIMEZONE SUPPORT
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  /// Get today's date in local timezone (start of day)
+  DateTime get _todayStart {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  /// Get tomorrow's date in local timezone (start of day)
+  DateTime get _tomorrowStart {
+    return _todayStart.add(const Duration(days: 1));
+  }
+
+  /// Check if order was created today (local date-based)
+  bool _isOrderToday(Order order) {
+    log('ore:${order}');
+    final orderLocal = order.createdAt.toLocal();
+    log(
+      'orderLocal: ${orderLocal}, todayStart: ${_todayStart}, tomorrowStart: ${_tomorrowStart}',
+    );
+    return orderLocal.isAfter(_todayStart) &&
+        orderLocal.isBefore(_tomorrowStart);
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
 
   @override
   void initState() {
@@ -295,9 +346,21 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
     _fetchOrders();
     _subscribeRealtime();
 
-    // 1-second timer for elapsed time display
+    // 1-second timer for elapsed time display + date-based filtering refresh
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _now = DateTime.now());
+      if (mounted) {
+        setState(() {
+          final prevNow = _now;
+          _now = DateTime.now();
+
+          // Check if day boundary crossed - if so, refresh orders to maintain today filter
+          if (prevNow.day != _now.day ||
+              prevNow.month != _now.month ||
+              prevNow.year != _now.year) {
+            _fetchOrders();
+          }
+        });
+      }
     });
 
     // ✅ Periodic full refresh every 5 seconds as backup sync mechanism
@@ -322,26 +385,36 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
       _error = null;
     });
     try {
-      // ✅ Fetch ALL orders regardless of status
+      // ✅ Fetch KITCHEN ACTIVE orders only (pending, preparing, ready, cancelled)
+      // ❌ EXCLUDE: Completed orders (already paid/done, not for kitchen display)
       final data = await _db
           .from('vw_orders_with_items')
           .select()
           .eq('business_id', widget.businessId)
-          // Include all statuses: pending, preparing, ready, completed
-          .inFilter('status', ['pending', 'preparing', 'ready', 'completed'])
+          .inFilter('status', ['pending', 'preparing', 'ready', 'cancelled'])
           .order('created_at', ascending: false); // Most recent first
 
+      final allOrders = (data as List)
+          .map((j) => Order.fromJson(j as Map<String, dynamic>))
+          .toList();
+      log('kds all orders: ${allOrders}');
+      // 🔥 CRITICAL: Filter to today's orders only (local date-based)
+      final todaysOrders = allOrders.where(_isOrderToday).toList();
+      log('kds today orders: ${todaysOrders}');
       setState(() {
-        _allOrders = (data as List)
-            .map((j) => Order.fromJson(j as Map<String, dynamic>))
-            .toList();
+        _allOrders = todaysOrders;
         _isLoading = false;
       });
+
+      debugPrint(
+        '[KDS] Loaded ${todaysOrders.length} orders for today (from ${allOrders.length} total)',
+      );
     } catch (e) {
       setState(() {
         _error = e.toString();
         _isLoading = false;
       });
+      debugPrint('[KDS] Error fetching orders: $e');
     }
   }
 
@@ -362,12 +435,14 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
             if (record.isEmpty) return;
             final status = record['status'] as String? ?? '';
 
-            // ✅ Include ALL statuses: pending, preparing, ready, completed
+            // ✅ KITCHEN ACTIVE: Include only kitchen-relevant statuses
+            // Include: pending, preparing, ready, cancelled
+            // Exclude: completed (not shown in kitchen)
             if ([
               'pending',
               'preparing',
               'ready',
-              'completed',
+              'cancelled',
             ].contains(status)) {
               try {
                 final full = await _db
@@ -380,15 +455,27 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
 
                 setState(() {
                   final idx = _allOrders.indexWhere((o) => o.id == order.id);
-                  if (idx == -1) {
-                    // New order: add to front
-                    _allOrders.insert(0, order);
-                    if (status == 'pending') {
-                      HapticFeedback.heavyImpact(); // Notify on new order
+
+                  // 🔥 CRITICAL: Apply today filter to new/updated orders
+                  final isToday = _isOrderToday(order);
+
+                  if (isToday) {
+                    if (idx == -1) {
+                      // New order from today: add to front
+                      _allOrders.insert(0, order);
+                      if (status == 'pending') {
+                        HapticFeedback.heavyImpact(); // Notify on new order
+                      }
+                    } else {
+                      // Update existing order that is still today's
+                      _allOrders[idx] = order;
                     }
                   } else {
-                    // Update existing order
-                    _allOrders[idx] = order;
+                    // Order is from a different date - remove if present
+                    if (idx != -1) {
+                      _allOrders.removeAt(idx);
+                      _doneItems.remove(order.id);
+                    }
                   }
                 });
               } catch (e) {
@@ -402,41 +489,279 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
-  Future<void> _bumpOrder(Order order) async {
+  Future<void> _advanceOrderStatus(Order order) async {
     HapticFeedback.mediumImpact();
+
+    // ✅ STRICT ORDER LIFECYCLE: Determine next status
+    final currentStatus = order.status;
+    final nextStatus = currentStatus.nextStatus;
+
+    if (nextStatus == null) {
+      debugPrint(
+        '[KDS] Cannot advance order ${order.id} from status $currentStatus',
+      );
+      return;
+    }
+
+    // Show confirmation based on current status
+    String actionLabel = '';
+    String confirmMsg = '';
+
+    switch (currentStatus) {
+      case OrderStatus.pending:
+        actionLabel = 'Start Preparing';
+        confirmMsg = 'Start preparing Order #${order.orderNumber}?';
+        break;
+      case OrderStatus.preparing:
+        actionLabel = 'Mark as Ready';
+        confirmMsg = 'Mark Order #${order.orderNumber} as ready for pickup?';
+        break;
+      case OrderStatus.ready:
+        actionLabel = 'Completed';
+        confirmMsg = 'Mark Order #${order.orderNumber} as completed?';
+        break;
+      default:
+        return;
+    }
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KC.surface,
+        title: Text(
+          actionLabel,
+          style: const TextStyle(
+            color: KC.textPri,
+            fontWeight: FontWeight.w900,
+            fontSize: 18,
+          ),
+        ),
+        content: Text(
+          confirmMsg,
+          style: const TextStyle(color: KC.textSec, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: KC.textMute)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              actionLabel,
+              style: const TextStyle(
+                color: KC.primary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      final updateMap = <String, dynamic>{'status': nextStatus.value};
+
+      // ✅ Set appropriate timestamps
+      switch (nextStatus) {
+        case OrderStatus.preparing:
+          updateMap['started_at'] = now;
+          break;
+        case OrderStatus.ready:
+          updateMap['ready_at'] = now;
+          break;
+        case OrderStatus.completed:
+          updateMap['completed_at'] = now;
+          break;
+        default:
+          break;
+      }
+
+      await _db.from('orders').update(updateMap).eq('id', order.id);
+
+      debugPrint('[KDS] Order ${order.id} advanced to $nextStatus');
+
+      // Remove order if it's now Completed
+      if (nextStatus == OrderStatus.completed) {
+        setState(() {
+          _allOrders.removeWhere((o) => o.id == order.id);
+          _doneItems.remove(order.id);
+        });
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Text(nextStatus.emoji, style: const TextStyle(fontSize: 18)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Order #${order.orderNumber} → ${nextStatus.label}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: nextStatus.color,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[KDS] advance error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error advancing order: $e'),
+            backgroundColor: KC.cancelled,
+          ),
+        );
+      }
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // NEW: ORDER CANCELLATION FROM KITCHEN SIDE
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  /// Cancel an order directly from the kitchen
+  Future<void> _cancelOrder(Order order) async {
+    HapticFeedback.heavyImpact();
+
+    // Show confirmation dialog
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KC.surface,
+        title: const Text(
+          'Cancel Order?',
+          style: TextStyle(
+            color: KC.textPri,
+            fontWeight: FontWeight.w900,
+            fontSize: 18,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to cancel Order #${order.orderNumber}?',
+              style: const TextStyle(color: KC.textSec, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: KC.cancelledBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: KC.cancelled.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                'This action will mark the order as cancelled and notify the POS system.',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: KC.cancelled,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Keep Order',
+              style: TextStyle(color: KC.textMute),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Cancel Order',
+              style: TextStyle(
+                color: KC.cancelled,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     setState(() {
       _allOrders.removeWhere((o) => o.id == order.id);
       _doneItems.remove(order.id);
-      _recalled.insert(0, order);
-      if (_recalled.length > 5) _recalled.removeLast();
     });
+
     try {
       await _db
           .from('orders')
           .update({
-            'status': 'ready',
-            'ready_at': DateTime.now().toUtc().toIso8601String(),
+            'status': 'cancelled',
+            'cancelled_at': DateTime.now().toUtc().toIso8601String(),
+            'cancellation_reason': 'Cancelled from Kitchen Display System',
           })
           .eq('id', order.id);
+
+      debugPrint('[KDS] Order ${order.id} cancelled from kitchen');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Order #${order.orderNumber} cancelled',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: KC.cancelled,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          ),
+        );
+      }
     } catch (e) {
-      debugPrint('[KDS] bump error: $e');
+      debugPrint('[KDS] cancel error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error cancelling order: $e'),
+            backgroundColor: KC.cancelled,
+          ),
+        );
+      }
     }
   }
 
-  Future<void> _recallOrder(Order order) async {
-    setState(() {
-      _recalled.removeWhere((o) => o.id == order.id);
-      _allOrders.insert(0, order);
-    });
-    try {
-      await _db
-          .from('orders')
-          .update({'status': 'preparing', 'ready_at': null})
-          .eq('id', order.id);
-    } catch (e) {
-      debugPrint('[KDS] recall error: $e');
-    }
-  }
+  // ═════════════════════════════════════════════════════════════════════════════
 
   void _toggleItem(String orderId, String key) {
     setState(() {
@@ -450,21 +775,35 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
   // ── Filter + sort ────────────────────────────────────────────────────────────
 
   List<Order> get _filtered {
-    var list = _station == KStation.all
-        ? List<Order>.from(_allOrders)
-        : _allOrders
-              .where(
-                (o) => o.items.any((i) => _station.matches(i.categoryName)),
-              )
-              .toList();
+    var list = _allOrders;
+
+    // Filter by selected status if specified, otherwise show all active statuses
+    if (_selectedStatus != null) {
+      list = list.where((o) => o.status == _selectedStatus).toList();
+    } else {
+      // Show all active kitchen statuses when no specific status selected
+      list = list
+          .where(
+            (o) =>
+                o.status == OrderStatus.pending ||
+                o.status == OrderStatus.preparing ||
+                o.status == OrderStatus.ready ||
+                o.status == OrderStatus.cancelled,
+          )
+          .toList();
+      log('listt:$list');
+    }
+
+    // Also apply station filter if not "all"
+    if (_station != KStation.all) {
+      list = list
+          .where((o) => o.items.any((i) => _station.matches(i.categoryName)))
+          .toList();
+    }
 
     // Sort by urgency first, then by creation time
     list.sort((a, b) {
-      // Priority: pending > preparing > ready > completed
-      final aStatusIdx = _statusOrder(a.status);
-      final bStatusIdx = _statusOrder(b.status);
-      if (aStatusIdx != bStatusIdx) return aStatusIdx.compareTo(bStatusIdx);
-
+      // Priority by urgency for active orders
       final ua = _urgencyOf(a, _now).index;
       final ub = _urgencyOf(b, _now).index;
       if (ua != ub) return ub.compareTo(ua);
@@ -473,28 +812,32 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
     return list;
   }
 
-  // Helper to sort by status priority
-  int _statusOrder(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pending:
-        return 0;
-      case OrderStatus.preparing:
-        return 1;
-      case OrderStatus.ready:
-        return 2;
-      case OrderStatus.completed:
-        return 3;
-      case OrderStatus.cancelled:
-        return 4;
-    }
-  }
-
   // ── Stats ────────────────────────────────────────────────────────────────────
+
+  /// ✅ Waiting Orders = Pending + Preparing ONLY
+  /// Excludes: Ready, Completed, Cancelled
+  int get _waitingOrdersCount {
+    return _allOrders
+        .where(
+          (o) =>
+              o.status == OrderStatus.pending ||
+              o.status == OrderStatus.preparing,
+        )
+        .length;
+  }
 
   int get _pendingCount =>
       _allOrders.where((o) => o.status == OrderStatus.pending).length;
+
   int get _prepCount =>
       _allOrders.where((o) => o.status == OrderStatus.preparing).length;
+
+  int get _readyCount =>
+      _allOrders.where((o) => o.status == OrderStatus.ready).length;
+
+  int get _cancelledCount =>
+      _allOrders.where((o) => o.status == OrderStatus.cancelled).length;
+
   int get _overdueCount =>
       _allOrders.where((o) => _urgencyOf(o, _now) == _Urgency.overdue).length;
 
@@ -512,29 +855,36 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
             // ① Header — mirrors _Header in orders_screen
             _Header(
               ordersCount: _allOrders.length,
-              recalledCount: _recalled.length,
               now: _now,
               onBack: () => Navigator.pop(context),
               onRefresh: _fetchOrders,
-              onRecall: _recalled.isEmpty
-                  ? null
-                  : () => _showRecallSheet(context),
             ),
 
             // ② Overdue alert — mirrors _PaymentAlertBanner
             if (_overdueCount > 0) _OverdueBanner(count: _overdueCount),
 
-            // ③ Station filter tabs — mirrors _StatusFilter
-            _StationFilter(
+            // ③ Status filter tabs — displays All, Pending, Preparing, Ready, Cancelled
+            _StatusFilter(
+              selectedStatus: _selectedStatus,
+              orders: _allOrders,
+              onChanged: (status) => setState(() => _selectedStatus = status),
+            ),
+
+            // Station filter tabs — mirrors _StatusFilter
+            /* _StationFilter(
               station: _station,
               orders: _allOrders,
               onChanged: (s) => setState(() => _station = s),
-            ),
+            ),*/
+            if (_overdueCount > 0) SizedBox(height: 5),
 
             // ④ Stats bar — mirrors _StatsBar
             _StatsBar(
+              waitingCount: _waitingOrdersCount,
+              readyCount: _readyCount,
               pendingCount: _pendingCount,
               prepCount: _prepCount,
+              cancelledCount: _cancelledCount,
               overdueCount: _overdueCount,
               total: _allOrders.length,
             ),
@@ -554,7 +904,8 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
                       now: _now,
                       doneItems: _doneItems,
                       onToggleItem: _toggleItem,
-                      onBump: _bumpOrder,
+                      onAdvance: _advanceOrderStatus,
+                      onCancel: _cancelOrder,
                       onRefresh: _fetchOrders,
                     ),
             ),
@@ -573,23 +924,6 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
       ),
     );
   }
-
-  void _showRecallSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: KC.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _RecallSheet(
-        queue: _recalled,
-        onRecall: (o) {
-          Navigator.pop(context);
-          _recallOrder(o);
-        },
-      ),
-    );
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -598,19 +932,15 @@ class _KitchenOrderTakenState extends State<KitchenOrderTaken> {
 
 class _Header extends StatelessWidget {
   final int ordersCount;
-  final int recalledCount;
   final DateTime now;
   final VoidCallback onBack;
   final VoidCallback onRefresh;
-  final VoidCallback? onRecall;
 
   const _Header({
     required this.ordersCount,
-    required this.recalledCount,
     required this.now,
     required this.onBack,
     required this.onRefresh,
-    this.onRecall,
   });
 
   @override
@@ -683,43 +1013,6 @@ class _Header extends StatelessWidget {
             ),
           ),
 
-          // Recall button
-          /*     if (onRecall != null) ...[
-            GestureDetector(
-              onTap: onRecall,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: KC.pendingBg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: KC.pending.withValues(alpha: 0.35),
-                    width: 1.2,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.undo_rounded, color: KC.pending, size: 16),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Recall ($recalledCount)',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: KC.pending,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-          ],
-*/
           // Live clock chip
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -787,6 +1080,156 @@ class _OverdueBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  STATUS FILTER TABS  (displays order statuses: Pending, Preparing, Ready, Cancelled)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StatusFilter extends StatelessWidget {
+  final OrderStatus? selectedStatus;
+  final List<Order> orders;
+  final ValueChanged<OrderStatus?> onChanged;
+
+  const _StatusFilter({
+    required this.selectedStatus,
+    required this.orders,
+    required this.onChanged,
+  });
+
+  int _count(OrderStatus status) {
+    return orders.where((o) => o.status == status).length;
+  }
+
+  int _countAll() {
+    return orders
+        .where(
+          (o) =>
+              o.status == OrderStatus.pending ||
+              o.status == OrderStatus.preparing ||
+              o.status == OrderStatus.ready ||
+              o.status == OrderStatus.cancelled,
+        )
+        .length;
+  }
+
+  Color _statusTabColor(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.pending:
+        return KC.pending;
+      case OrderStatus.preparing:
+        return KC.preparing;
+      case OrderStatus.ready:
+        return KC.ready;
+      case OrderStatus.completed:
+        return KC.completed;
+      case OrderStatus.cancelled:
+        return KC.cancelled;
+    }
+  }
+
+  String _statusLabel(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.pending:
+        return '⏳ Pending';
+      case OrderStatus.preparing:
+        return '👨‍🍳 Preparing';
+      case OrderStatus.ready:
+        return '✅ Ready';
+      case OrderStatus.completed:
+        return '🎉 Completed';
+      case OrderStatus.cancelled:
+        return '❌ Cancelled';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statuses = [
+      OrderStatus.pending,
+      OrderStatus.preparing,
+      OrderStatus.ready,
+      OrderStatus.cancelled,
+    ];
+
+    return Container(
+      color: KC.surface,
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            // ✅ "All" tab - shows all active statuses
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => onChanged(null),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selectedStatus == null ? KC.primary : KC.surfaceAlt,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: selectedStatus == null ? KC.primary : KC.border,
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Text(
+                    '🔄 All (${_countAll()})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: selectedStatus == null ? Colors.white : KC.textSec,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Individual status tabs
+            ...statuses.map((status) {
+              final isSel = status == selectedStatus;
+              final tabColor = _statusTabColor(status);
+              final count = _count(status);
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => onChanged(status),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSel ? tabColor : KC.surfaceAlt,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSel ? tabColor : KC.border,
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Text(
+                      '${_statusLabel(status)} ($count)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isSel ? Colors.white : KC.textSec,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
@@ -867,14 +1310,20 @@ class _StationFilter extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatsBar extends StatelessWidget {
+  final int waitingCount;
+  final int readyCount;
   final int pendingCount;
   final int prepCount;
+  final int cancelledCount;
   final int overdueCount;
   final int total;
 
   const _StatsBar({
+    required this.waitingCount,
+    required this.readyCount,
     required this.pendingCount,
     required this.prepCount,
+    required this.cancelledCount,
     required this.overdueCount,
     required this.total,
   });
@@ -884,38 +1333,57 @@ class _StatsBar extends StatelessWidget {
     return Container(
       color: KC.surface,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      child: Row(
-        children: [
-          _StatChip(
-            emoji: '🕐',
-            label: '$pendingCount pending',
-            color: KC.pending,
-            bg: KC.pendingBg,
-          ),
-          const SizedBox(width: 8),
-          _StatChip(
-            emoji: '👨‍🍳',
-            label: '$prepCount cooking',
-            color: KC.preparing,
-            bg: KC.preparingBg,
-          ),
-          if (overdueCount > 0) ...[
-            const SizedBox(width: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // ✅ WAITING ORDERS (Active) = Pending + Preparing
             _StatChip(
-              emoji: '⚠️',
-              label: '$overdueCount overdue',
+              emoji: '⏳',
+              label: '$waitingCount waiting',
+              color: KC.pending,
+              bg: KC.pendingBg,
+            ),
+            const SizedBox(width: 8),
+
+            // Ready for pickup
+            _StatChip(
+              emoji: '✅',
+              label: '$readyCount ready',
+              color: KC.ready,
+              bg: KC.readyBg,
+            ),
+
+            const SizedBox(width: 8),
+
+            // Cancelled orders
+            _StatChip(
+              emoji: '❌',
+              label: '$cancelledCount cancelled',
               color: KC.cancelled,
               bg: KC.cancelledBg,
             ),
+
+            if (overdueCount > 0) ...[
+              const SizedBox(width: 8),
+              _StatChip(
+                emoji: '⚠️',
+                label: '$overdueCount overdue',
+                color: KC.cancelled,
+                bg: KC.cancelledBg,
+              ),
+            ],
+            const SizedBox(width: 8),
+
+            // Total in KDS (active only)
+            _StatChip(
+              emoji: '🍽️',
+              label: '$total total',
+              color: KC.primary,
+              bg: KC.primaryLight,
+            ),
           ],
-          const SizedBox(width: 8),
-          _StatChip(
-            emoji: '🍽️',
-            label: '$total in queue',
-            color: KC.primary,
-            bg: KC.primaryLight,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -930,7 +1398,8 @@ class _Body extends StatelessWidget {
   final DateTime now;
   final Map<String, Set<String>> doneItems;
   final void Function(String, String) onToggleItem;
-  final ValueChanged<Order> onBump;
+  final ValueChanged<Order> onAdvance;
+  final ValueChanged<Order> onCancel;
   final Future<void> Function() onRefresh;
 
   const _Body({
@@ -938,7 +1407,8 @@ class _Body extends StatelessWidget {
     required this.now,
     required this.doneItems,
     required this.onToggleItem,
-    required this.onBump,
+    required this.onAdvance,
+    required this.onCancel,
     required this.onRefresh,
   });
 
@@ -965,7 +1435,8 @@ class _Body extends StatelessWidget {
             progress: progress,
             doneSet: doneItems[o.id] ?? {},
             onToggleItem: (key) => onToggleItem(o.id, key),
-            onBump: () => onBump(o),
+            onAdvance: () => onAdvance(o),
+            onCancel: () => onCancel(o),
           );
         },
       ),
@@ -984,7 +1455,8 @@ class _KDSOrderCard extends StatelessWidget {
   final double progress;
   final Set<String> doneSet;
   final void Function(String) onToggleItem;
-  final VoidCallback onBump;
+  final VoidCallback onAdvance;
+  final VoidCallback onCancel;
 
   const _KDSOrderCard({
     required this.order,
@@ -993,7 +1465,8 @@ class _KDSOrderCard extends StatelessWidget {
     required this.progress,
     required this.doneSet,
     required this.onToggleItem,
-    required this.onBump,
+    required this.onAdvance,
+    required this.onCancel,
   });
 
   @override
@@ -1003,46 +1476,75 @@ class _KDSOrderCard extends StatelessWidget {
     final sBg = _statusBg(o.status);
     final uColor = _urgencyColor(urgency);
     final elapsed = now.difference(o.createdAt);
-    final timerStr =
-        '${elapsed.inMinutes.toString().padLeft(2, '0')}:'
-        '${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // IMPROVED TIME FORMATTING: HH:mm:ss format
+    // ═══════════════════════════════════════════════════════════════════════════
+    final hours = (elapsed.inSeconds ~/ 3600).toString().padLeft(2, '0');
+    final minutes = ((elapsed.inSeconds % 3600) ~/ 60).toString().padLeft(
+      2,
+      '0',
+    );
+    final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    final timerStr = '$hours:$minutes:$seconds';
+
     final allDone = progress >= 1.0 && o.items.isNotEmpty;
+
+    // ✅ STRICT ORDER LIFECYCLE: Only enable gestures for active orders
+    final canAdvance =
+        (o.status == OrderStatus.pending || o.status == OrderStatus.preparing
+        // || o.status == OrderStatus.ready
+        );
 
     return Dismissible(
       key: ValueKey('kds_${o.id}'),
-      direction: DismissDirection.endToStart,
+      direction: canAdvance
+          ? DismissDirection.endToStart
+          : DismissDirection.none,
       confirmDismiss: (_) async {
-        onBump();
+        if (canAdvance) {
+          onAdvance();
+        }
         return false;
       },
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        decoration: BoxDecoration(
-          color: KC.readyBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: KC.ready.withValues(alpha: 0.4),
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.check_circle_outline_rounded, color: KC.ready, size: 32),
-            SizedBox(height: 4),
-            Text(
-              'BUMP',
-              style: TextStyle(
-                color: KC.ready,
-                fontWeight: FontWeight.w900,
-                fontSize: 11,
-                letterSpacing: 1.5,
+      background: canAdvance
+          ? Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 24),
+              decoration: BoxDecoration(
+                color: KC.readyBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: KC.ready.withValues(alpha: 0.4),
+                  width: 1.5,
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    o.status.nextStatus == OrderStatus.preparing
+                        ? Icons.play_circle_outline_rounded
+                        : o.status.nextStatus == OrderStatus.ready
+                        ? Icons.check_circle_outline_rounded
+                        : Icons.done_all_rounded,
+                    color: KC.ready,
+                    size: 32,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _kdsNextLabel(o.status).toUpperCase(),
+                    style: const TextStyle(
+                      color: KC.ready,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Container(),
       child: Container(
         decoration: BoxDecoration(
           color: KC.surface,
@@ -1119,13 +1621,15 @@ class _KDSOrderCard extends StatelessWidget {
                         ),
                       ),
 
-                      // Timer chip
-                      _TimerChip(timer: timerStr, color: uColor),
+                      // Timer chip — hide for ready orders
+                      if (o.status != OrderStatus.ready)
+                        _TimerChip(timer: timerStr, color: uColor),
                     ],
                   ),
 
-                  // Overdue warning row
-                  if (urgency == _Urgency.overdue) ...[
+                  // Overdue warning row — don't show for ready orders
+                  if (urgency == _Urgency.overdue &&
+                      o.status != OrderStatus.ready) ...[
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1165,10 +1669,10 @@ class _KDSOrderCard extends StatelessWidget {
             ),
 
             // ── Progress bar ─────────────────────────────────────────────
-            _ProgressRow(
+            /* _ProgressRow(
               progress: progress,
               total: o.items.fold(0, (s, i) => s + i.quantity),
-            ),
+            ),*/
 
             // ── Item rows ─────────────────────────────────────────────────
             if (o.items.isNotEmpty)
@@ -1199,76 +1703,87 @@ class _KDSOrderCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               child: Row(
                 children: [
-                  // Swipe hint
-                  Expanded(
-                    flex: 1,
-                    child: OutlinedButton(
-                      onPressed: null,
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: KC.border, width: 1.2),
-                        foregroundColor: KC.textMute,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                  // ✅ ACTION BUTTONS VISIBILITY RULES:
+                  // Pending: Show "Start Preparing" + "Cancel"
+                  // Preparing: Show "Mark as Ready" + "Cancel"
+                  // Ready: Show "Mark as Completed" + "Cancel"
+                  // Completed/Cancelled: No buttons shown
+                  if (o.status == OrderStatus.completed ||
+                      o.status == OrderStatus.cancelled)
+                    // ✅ No buttons for completed/cancelled orders
+                    Center(
+                      child: Text(
+                        o.status == OrderStatus.completed
+                            ? '✅ Completed'
+                            : '❌ Cancelled',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: KC.textMute,
                         ),
                       ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.swipe_left_alt_rounded,
-                            size: 14,
-                            color: KC.textMute,
+                    )
+                  else ...[
+                    // Cancel button — only show for Pending & Preparing (not for Ready)
+                    if (o.status != OrderStatus.ready)
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onCancel,
+                          icon: const Icon(Icons.close_rounded, size: 14),
+                          label: const Text(
+                            'Cancel',
+                            style: TextStyle(fontSize: 12),
                           ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Swipe',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: KC.textMute,
-                              fontWeight: FontWeight.w600,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(
+                              color: KC.cancelled,
+                              width: 1.2,
+                            ),
+                            foregroundColor: KC.cancelled,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
+                    if (o.status != OrderStatus.ready) const SizedBox(width: 8),
 
-                  // Bump / Mark Ready button
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: onBump,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: allDone ? KC.ready : sColor,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                    // Context-aware status advancement button
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: onAdvance,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: sColor,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              o.status.emoji,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _kdsNextLabel(o.status),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            allDone ? '✅' : o.status.emoji,
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            allDone ? 'Mark Ready' : 'Bump Order',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -1340,6 +1855,7 @@ class _KDSItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    log('itemss:${item.itemName}');
     final dotColor = item.isVeg
         ? const Color(0xFF2E7D32)
         : const Color(0xFFB71C1C);
@@ -1368,7 +1884,7 @@ class _KDSItemRow extends StatelessWidget {
             Row(
               children: [
                 // Completion checkbox
-                AnimatedContainer(
+                /*    AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
                   width: 20,
                   height: 20,
@@ -1390,7 +1906,7 @@ class _KDSItemRow extends StatelessWidget {
                         )
                       : null,
                 ),
-
+*/
                 // Veg/non-veg dot (exact copy from orders_screen._ItemRow)
                 Container(
                   width: 11,
@@ -1844,101 +2360,6 @@ class _StatChip extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  RECALL SHEET
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _RecallSheet extends StatelessWidget {
-  final List<Order> queue;
-  final ValueChanged<Order> onRecall;
-  const _RecallSheet({required this.queue, required this.onRecall});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: KC.border,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const Text(
-            'Recall Bumped Orders',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              color: KC.textPri,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Undo a bump and send back to kitchen',
-            style: TextStyle(fontSize: 12, color: KC.textSec),
-          ),
-          const SizedBox(height: 12),
-          const Divider(height: 1, color: KC.border),
-          ...queue.map(
-            (o) => ListTile(
-              leading: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: KC.primaryLight,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '#${o.orderNumber}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: KC.primary,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              title: Text(
-                'Order #${o.orderNumber}',
-                style: const TextStyle(
-                  color: KC.textPri,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              subtitle: Text(
-                '${o.totalItems} items · ${o.orderType.label}'
-                '${o.tableNumber != null ? ' · Table ${o.tableNumber}' : ''}',
-                style: const TextStyle(color: KC.textSec, fontSize: 12),
-              ),
-              trailing: OutlinedButton(
-                onPressed: () => onRecall(o),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: KC.pending, width: 1.2),
-                  foregroundColor: KC.pending,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Recall',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMPTY VIEW  (mirrors orders_screen empty state)
 // ─────────────────────────────────────────────────────────────────────────────

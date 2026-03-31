@@ -6,12 +6,35 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:pos_app/models/expense_model.dart';
 import 'package:pos_app/providers/expense_provider.dart';
-import 'package:pos_app/theme/app_colors.dart';
-import 'package:pos_app/theme/app_theme.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGN TOKENS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _T {
+  static const pageBg     = Color(0xFFF5F4F0);
+  static const cardBg     = Color(0xFFFFFFFF);
+  static const indigoSoft = Color(0xFFEEEDFD);
+  static const indigo     = Color(0xFF4F46E5);
+  static const emerald    = Color(0xFF059669);
+  static const emeraldBg  = Color(0xFFECFDF5);
+  static const amber      = Color(0xFFD97706);
+  static const amberBg    = Color(0xFFFFFBEB);
+  static const rose       = Color(0xFFE11D48);
+  static const roseBg     = Color(0xFFFFF1F2);
+  static const textPri    = Color(0xFF111827);
+  static const textSec    = Color(0xFF6B7280);
+  static const textTer    = Color(0xFF9CA3AF);
+  static const border     = Color(0xFFE5E7EB);
+  static const borderSoft = Color(0xFFF3F4F6);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD / EDIT EXPENSE SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 
 class AddExpenseScreen extends StatefulWidget {
-  final String? expenseId; // if provided, this is edit mode
-
+  final String? expenseId;
   const AddExpenseScreen({super.key, this.expenseId});
 
   @override
@@ -20,291 +43,180 @@ class AddExpenseScreen extends StatefulWidget {
 
 class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _vendorNameController = TextEditingController();
-  final _amountController = TextEditingController();
-  final _invoiceNumberController = TextEditingController();
-  final _gstController = TextEditingController();
-  final _notesController = TextEditingController();
+  final _titleCtrl       = TextEditingController();
+  final _descCtrl        = TextEditingController();
+  final _vendorCtrl      = TextEditingController();
+  final _amountCtrl      = TextEditingController();
+  final _invoiceCtrl     = TextEditingController();
+  final _gstCtrl         = TextEditingController();
+  final _notesCtrl       = TextEditingController();
 
   String? _selectedCategoryId;
-  DateTime _selectedExpenseDate = DateTime.now();
-  DateTime? _selectedInvoiceDate;
-  String _selectedExpenseType = 'general';
-  ExpensePaymentStatus _selectedPaymentStatus = ExpensePaymentStatus.unpaid;
+  DateTime _expenseDate      = DateTime.now();
+  DateTime? _invoiceDate;
+  String _expenseType        = 'general';
+  ExpensePaymentStatus _paymentStatus = ExpensePaymentStatus.unpaid;
 
-  bool _isLoading = false;
-  Expense? _existingExpense; // For edit mode
-  bool _isEditMode = false;
+  bool _isLoading     = false;
+  bool _isEditMode    = false;
+  Expense? _existing;
 
   @override
   void initState() {
     super.initState();
     _isEditMode = widget.expenseId != null;
-    if (_isEditMode) {
-      _loadExpenseDetailsAndCategories();
-    } else {
-      _loadCategories();
-    }
+    if (_isEditMode) _loadForEdit();
+    else _loadCategories();
   }
 
-  /// Load existing expense details for edit mode and categories
-  void _loadExpenseDetailsAndCategories() {
+  void _loadForEdit() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-
-      try {
-        final provider = context.read<ExpenseProvider>();
-        log(
-          '📝 [AddExpenseScreen] Loading expense for edit: ${widget.expenseId}',
-        );
-
-        // Load categories first
-        if (provider.categories.isEmpty && !provider.isLoading) {
-          provider.loadCategories().then((_) {
-            if (mounted) setState(() {});
-          });
-        }
-
-        // Load expense details
-        provider
-            .loadExpenseDetails(widget.expenseId!)
-            .then((_) {
-              if (mounted && provider.selectedExpense != null) {
-                _existingExpense = provider.selectedExpense;
-                _prefillFormWithExpense(_existingExpense!);
-                log('✅ [AddExpenseScreen] Expense loaded and form pre-filled');
-                setState(() {});
-              }
-            })
-            .catchError((e) {
-              log('❌ [AddExpenseScreen] Failed to load expense: $e');
-              _showErrorSnackBar('Failed to load expense details');
-            });
-      } catch (e) {
-        log('❌ [AddExpenseScreen] Error loading expense: $e');
+      final provider = context.read<ExpenseProvider>();
+      if (provider.categories.isEmpty && !provider.isLoading) {
+        provider.loadCategories().then((_) { if (mounted) setState(() {}); });
       }
+      provider.loadExpenseDetails(widget.expenseId!).then((_) {
+        if (mounted && provider.selectedExpense != null) {
+          _existing = provider.selectedExpense;
+          _prefill(_existing!);
+          setState(() {});
+        }
+      }).catchError((e) {
+        log('❌ Failed to load expense: $e');
+        _snack('Failed to load expense details', _T.rose);
+      });
     });
   }
 
-  /// Pre-fill form with existing expense details
-  void _prefillFormWithExpense(Expense expense) {
-    _titleController.text = expense.title;
-    _descriptionController.text = expense.description ?? '';
-    _vendorNameController.text = expense.vendorName;
-    _amountController.text = expense.amount.toString();
-    _invoiceNumberController.text = expense.invoiceNumber ?? '';
-    _gstController.text = expense.gstAmount?.toString() ?? '';
-    _notesController.text = expense.notes ?? '';
-    _selectedCategoryId = expense.categoryId;
-    _selectedExpenseDate = expense.expenseDate;
-    _selectedInvoiceDate = expense.invoiceDate;
-    _selectedExpenseType = expense.expenseType.dbValue;
-    _selectedPaymentStatus = expense.paymentStatus;
+  void _prefill(Expense e) {
+    _titleCtrl.text   = e.title;
+    _descCtrl.text    = e.description ?? '';
+    _vendorCtrl.text  = e.vendorName;
+    _amountCtrl.text  = e.amount.toString();
+    _invoiceCtrl.text = e.invoiceNumber ?? '';
+    _gstCtrl.text     = e.gstAmount?.toString() ?? '';
+    _notesCtrl.text   = e.notes ?? '';
+    _selectedCategoryId = e.categoryId;
+    _expenseDate        = e.expenseDate;
+    _invoiceDate        = e.invoiceDate;
+    _expenseType        = e.expenseType.dbValue;
+    _paymentStatus      = e.paymentStatus;
+  }
+
+  void _loadCategories() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final provider = context.read<ExpenseProvider>();
+      if (provider.categories.isEmpty && !provider.isLoading) {
+        provider.loadCategories().then((_) { if (mounted) setState(() {}); })
+            .catchError((e) => log('❌ Categories: $e'));
+      }
+    });
   }
 
   @override
   void dispose() {
-    _titleController.dispose();
-    _descriptionController.dispose();
-    _vendorNameController.dispose();
-    _amountController.dispose();
-    _invoiceNumberController.dispose();
-    _gstController.dispose();
-    _notesController.dispose();
+    for (final c in [_titleCtrl,_descCtrl,_vendorCtrl,_amountCtrl,_invoiceCtrl,_gstCtrl,_notesCtrl]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  void _loadCategories() {
-    // Use addPostFrameCallback to ensure context is ready
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
-      try {
-        final provider = context.read<ExpenseProvider>();
-        log('🎬 [AddExpenseScreen] _loadCategories() - reading provider');
-        log(
-          '🎬 [AddExpenseScreen] Provider categories count: ${provider.categories.length}',
-        );
-        log('🎬 [AddExpenseScreen] Provider isLoading: ${provider.isLoading}');
-
-        if (provider.categories.isEmpty && !provider.isLoading) {
-          log(
-            '🎬 [AddExpenseScreen] Categories empty and not loading, calling loadCategories()',
-          );
-          provider
-              .loadCategories()
-              .then((_) {
-                log(
-                  '✅ [AddExpenseScreen] Categories loaded successfully - count: ${provider.categories.length}',
-                );
-                if (mounted) setState(() {});
-              })
-              .catchError((e) {
-                log('❌ [AddExpenseScreen] Failed to load categories: $e');
-              });
-        } else {
-          log(
-            '🎬 [AddExpenseScreen] Categories already loaded (${provider.categories.length}) or loading in progress',
-          );
-        }
-      } catch (e) {
-        log('❌ [AddExpenseScreen] Error in _loadCategories: $e');
-      }
-    });
-  }
-
-  Future<void> _showDatePicker(
-    DateTime currentDate,
-    Function(DateTime) onDateSelected,
-  ) async {
+  Future<void> _pickDate(DateTime current, void Function(DateTime) onPick) async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: currentDate,
+      initialDate: current,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (ctx, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: const ColorScheme.light(primary: _T.indigo),
+        ),
+        child: child!,
+      ),
     );
-    if (picked != null) {
-      onDateSelected(picked);
-      setState(() {});
-    }
+    if (picked != null) { onPick(picked); setState(() {}); }
   }
 
-  Future<void> _submitForm() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedCategoryId == null) {
-      _showErrorSnackBar('Please select a category');
-      return;
+      _snack('Please select a category', _T.rose); return;
     }
-
     setState(() => _isLoading = true);
-
     try {
       final provider = context.read<ExpenseProvider>();
-
-      if (_isEditMode && _existingExpense != null) {
-        // UPDATE EXISTING EXPENSE
-        log('📝 Updating expense: ${_existingExpense!.id}');
-
-        final success = await provider.updateExpense(
-          expenseId: _existingExpense!.id,
-          title: _titleController.text.trim(),
+      if (_isEditMode && _existing != null) {
+        final ok = await provider.updateExpense(
+          expenseId: _existing!.id,
+          title: _titleCtrl.text.trim(),
           categoryId: _selectedCategoryId,
-          vendorName: _vendorNameController.text.trim(),
-          amount: double.parse(_amountController.text),
-          expenseDate: _selectedExpenseDate,
-          invoiceNumber: _invoiceNumberController.text.trim().isNotEmpty
-              ? _invoiceNumberController.text.trim()
-              : null,
-          invoiceDate: _selectedInvoiceDate,
-          notes: _notesController.text.trim().isNotEmpty
-              ? _notesController.text.trim()
-              : null,
+          vendorName: _vendorCtrl.text.trim(),
+          amount: double.parse(_amountCtrl.text),
+          expenseDate: _expenseDate,
+          invoiceNumber: _invoiceCtrl.text.trim().isNotEmpty ? _invoiceCtrl.text.trim() : null,
+          invoiceDate: _invoiceDate,
+          notes: _notesCtrl.text.trim().isNotEmpty ? _notesCtrl.text.trim() : null,
         );
-
-        if (success && mounted) {
-          _showSuccessSnackBar('Expense updated successfully!');
-          log('✅ Expense updated: ${_existingExpense!.id}');
-
-          // Update payment status if changed
-          if (_existingExpense!.paymentStatus != _selectedPaymentStatus) {
-            await provider.updateExpensePaymentStatus(
-              expenseId: _existingExpense!.id,
-              newStatus: _selectedPaymentStatus,
-            );
+        if (ok && mounted) {
+          _snack('Expense updated successfully!', _T.emerald);
+          if (_existing!.paymentStatus != _paymentStatus) {
+            await provider.updateExpensePaymentStatus(expenseId: _existing!.id, newStatus: _paymentStatus);
           }
-
           Navigator.pop(context);
         } else if (mounted) {
-          _showErrorSnackBar('Failed to update expense');
+          _snack('Failed to update expense', _T.rose);
         }
       } else {
-        // CREATE NEW EXPENSE
-        log('✨ Creating new expense');
-
-        final selectedCategory = provider.categories.firstWhere(
-          (cat) => cat.id == _selectedCategoryId,
+        final cat = provider.categories.firstWhere(
+          (c) => c.id == _selectedCategoryId,
           orElse: () => ExpenseCategory(
-            id: _selectedCategoryId ?? '',
-            name: 'Uncategorized',
-            icon: 'help',
-            color: '#9B9B9B',
-            isActive: true,
-            sortOrder: 0,
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
+            id: _selectedCategoryId!, name: 'Uncategorized',
+            icon: 'help', color: '#9B9B9B', isActive: true,
+            sortOrder: 0, createdAt: DateTime.now(), updatedAt: DateTime.now(),
           ),
         );
-
-        // Generate expense number based on timestamp
-        final expenseNumber = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-
-        final newExpense = await provider.createExpense(
-          title: _titleController.text.trim(),
-          expenseNumber: expenseNumber,
+        final expNo = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final newExp = await provider.createExpense(
+          title: _titleCtrl.text.trim(),
+          expenseNumber: expNo,
           categoryId: _selectedCategoryId!,
-          categoryName: selectedCategory.name,
-          vendorName: _vendorNameController.text.trim(),
-          amount: double.parse(_amountController.text),
-          expenseDate: _selectedExpenseDate,
-          description: _descriptionController.text.trim().isNotEmpty
-              ? _descriptionController.text.trim()
-              : null,
-          invoiceNumber: _invoiceNumberController.text.trim().isNotEmpty
-              ? _invoiceNumberController.text.trim()
-              : null,
-          invoiceDate: _selectedInvoiceDate,
-          gstAmount: _gstController.text.trim().isNotEmpty
-              ? double.parse(_gstController.text.trim())
-              : null,
+          categoryName: cat.name,
+          vendorName: _vendorCtrl.text.trim(),
+          amount: double.parse(_amountCtrl.text),
+          expenseDate: _expenseDate,
+          description: _descCtrl.text.trim().isNotEmpty ? _descCtrl.text.trim() : null,
+          invoiceNumber: _invoiceCtrl.text.trim().isNotEmpty ? _invoiceCtrl.text.trim() : null,
+          invoiceDate: _invoiceDate,
+          gstAmount: _gstCtrl.text.trim().isNotEmpty ? double.parse(_gstCtrl.text.trim()) : null,
           gstNumber: null,
         );
-
-        if (newExpense != null && mounted) {
-          _showSuccessSnackBar('Expense added successfully!');
-          log('✅ New expense created: ${newExpense.id}');
-
-          // Set payment status if not unpaid (default)
-          if (_selectedPaymentStatus != ExpensePaymentStatus.unpaid) {
-            await provider.updateExpensePaymentStatus(
-              expenseId: newExpense.id,
-              newStatus: _selectedPaymentStatus,
-            );
+        if (newExp != null && mounted) {
+          _snack('Expense added successfully!', _T.emerald);
+          if (_paymentStatus != ExpensePaymentStatus.unpaid) {
+            await provider.updateExpensePaymentStatus(expenseId: newExp.id, newStatus: _paymentStatus);
           }
-
           Navigator.pop(context);
         } else if (mounted) {
-          _showErrorSnackBar('Failed to add expense');
+          _snack('Failed to add expense', _T.rose);
         }
       }
     } catch (e) {
-      final action = _isEditMode ? 'update' : 'add';
-      _showErrorSnackBar('Failed to $action expense: $e');
+      _snack('Error: $e', _T.rose);
       log('❌ Error: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showSuccessSnackBar(String message) {
+  void _snack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.success,
+        content: Text(msg),
+        backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
-      ),
-    );
-  }
-
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
       ),
     );
   }
@@ -312,95 +224,86 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.lightNeutral100,
+      backgroundColor: _T.pageBg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: _T.pageBg,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: Padding(
+          padding: EdgeInsets.only(left: 16.w),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 36.w, height: 36.w,
+              decoration: BoxDecoration(
+                color: _T.cardBg, shape: BoxShape.circle,
+                border: Border.all(color: _T.border),
+              ),
+              child: Icon(Icons.arrow_back_rounded, size: 18.sp, color: _T.textPri),
+            ),
+          ),
+        ),
         title: Text(
           _isEditMode ? 'Edit Expense' : 'Add Expense',
-          style: AppTheme.headlineSmall,
+          style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w600, color: _T.textPri),
         ),
-        centerTitle: false,
+        centerTitle: true,
       ),
       body: Consumer<ExpenseProvider>(
         builder: (context, provider, _) {
           return SingleChildScrollView(
-            padding: EdgeInsets.all(16.w),
+            padding: EdgeInsets.fromLTRB(20.w, 12.h, 20.w, 32.h),
             child: Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title Section
-                  _buildSectionTitle('Expense Details'),
-                  SizedBox(height: 12.h),
-
-                  // Title Field
-                  _buildTextField(
-                    controller: _titleController,
+                  // ── Expense Details ────────────────────────────────────
+                  _sectionLabel('Expense Details'),
+                  SizedBox(height: 10.h),
+                  _field(
+                    controller: _titleCtrl,
                     label: 'Expense Title',
-                    hint: 'e.g., Building Maintenance, Event Setup',
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Title is required';
-                      }
-                      return null;
-                    },
+                    hint: 'e.g., Building Maintenance',
+                    validator: (v) => (v == null || v.isEmpty) ? 'Title is required' : null,
                   ),
-                  SizedBox(height: 12.h),
-
-                  // Category Dropdown
-                  _buildCategoryDropdown(provider),
-                  SizedBox(height: 12.h),
-
-                  // Expense Type
-                  _buildExpenseTypeDropdown(),
-                  SizedBox(height: 12.h),
-
-                  // Vendor Name
-                  _buildTextField(
-                    controller: _vendorNameController,
+                  SizedBox(height: 10.h),
+                  _categoryDropdown(provider),
+                  SizedBox(height: 10.h),
+                  _expenseTypeDropdown(),
+                  SizedBox(height: 10.h),
+                  _field(
+                    controller: _vendorCtrl,
                     label: 'Vendor / Supplier Name',
                     hint: 'Who is providing this service?',
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Vendor name is required';
-                      }
-                      return null;
-                    },
+                    validator: (v) => (v == null || v.isEmpty) ? 'Vendor name is required' : null,
                   ),
-                  SizedBox(height: 12.h),
 
-                  // Amount Section
-                  _buildSectionTitle('Financial Details'),
-                  SizedBox(height: 12.h),
-
+                  // ── Financial Details ──────────────────────────────────
+                  SizedBox(height: 20.h),
+                  _sectionLabel('Financial Details'),
+                  SizedBox(height: 10.h),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: _buildTextField(
-                          controller: _amountController,
+                        child: _field(
+                          controller: _amountCtrl,
                           label: 'Amount',
                           hint: '0.00',
                           keyboardType: TextInputType.number,
                           prefixText: '₹ ',
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Amount required';
-                            }
-                            try {
-                              double.parse(value);
-                              return null;
-                            } catch (e) {
-                              return 'Invalid amount';
-                            }
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Required';
+                            if (double.tryParse(v) == null) return 'Invalid';
+                            return null;
                           },
                         ),
                       ),
-                      SizedBox(width: 12.w),
+                      SizedBox(width: 10.w),
                       Expanded(
-                        child: _buildTextField(
-                          controller: _gstController,
+                        child: _field(
+                          controller: _gstCtrl,
                           label: 'GST Amount',
                           hint: '0.00',
                           keyboardType: TextInputType.number,
@@ -409,205 +312,100 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       ),
                     ],
                   ),
-                  SizedBox(height: 16.h),
 
-                  // Payment Status
-                  _buildSectionTitle('Payment Status'),
-                  SizedBox(height: 12.h),
-                  _buildPaymentStatusDropdown(),
-                  SizedBox(height: 16.h),
+                  // ── Payment Status ─────────────────────────────────────
+                  SizedBox(height: 20.h),
+                  _sectionLabel('Payment Status'),
+                  SizedBox(height: 10.h),
+                  _paymentStatusPicker(),
 
-                  // Date Section
-                  _buildSectionTitle('Dates'),
-                  SizedBox(height: 12.h),
-
-                  // Expense Date
-                  GestureDetector(
-                    onTap: () => _showDatePicker(_selectedExpenseDate, (date) {
-                      setState(() => _selectedExpenseDate = date);
-                    }),
-                    child: Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.lightNeutral300),
-                        borderRadius: BorderRadius.circular(8.r),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Expense Date',
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12.sp,
-                                ),
-                              ),
-                              SizedBox(height: 4.h),
-                              Text(
-                                DateFormat(
-                                  'dd MMM yyyy',
-                                ).format(_selectedExpenseDate),
-                                style: AppTheme.labelMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13.sp,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Icon(
-                            Icons.calendar_today,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ],
-                      ),
-                    ),
+                  // ── Dates ──────────────────────────────────────────────
+                  SizedBox(height: 20.h),
+                  _sectionLabel('Dates'),
+                  SizedBox(height: 10.h),
+                  _datePicker(
+                    label: 'Expense Date',
+                    date: _expenseDate,
+                    onTap: () => _pickDate(_expenseDate, (d) => _expenseDate = d),
                   ),
-                  SizedBox(height: 12.h),
 
-                  // Invoice Details
-                  _buildSectionTitle('Invoice Details (Optional)'),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _invoiceNumberController,
-                    label: 'Invoice Number',
-                    hint: 'e.g., INV-2026-001',
+                  // ── Invoice ────────────────────────────────────────────
+                  SizedBox(height: 20.h),
+                  _sectionLabel('Invoice Details (Optional)'),
+                  SizedBox(height: 10.h),
+                  _field(controller: _invoiceCtrl, label: 'Invoice Number', hint: 'e.g., INV-2026-001'),
+                  SizedBox(height: 10.h),
+                  _datePicker(
+                    label: 'Invoice Date',
+                    date: _invoiceDate,
+                    placeholder: 'Not selected',
+                    onTap: () => _pickDate(_invoiceDate ?? DateTime.now(), (d) => _invoiceDate = d),
                   ),
-                  SizedBox(height: 12.h),
 
-                  GestureDetector(
-                    onTap: () => _showDatePicker(
-                      _selectedInvoiceDate ?? DateTime.now(),
-                      (date) => setState(() => _selectedInvoiceDate = date),
-                    ),
-                    child: Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.lightNeutral300),
-                        borderRadius: BorderRadius.circular(8.r),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Invoice Date',
-                                style: AppTheme.labelSmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12.sp,
-                                ),
-                              ),
-                              SizedBox(height: 4.h),
-                              Text(
-                                _selectedInvoiceDate == null
-                                    ? 'Not selected'
-                                    : DateFormat(
-                                        'dd MMM yyyy',
-                                      ).format(_selectedInvoiceDate!),
-                                style: AppTheme.labelMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13.sp,
-                                  color: _selectedInvoiceDate == null
-                                      ? AppColors.textSecondary
-                                      : AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Icon(
-                            Icons.calendar_today,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 16.h),
+                  // ── Additional ─────────────────────────────────────────
+                  SizedBox(height: 20.h),
+                  _sectionLabel('Additional Details'),
+                  SizedBox(height: 10.h),
+                  _field(controller: _descCtrl, label: 'Description', hint: 'Add details...', maxLines: 3),
+                  SizedBox(height: 10.h),
+                  _field(controller: _notesCtrl, label: 'Notes', hint: 'Any additional notes...', maxLines: 2),
 
-                  // Additional Details
-                  _buildSectionTitle('Additional Details'),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _descriptionController,
-                    label: 'Description',
-                    hint: 'Add more details about this expense...',
-                    maxLines: 3,
-                  ),
-                  SizedBox(height: 12.h),
-
-                  _buildTextField(
-                    controller: _notesController,
-                    label: 'Notes',
-                    hint: 'Any additional notes...',
-                    maxLines: 2,
-                  ),
-                  SizedBox(height: 24.h),
-
-                  // Submit Button
+                  // ── Buttons ────────────────────────────────────────────
+                  SizedBox(height: 28.h),
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _submitForm,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryPurple,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 14.h),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.r),
-                        ),
-                        disabledBackgroundColor: AppColors.lightNeutral300,
-                      ),
-                      child: _isLoading
-                          ? SizedBox(
-                              height: 20.h,
-                              width: 20.h,
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation(
-                                  Colors.white,
-                                ),
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : Text(
-                              _isEditMode ? 'Update Expense' : 'Add Expense',
-                              style: AppTheme.labelMedium.copyWith(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14.sp,
-                              ),
+                    child: GestureDetector(
+                      onTap: _isLoading ? null : _submit,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 15.h),
+                        decoration: BoxDecoration(
+                          color: _isLoading ? _T.textTer : _T.indigo,
+                          borderRadius: BorderRadius.circular(14.r),
+                          boxShadow: _isLoading ? null : [
+                            BoxShadow(
+                              color: _T.indigo.withOpacity(0.25),
+                              blurRadius: 16, offset: const Offset(0, 6),
                             ),
+                          ],
+                        ),
+                        child: Center(
+                          child: _isLoading
+                              ? SizedBox(
+                                  height: 18.h, width: 18.h,
+                                  child: const CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  _isEditMode ? 'Update Expense' : 'Add Expense',
+                                  style: TextStyle(
+                                    fontSize: 15.sp, fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                        ),
+                      ),
                     ),
                   ),
-                  SizedBox(height: 12.h),
-
-                  // Cancel Button
+                  SizedBox(height: 10.h),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
                         padding: EdgeInsets.symmetric(vertical: 14.h),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8.r),
+                        decoration: BoxDecoration(
+                          color: _T.cardBg,
+                          borderRadius: BorderRadius.circular(14.r),
+                          border: Border.all(color: _T.border),
                         ),
-                        side: BorderSide(color: AppColors.lightNeutral300),
-                      ),
-                      child: Text(
-                        'Cancel',
-                        style: AppTheme.labelMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14.sp,
-                          color: AppColors.textPrimary,
+                        child: Center(
+                          child: Text('Cancel',
+                            style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w500, color: _T.textSec)),
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(height: 24.h),
                 ],
               ),
             ),
@@ -617,17 +415,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: AppTheme.labelLarge.copyWith(
-        fontWeight: FontWeight.w700,
-        fontSize: 14.sp,
-      ),
-    );
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  Widget _sectionLabel(String label) {
+    return Text(label,
+      style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w700,
+        color: _T.textPri, letterSpacing: -0.2));
   }
 
-  Widget _buildTextField({
+  Widget _field({
     required TextEditingController controller,
     required String label,
     required String hint,
@@ -641,199 +437,192 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       keyboardType: keyboardType,
       maxLines: maxLines,
       validator: validator,
+      style: TextStyle(fontSize: 13.sp, color: _T.textPri),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         prefixText: prefixText,
+        labelStyle: TextStyle(fontSize: 13.sp, color: _T.textSec),
+        hintStyle: TextStyle(fontSize: 13.sp, color: _T.textTer),
+        filled: true,
+        fillColor: _T.cardBg,
+        contentPadding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 13.h),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
+          borderRadius: BorderRadius.circular(12.r),
+          borderSide: BorderSide(color: _T.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
+          borderRadius: BorderRadius.circular(12.r),
+          borderSide: BorderSide(color: _T.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
+          borderRadius: BorderRadius.circular(12.r),
+          borderSide: const BorderSide(color: _T.indigo, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error),
+          borderRadius: BorderRadius.circular(12.r),
+          borderSide: BorderSide(color: _T.rose),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error, width: 2),
+          borderRadius: BorderRadius.circular(12.r),
+          borderSide: BorderSide(color: _T.rose, width: 1.5),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
       ),
     );
   }
 
-  Widget _buildCategoryDropdown(ExpenseProvider provider) {
-    final categories = provider.categories;
-    final isLoading = provider.isLoading;
-
-    return DropdownButtonFormField<String>(
-      initialValue: _selectedCategoryId,
-      isExpanded: true,
-      disabledHint: isLoading
-          ? Text(
-              'Loading categories...',
-              style: AppTheme.bodySmall.copyWith(
-                color: AppColors.textSecondary,
-              ),
-            )
-          : categories.isEmpty
-          ? Text(
-              'No categories available',
-              style: AppTheme.bodySmall.copyWith(color: AppColors.error),
-            )
-          : null,
-      decoration: InputDecoration(
-        labelText: 'Category',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
+  Widget _datePicker({
+    required String label,
+    required DateTime? date,
+    String? placeholder,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 13.h),
+        decoration: BoxDecoration(
+          color: _T.cardBg,
+          borderRadius: BorderRadius.circular(12.r),
+          border: Border.all(color: _T.border),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.error, width: 2),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
-      ),
-      items: categories.isEmpty
-          ? []
-          : categories.map((category) {
-              return DropdownMenuItem(
-                value: category.id,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.category,
-                      size: 16.sp,
-                      color: AppColors.primaryPurple,
-                    ),
-                    SizedBox(width: 8.w),
-                    Text(category.name),
-                  ],
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                  style: TextStyle(fontSize: 11.sp, color: _T.textSec)),
+                SizedBox(height: 3.h),
+                Text(
+                  date != null
+                      ? DateFormat('dd MMM yyyy').format(date)
+                      : (placeholder ?? ''),
+                  style: TextStyle(
+                    fontSize: 13.sp,
+                    fontWeight: FontWeight.w600,
+                    color: date != null ? _T.textPri : _T.textTer,
+                  ),
                 ),
-              );
-            }).toList(),
-      onChanged: isLoading || categories.isEmpty
-          ? null
-          : (value) {
-              setState(() => _selectedCategoryId = value);
-            },
-      validator: (_) {
-        if (_selectedCategoryId == null) return 'Please select a category';
-        return null;
-      },
+              ],
+            ),
+            Icon(Icons.calendar_today_rounded, size: 18.sp, color: _T.indigo),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildExpenseTypeDropdown() {
-    final expenseTypes = [
-      ('maintenance', 'Maintenance 🔧'),
-      ('event', 'Event 🎉'),
-      ('interior_work', 'Interior Work 🏠'),
-      ('festival', 'Festival 🎪'),
-      ('operational', 'Operational 📊'),
-      ('utility', 'Utility ⚡'),
-      ('general', 'General 📝'),
-    ];
-
+  Widget _categoryDropdown(ExpenseProvider provider) {
+    final cats = provider.categories;
     return DropdownButtonFormField<String>(
-      initialValue: _selectedExpenseType,
+      value: _selectedCategoryId,
       isExpanded: true,
-      decoration: InputDecoration(
-        labelText: 'Expense Type',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
-      ),
-      items: expenseTypes.map((type) {
-        return DropdownMenuItem(value: type.$1, child: Text(type.$2));
-      }).toList(),
-      onChanged: (value) {
-        setState(() => _selectedExpenseType = value ?? 'general');
-      },
-    );
-  }
-
-  Widget _buildPaymentStatusDropdown() {
-    final statuses = [
-      (ExpensePaymentStatus.unpaid, 'Unpaid (Red)', AppColors.error),
-      (ExpensePaymentStatus.partial, 'Partial (Orange)', AppColors.warning),
-      (ExpensePaymentStatus.paid, 'Paid (Green)', AppColors.success),
-    ];
-
-    return DropdownButtonFormField<ExpensePaymentStatus>(
-      initialValue: _selectedPaymentStatus,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: 'Payment Status',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.lightNeutral300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8.r),
-          borderSide: BorderSide(color: AppColors.primaryPurple, width: 2),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
-      ),
-      items: statuses.map((item) {
-        final (status, label, color) = item;
+      style: TextStyle(fontSize: 13.sp, color: _T.textPri),
+      decoration: _dropDeco('Category'),
+      items: cats.map((c) {
         return DropdownMenuItem(
-          value: status,
-          child: Row(
-            children: [
-              Container(
-                width: 12.w,
-                height: 12.h,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(2.r),
+          value: c.id,
+          child: Row(children: [
+            Icon(Icons.category_rounded, size: 14.sp, color: _T.indigo),
+            SizedBox(width: 8.w),
+            Text(c.name, style: TextStyle(fontSize: 13.sp)),
+          ]),
+        );
+      }).toList(),
+      onChanged: (v) => setState(() => _selectedCategoryId = v),
+      validator: (_) => _selectedCategoryId == null ? 'Select a category' : null,
+    );
+  }
+
+  Widget _expenseTypeDropdown() {
+    final types = [
+      ('maintenance', 'Maintenance'), ('event', 'Event'),
+      ('interior_work', 'Interior Work'), ('festival', 'Festival'),
+      ('operational', 'Operational'), ('utility', 'Utility'), ('general', 'General'),
+    ];
+    return DropdownButtonFormField<String>(
+      value: _expenseType,
+      isExpanded: true,
+      style: TextStyle(fontSize: 13.sp, color: _T.textPri),
+      decoration: _dropDeco('Expense Type'),
+      items: types.map((t) => DropdownMenuItem(value: t.$1, child: Text(t.$2))).toList(),
+      onChanged: (v) => setState(() => _expenseType = v ?? 'general'),
+    );
+  }
+
+  InputDecoration _dropDeco(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(fontSize: 13.sp, color: _T.textSec),
+      filled: true, fillColor: _T.cardBg,
+      contentPadding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 13.h),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12.r),
+        borderSide: BorderSide(color: _T.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12.r),
+        borderSide: BorderSide(color: _T.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12.r),
+        borderSide: const BorderSide(color: _T.indigo, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _paymentStatusPicker() {
+    final statuses = [
+      (ExpensePaymentStatus.unpaid,  'Unpaid',  _T.rose,    _T.roseBg),
+      (ExpensePaymentStatus.partial, 'Partial', _T.amber,   _T.amberBg),
+      (ExpensePaymentStatus.paid,    'Paid',    _T.emerald, _T.emeraldBg),
+    ];
+    return Row(
+      children: statuses.map((item) {
+        final (status, label, color, bg) = item;
+        final selected = _paymentStatus == status;
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _paymentStatus = status),
+            child: Container(
+              margin: EdgeInsets.only(
+                right: status == ExpensePaymentStatus.paid ? 0 : 8.w,
+              ),
+              padding: EdgeInsets.symmetric(vertical: 11.h),
+              decoration: BoxDecoration(
+                color: selected ? color : _T.cardBg,
+                borderRadius: BorderRadius.circular(10.r),
+                border: Border.all(
+                  color: selected ? color : _T.border,
+                  width: selected ? 1.5 : 1,
                 ),
               ),
-              SizedBox(width: 8.w),
-              Text(label, style: AppTheme.bodySmall),
-            ],
+              child: Column(
+                children: [
+                  Container(
+                    width: 8.w, height: 8.w,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: selected ? Colors.white : color,
+                    ),
+                  ),
+                  SizedBox(height: 4.h),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11.sp,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? Colors.white : color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       }).toList(),
-      onChanged: (value) {
-        setState(
-          () => _selectedPaymentStatus = value ?? ExpensePaymentStatus.unpaid,
-        );
-      },
     );
   }
 }

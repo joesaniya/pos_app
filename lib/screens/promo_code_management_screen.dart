@@ -9,32 +9,49 @@ import 'package:pos_app/utils/promo_code_access_control.dart';
 import 'package:provider/provider.dart';
 
 // ─────────────────────────────────────────────
-//  DESIGN TOKENS
+//  DESIGN TOKENS (from profile_screen)
 // ─────────────────────────────────────────────
 
 abstract class _T {
   // Palette
-  static const ink = Color(0xFF0F0F0F);
-  static const ink2 = Color(0xFF3A3A3A);
-  static const ink3 = Color(0xFF7A7A7A);
-  static const surface = Color(0xFFFFFFFF);
-  static const surface2 = Color(0xFFF6F5F2);
-  static const surface3 = Color(0xFFEEECE8);
-  static const navy = Color(0xFF1A1A2E);
-  static const tangerine = Color(0xFFE8642C);
-  static const forest = Color(0xFF2D6A4F);
-  static const forestLight = Color(0xFFE6F5EC);
-  static const forestText = Color(0xFF1A6B3A);
-  static const border = Color(0xFFE0DDD6);
-  static const border2 = Color(0xFFC8C4BC);
-  static const errorBg = Color(0xFFFFF0EE);
-  static const errorBorder = Color(0xFFF0C4BA);
-  static const errorText = Color(0xFFC0400A);
-  static const deleteBg = Color(0xFFFFF8F5);
-  static const deleteBorder = Color(0xFFF0C4BA);
-  static const deleteText = Color(0xFFC0440A);
-  static const infoChipBg = Color(0xFFE8F0FE);
-  static const infoChipText = Color(0xFF1A56B0);
+  static const bg = Color(0xFFF4F7FF);
+  static const white = Color(0xFFFFFFFF);
+  static const royal = Color(0xFF1847C4);
+  static const royalLt = Color(0xFF3B6FE8);
+  static const royalBg = Color(0xFFEBF0FF);
+  static const royalBd = Color(0xFFCDD8FB);
+  static const ink = Color(0xFF0D1B3E);
+  static const bodyColor = Color(0xFF3A4A6B);
+  static const muted = Color(0xFF8C9AB8);
+  static const line = Color(0xFFE4EAF8);
+  static const green = Color(0xFF0EA472);
+  static const amber = Color(0xFFD97706);
+  static const teal = Color(0xFF0891B2);
+  static const violet = Color(0xFF7C3AED);
+  static const rose = Color(0xFFE11D48);
+  static const indigo = Color(0xFF6366F1);
+
+  // Aliases for backward compatibility
+  static const ink2 = bodyColor;
+  static const ink3 = muted;
+  static const surface = white;
+  static const surface2 = bg;
+  static const surface3 = royalBg;
+  static const navy = indigo;
+  static const tangerine = amber;
+  static const forest = green;
+  static const forestLight = royalBg;
+  static const forestText = green;
+  static const border = line;
+  static const border2 = royalBd;
+  static const errorBg = Color(0xFFFFF5F7);
+  static const errorBorder = rose;
+  static const errorText = rose;
+  static const deleteBg = Color(0xFFFFF5F7);
+  static const deleteBorder = rose;
+  static const deleteText = rose;
+  static const infoChipBg = royalBg;
+  static const infoChipText = royal;
 
   // Radii
   static const r8 = Radius.circular(8);
@@ -346,7 +363,15 @@ class _TopNav extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Text('Promo Manager', style: _T.head(15, color: Colors.white)),
+          Text(
+            'Promo Manager',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          // Text('Promo Manager', style: _T.head(15, color: Colors.white)),
           const Spacer(),
           if (userRole != null)
             Container(
@@ -357,18 +382,27 @@ class _TopNav extends StatelessWidget {
               ),
               child: Text(
                 userRole!.toUpperCase(),
-                style: _T.mono(10, color: Colors.white.withOpacity(0.75)),
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withOpacity(0.75),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-          const SizedBox(width: 10),
+          /*  const SizedBox(width: 10),
           CircleAvatar(
             radius: 16,
             backgroundColor: _T.tangerine,
             child: Text(
               (userRole?.isNotEmpty == true) ? userRole![0].toUpperCase() : 'A',
-              style: _T.head(12, color: Colors.white),
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
+        */
         ],
       ),
     );

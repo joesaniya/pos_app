@@ -243,8 +243,11 @@ Color _stationColor(KStation s) {
 enum _Urgency { normal, warning, overdue }
 
 _Urgency _urgencyOf(Order o, DateTime now) {
-  // ✅ Ready orders don't show urgency/timer/rush warnings
-  if (o.status == OrderStatus.ready) return _Urgency.normal;
+  // ✅ Ready and cancelled orders don't show urgency/timer/rush warnings
+  // Cancelled orders are closed and no longer tracked for overdue
+  if (o.status == OrderStatus.ready || o.status == OrderStatus.cancelled) {
+    return _Urgency.normal;
+  }
 
   final mins = now.difference(o.createdAt).inMinutes;
   if (mins >= 20) return _Urgency.overdue;
@@ -1621,15 +1624,17 @@ class _KDSOrderCard extends StatelessWidget {
                         ),
                       ),
 
-                      // Timer chip — hide for ready orders
-                      if (o.status != OrderStatus.ready)
+                      // Timer chip — hide for ready and cancelled orders
+                      if (o.status != OrderStatus.ready &&
+                          o.status != OrderStatus.cancelled)
                         _TimerChip(timer: timerStr, color: uColor),
                     ],
                   ),
 
-                  // Overdue warning row — don't show for ready orders
+                  // Overdue warning row — don't show for ready or cancelled orders
                   if (urgency == _Urgency.overdue &&
-                      o.status != OrderStatus.ready) ...[
+                      o.status != OrderStatus.ready &&
+                      o.status != OrderStatus.cancelled) ...[
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(

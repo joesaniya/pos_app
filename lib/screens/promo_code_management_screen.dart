@@ -371,7 +371,6 @@ class _TopNav extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          // Text('Promo Manager', style: _T.head(15, color: Colors.white)),
           const Spacer(),
           if (userRole != null)
             Container(
@@ -389,20 +388,6 @@ class _TopNav extends StatelessWidget {
                 ),
               ),
             ),
-          /*  const SizedBox(width: 10),
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: _T.tangerine,
-            child: Text(
-              (userRole?.isNotEmpty == true) ? userRole![0].toUpperCase() : 'A',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        */
         ],
       ),
     );
@@ -435,24 +420,6 @@ class _PageHeader extends StatelessWidget {
             ],
           ),
         ),
-        /*   GestureDetector(
-          onTap: onAdd,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(color: _T.navy, borderRadius: _T.rBtn),
-            child: Row(
-              children: [
-                const Icon(Icons.add_rounded, color: Colors.white, size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  'New Code',
-                  style: _T.head(13, color: Colors.white, w: FontWeight.w700),
-                ),
-              ],
-            ),
-          ),
-        ),
-     */
       ],
     );
   }
@@ -639,7 +606,7 @@ class _PromoCard extends StatelessWidget {
       ? 'Min ₹${promo.minOrderValue.toStringAsFixed(0)}'
       : 'No minimum';
 
-  String _fmtDate(DateTime d) => DateFormat('dd MMM yy').format(d);
+  String _fmtDate(DateTime d) => DateFormat('dd MMM yy').format(d.toLocal());
 
   @override
   Widget build(BuildContext context) {
@@ -1084,6 +1051,9 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
   bool _isLoading = false;
   String? _error;
 
+  // ── FIX: Helper to get current IST local time ──
+  DateTime get _nowLocal => DateTime.now().toLocal();
+
   @override
   void initState() {
     super.initState();
@@ -1094,16 +1064,18 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
       _minCtrl = TextEditingController(text: p.minOrderValue.toString());
       _cidCtrl = TextEditingController(text: p.customerId ?? '');
       _discountType = p.discountType;
-      _startDate = p.startDate;
-      _expiryDate = p.expiryDate;
+      // ── FIX: Convert stored dates to local (IST) when editing ──
+      _startDate = p.startDate.toLocal();
+      _expiryDate = p.expiryDate.toLocal();
     } else {
       _codeCtrl = TextEditingController();
       _valueCtrl = TextEditingController();
       _minCtrl = TextEditingController(text: '0');
       _cidCtrl = TextEditingController();
       _discountType = DiscountType.percentage;
-      _startDate = DateTime.now();
-      _expiryDate = DateTime.now().add(const Duration(days: 30));
+      // ── FIX: Use explicit local time for IST ──
+      _startDate = _nowLocal;
+      _expiryDate = _nowLocal.add(const Duration(days: 30));
     }
   }
 
@@ -1120,8 +1092,9 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: isStart ? _startDate : _expiryDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 730)),
+      // ── FIX: Use local time for firstDate/lastDate bounds ──
+      firstDate: _nowLocal.subtract(const Duration(days: 1)),
+      lastDate: _nowLocal.add(const Duration(days: 730)),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
           colorScheme: const ColorScheme.light(
@@ -1134,7 +1107,12 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
       ),
     );
     if (picked == null) return;
-    setState(() => isStart ? _startDate = picked : _expiryDate = picked);
+    // ── FIX: Ensure picked date stays in local timezone ──
+    setState(
+      () => isStart
+          ? _startDate = picked.toLocal()
+          : _expiryDate = picked.toLocal(),
+    );
   }
 
   Future<void> _save() async {
@@ -1165,8 +1143,9 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
           'discount_type': _discountType.value,
           'discount_value': double.parse(_valueCtrl.text),
           'min_order_value': double.parse(_minCtrl.text),
-          'start_date': _startDate.toIso8601String(),
-          'expiry_date': _expiryDate.toIso8601String(),
+          // ── FIX: Serialize with local timezone offset (+05:30) ──
+          'start_date': _startDate.toLocal().toIso8601String(),
+          'expiry_date': _expiryDate.toLocal().toIso8601String(),
           'customer_id': _cidCtrl.text.trim().isEmpty
               ? null
               : _cidCtrl.text.trim(),
@@ -1178,13 +1157,15 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
           discountType: _discountType.value,
           discountValue: double.parse(_valueCtrl.text),
           minOrderValue: double.parse(_minCtrl.text),
-          startDate: _startDate,
-          expiryDate: _expiryDate,
+          // ── FIX: Pass local DateTime objects (IST) ──
+          startDate: _startDate.toLocal(),
+          expiryDate: _expiryDate.toLocal(),
           createdBy: widget.userId,
           customerId: _cidCtrl.text.trim().isEmpty
               ? null
               : _cidCtrl.text.trim(),
         );
+        log('Create result: $result==>${_startDate.toLocal()}');
         ok = result != null;
       }
 
@@ -1320,8 +1301,9 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
                                       )
                                       .toList(),
                                   onChanged: (v) {
-                                    if (v != null)
+                                    if (v != null) {
                                       setState(() => _discountType = v);
+                                    }
                                   },
                                 ),
                               ),
@@ -1550,7 +1532,11 @@ class _DatePicker extends StatelessWidget {
           children: [
             const Icon(Icons.calendar_today_rounded, size: 14, color: _T.ink3),
             const SizedBox(width: 8),
-            Text(DateFormat('dd/MM/yyyy').format(date), style: _T.body(14)),
+            // ── FIX: Always display in local time (IST) ──
+            Text(
+              DateFormat('dd/MM/yyyy').format(date.toLocal()),
+              style: _T.body(14),
+            ),
           ],
         ),
       ),

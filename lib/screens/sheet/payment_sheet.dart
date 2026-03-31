@@ -501,15 +501,13 @@ class _PaymentSheetState extends State<PaymentSheet>
                       )
                     else
                       // Show tip only when promo is applied
-                      Expanded(
-                        child: _AmountField(
-                          label: 'Tip (₹)',
-                          hint: '0',
-                          ctrl: _tipCtrl,
-                          emoji: '🙏',
-                          color: PC.gold,
-                          onChanged: (_) => setState(() {}),
-                        ),
+                      _AmountField(
+                        label: 'Tip (₹)',
+                        hint: '0',
+                        ctrl: _tipCtrl,
+                        emoji: '🙏',
+                        color: PC.gold,
+                        onChanged: (_) => setState(() {}),
                       ),
 
                     const SizedBox(height: 18),

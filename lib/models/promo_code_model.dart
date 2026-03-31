@@ -264,6 +264,7 @@ class PromoCode {
       applicableItems: _parseJsonArray(data['applicable_items']),
       applicableCategories: _parseJsonArray(data['applicable_categories']),
       customerId: data['customer_id'],
+
       isActive: data['is_active'] ?? true,
       createdBy: data['created_by'] ?? '',
       createdAt: _parseDateTime(data['created_at']),
@@ -284,6 +285,7 @@ class PromoCode {
       'applicable_items': applicableItems,
       'applicable_categories': applicableCategories,
       'customer_id': customerId,
+
       'is_active': isActive,
       'created_by': createdBy,
       'created_at': createdAt.toIso8601String(),
@@ -335,42 +337,34 @@ class PromoCode {
   //  UTILITY METHODS
   // ═══════════════════════════════════════════════════════════
 
-  /// Parse DateTime from various formats including PostgreSQL timestamps
-  /// Returns DateTime in LOCAL timezone (device timezone) for proper comparison
+  /// Parse DateTime from database - PRESERVE EXACT TIME WITHOUT TIMEZONE CONVERSION
+  /// Dates stored in IST should remain as-is when retrieved
   static DateTime _parseDateTime(dynamic dateStr) {
     if (dateStr == null) return DateTime.now();
 
     String dateString = dateStr.toString().trim();
 
     try {
-      // Normalize various datetime formats to ISO8601
-      // Handles:
-      // - "2026-03-31 11:11:43.207415+00" (PostgreSQL with +00 UTC)
-      // - "2026-03-31 11:11:43.207415+05:30" (PostgreSQL with IST)
-      // - "2026-04-30 11:10:31.638140Z" (ISO8601 with Z UTC)
-      // - "2026-03-31T11:11:43.207415" (ISO8601 without timezone)
+      // Remove any timezone information and parse as local time
+      // This preserves the exact time that was set in IST
 
       // Step 1: Replace space with T for ISO8601 format
       dateString = dateString.replaceFirst(' ', 'T');
 
-      // Step 2: Parse with timezone offset info (keep timezone intact)
-      DateTime parsed;
+      // Step 2: Remove all timezone information
+      // - Remove +05:30
+      // - Remove +00:00
+      // - Remove Z
+      dateString = dateString
+          .replaceAll(
+            RegExp(r'[+-]\d{2}:\d{2}$'),
+            '',
+          ) // Remove +HH:MM or -HH:MM
+          .replaceAll(RegExp(r'Z$'), ''); // Remove Z
 
-      if (dateString.contains('+') ||
-          (dateString.contains('-') && dateString.lastIndexOf('-') > 10)) {
-        // Has timezone offset - DateTime.parse handles it and converts to UTC automatically
-        // Then we convert back to local time
-        parsed = DateTime.parse(dateString).toLocal();
-      } else if (dateString.endsWith('Z')) {
-        // UTC timezone - parse and convert to local time
-        parsed = DateTime.parse(dateString).toLocal();
-      } else {
-        // No timezone - assumes local time already
-        if (!dateString.endsWith('Z')) {
-          dateString += 'Z'; // Assume UTC if no timezone specified
-        }
-        parsed = DateTime.parse(dateString).toLocal();
-      }
+      // Step 3: Parse as local time (no timezone conversion)
+      // This treats the time as-is in the device's local timezone (IST)
+      DateTime parsed = DateTime.parse(dateString);
 
       return parsed;
     } catch (e) {

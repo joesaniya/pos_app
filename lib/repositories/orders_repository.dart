@@ -388,6 +388,30 @@ class OrdersRepository {
     String? notes,
     double taxRate = 5.0,
   }) async {
+    // ✅ FIX: VALIDATE items upfront to prevent empty orders
+    if (cartItems.isEmpty) {
+      throw Exception(
+        'Cannot create order: cart is empty. Add items before creating an order.',
+      );
+    }
+
+    final validCartItems = cartItems.where((item) {
+      if (item.menuItemId.isEmpty) {
+        debugPrint(
+          '⚠️  [OrdersRepo] Skipping item with empty menuItemId: ${item.itemName}',
+        );
+        return false;
+      }
+      return true;
+    }).toList();
+
+    if (validCartItems.isEmpty) {
+      throw Exception(
+        'Cannot create order: all items have missing menu IDs. '
+        'Please refresh the menu and try again.',
+      );
+    }
+
     if (_connectivity.isOnline) {
       // ONLINE: call Supabase directly (existing flow), then cache result
       try {
@@ -504,7 +528,7 @@ class OrdersRepository {
     }
 
     // OFFLINE: generate local ID and store locally
-    final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
+    final subtotal = validCartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
     final localId = _uuid.v4();
@@ -548,10 +572,11 @@ class OrdersRepository {
       'created_by_role': createdByRole,
       'created_at': now,
       'updated_at': now,
-      'items': cartItems
+      'items': validCartItems
           .map(
             (c) => {
               'order_id': localId,
+              'business_id': businessId,
               'menu_item_id': c.menuItemId,
               'item_name': c.itemName,
               'item_price': c.itemPrice,
@@ -684,6 +709,7 @@ class OrdersRepository {
           .map(
             (item) => {
               'order_id': orderId,
+              'business_id': businessId,
               'menu_item_id': item.menuItemId,
               'item_name': item.itemName,
               'item_price': item.itemPrice,

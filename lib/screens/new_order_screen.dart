@@ -1465,12 +1465,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
       if (mounted) {
         if (!_isOnline) {
+          log('order placed sucessfully:${order.items[0].itemName}');
           _snack(
             _isContinuingExistingOrder
                 ? '✅ Items added offline. Will sync when online.'
                 : '✅ Order created offline. Will sync when online.',
           );
         } else {
+          log('order placed sucessfully:${order.items[0].itemName}');
           _snack(
             _isContinuingExistingOrder
                 ? '✅ ✨ Items added seamlessly to order #${order.orderNumber}'
@@ -2665,7 +2667,7 @@ class _MenuView extends StatelessWidget {
                     return _MenuTile(
                       item: item,
                       quantity: cart[id]?.quantity ?? 0,
-                      onAdd: () => onAdd(item),
+                      onAdd: onAdd,
                       onRemove: () => onRemove(id),
                     );
                   },
@@ -2719,7 +2721,7 @@ class _CatChip extends StatelessWidget {
 class _MenuTile extends StatelessWidget {
   final Map<String, dynamic> item;
   final int quantity;
-  final VoidCallback onAdd;
+  final void Function(Map<String, dynamic>) onAdd;
   final VoidCallback onRemove;
   const _MenuTile({
     required this.item,
@@ -2899,7 +2901,7 @@ class _MenuTile extends StatelessWidget {
             )
           else if (quantity == 0)
             GestureDetector(
-              onTap: onAdd,
+              onTap: () => onAdd(item),
               child: Container(
                 width: 32,
                 height: 32,
@@ -2945,7 +2947,7 @@ class _MenuTile extends StatelessWidget {
                   // ✓ Handle async onAdd (don't await, fire-and-forget with error capture)
                   onTap: () async {
                     try {
-                      onAdd();
+                      onAdd(item);
                     } catch (e) {
                       debugPrint('❌ Add item error: $e');
                     }

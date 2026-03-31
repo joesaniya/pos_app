@@ -498,6 +498,8 @@ class OfflineSyncService {
                         ..._cleanPayload(item),
                         'order_id':
                             existingOrderId, // ✅ Use extracted ID (non-null)
+                        'business_id':
+                            clean['business_id'], // ✅ Include business_id
                       },
                     )
                     .toList();
@@ -508,22 +510,32 @@ class OfflineSyncService {
           }
         }
 
-        // ✅ No conflict - proceed with normal insert
+        // ✅ FIX: VALIDATE items exist before syncing order
+        final items = (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        if (items.isEmpty) {
+          log(
+            '[SyncService] ⚠️ Skipping order sync - no items in offline order $id. Cannot create empty order.',
+          );
+          return; // Skip this order (don't create orphan empty record)
+        }
+
+        // ✅ No conflict - proceed with normal insert (items are guaranteed here)
         final orderData = Map<String, dynamic>.from(clean)..remove('items');
         await _sb.from('orders').insert(orderData);
-        final items = (p['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-        if (items.isNotEmpty) {
-          final cleanItems = items
-              .map(
-                (item) => {
-                  ..._cleanPayload(item),
-                  'order_id':
-                      id, // ✅ Ensure order_id is set to syncing order's id
-                },
-              )
-              .toList();
-          await _sb.from('order_items').insert(cleanItems);
-        }
+
+        // ✅ Insert items (guaranteed non-empty)
+        final cleanItems = items
+            .map(
+              (item) => {
+                ..._cleanPayload(item),
+                'order_id':
+                    id, // ✅ Ensure order_id is set to syncing order's id
+                'business_id':
+                    clean['business_id'], // ✅ Include business_id from order
+              },
+            )
+            .toList();
+        await _sb.from('order_items').insert(cleanItems);
         break;
       case LocalDatabase.actionUpdate:
         final updateData = Map<String, dynamic>.from(clean)..remove('items');

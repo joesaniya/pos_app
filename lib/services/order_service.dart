@@ -25,6 +25,8 @@
 // Paste the full updated class below into lib/services/order_service.dart,
 // replacing the existing file content.
 
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -280,6 +282,9 @@ class OrdersService {
     String? updatedNotes,
     double taxRate = 5.0,
   }) async {
+    log(
+      'businessId:$businessId, orderId:$orderId, newItems:${newItems.length}, updatedNotes:$updatedNotes',
+    );
     if (newItems.isEmpty) {
       throw Exception('No items to add to order');
     }
@@ -316,6 +321,7 @@ class OrdersService {
         .map(
           (item) => {
             'order_id': orderId,
+            'business_id': businessId,
             'menu_item_id': item.menuItemId,
             'item_name': item.itemName,
             'item_price': item.itemPrice,
@@ -548,6 +554,30 @@ class OrdersService {
     String? notes,
     double taxRate = 5.0,
   }) async {
+    // ✅ FIX: VALIDATE items BEFORE creating order to prevent orphan empty records
+    if (cartItems.isEmpty) {
+      throw Exception(
+        'Cannot create order: cart is empty. Add items before creating an order.',
+      );
+    }
+
+    final validCartItems = cartItems.where((item) {
+      if (item.menuItemId.isEmpty) {
+        debugPrint(
+          '⚠️  [OrdersService] Skipping item with empty menuItemId: ${item.itemName}',
+        );
+        return false;
+      }
+      return true;
+    }).toList();
+
+    if (validCartItems.isEmpty) {
+      throw Exception(
+        'Cannot create order: all items have missing menu IDs. '
+        'Please refresh the menu and try again.',
+      );
+    }
+
     // ── DUPLICATE ORDER GUARD ────────────────────────────────────────────────
     if (tableSeatId != null && tableSeatId.isNotEmpty) {
       final existing = await _db
@@ -614,7 +644,7 @@ class OrdersService {
       } catch (_) {}
     }
 
-    final subtotal = cartItems.fold<double>(0, (s, i) => s + i.subtotal);
+    final subtotal = validCartItems.fold<double>(0, (s, i) => s + i.subtotal);
     final taxAmount = subtotal * (taxRate / 100);
     final totalAmount = subtotal + taxAmount;
 
@@ -667,39 +697,66 @@ class OrdersService {
 
     final orderId = orderData['id'] as String;
 
-    if (cartItems.isNotEmpty) {
-      // ✅ VALIDATE: Filter out items with empty/invalid menu_item_id
-      final validCartItems = cartItems.where((item) {
-        if (item.menuItemId.isEmpty) {
-          debugPrint(
-            '⚠️  [OrdersService] Skipping item with empty menuItemId: ${item.itemName}',
+    // ✅ GUARANTEED: validCartItems is not empty (validated earlier)
+    // Insert all validated items for this order
+    try {
+      await _db
+          .from('order_items')
+          .insert(
+            validCartItems
+                .map(
+                  (c) => {
+                    'order_id': orderId,
+                    'business_id': businessId,
+                    'menu_item_id': c.menuItemId,
+                    'item_name': c.itemName,
+                    'item_price': c.itemPrice,
+                    'category_name': c.categoryName,
+                    'is_veg': c.isVeg,
+                    'quantity': c.quantity,
+                    'subtotal': c.subtotal,
+                    'notes': c.notes,
+                  },
+                )
+                .toList(),
           );
-          return false;
-        }
-        return true;
-      }).toList();
-
-      if (validCartItems.isNotEmpty) {
-        await _db
-            .from('order_items')
-            .insert(
-              validCartItems
-                  .map(
-                    (c) => {
-                      'order_id': orderId,
-                      'menu_item_id': c.menuItemId,
-                      'item_name': c.itemName,
-                      'item_price': c.itemPrice,
-                      'category_name': c.categoryName,
-                      'is_veg': c.isVeg,
-                      'quantity': c.quantity,
-                      'subtotal': c.subtotal,
-                      'notes': c.notes,
-                    },
-                  )
-                  .toList(),
-            );
+    } catch (e) {
+      // ❌ CRITICAL: Items insertion failed - clean up order to prevent orphan
+      debugPrint('❌ CRITICAL: Items insertion failed: $e');
+      try {
+        await _db.from('orders').delete().eq('id', orderId);
+        debugPrint('✅ Rolled back: Deleted orphan order $orderId');
+      } catch (e2) {
+        debugPrint('❌ Failed to rollback order: $e2');
       }
+      throw Exception(
+        'Failed to create order items. Order has been rolled back. '
+        'Error: $e',
+      );
+    }
+
+    // ✅ VERIFICATION: Confirm items were actually inserted (safety check)
+    final itemsCount = await _db
+        .from('order_items')
+        .select('id')
+        .eq('order_id', orderId);
+    debugPrint(
+      '✅ [OrdersService] Verified: ${(itemsCount as List).length} items inserted',
+    );
+    if ((itemsCount as List).isEmpty) {
+      // ❌ CRITICAL: Items didn't insert (silent failure flag)
+      debugPrint('❌ CRITICAL: Items verification failed (count=0)');
+      try {
+        await _db.from('orders').delete().eq('id', orderId);
+        debugPrint('✅ Rolled back: Deleted orphan order $orderId (no items)');
+      } catch (e) {
+        debugPrint('❌ Failed to rollback order: $e');
+      }
+      throw Exception(
+        'Order items verification failed. '
+        'Items were not saved to database (possibly missing business_id column). '
+        'Order rolled back. Ensure FIX_ORDER_ITEMS_BUSINESS_ID_2026_03_31.sql has been applied.',
+      );
     }
 
     // ── TABLE STATUS UPDATE — SEAT-AWARE (FIX) ─────────────────────────────

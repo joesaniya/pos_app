@@ -456,23 +456,30 @@ class OrdersProvider extends ChangeNotifier {
     _ordersChannel = OrdersRepository.instance.subscribeToOrders(
       businessId: _businessId,
       onEvent: (order, eventType) async {
-        final idx = _orders.indexWhere((o) => o.id == order.id);
-        final isNew = idx == -1;
-
-        // Consume the optimistic token if present — but ALWAYS apply the full
-        // server record (which carries seat_label and other view-computed fields)
-        // so the UI updates immediately without a manual refresh.
-        if (_pendingOptimisticIds.contains(order.id)) {
+        // ✅ FIX: Skip duplicate insertion for optimistically-added orders
+        // If this order was just created locally, the optimistic version is already
+        // in the list. Mark it as synced and update it with server data, but don't
+        // insert again to prevent duplicates.
+        final isOptimisticOrder = _pendingOptimisticIds.contains(order.id);
+        if (isOptimisticOrder) {
           _pendingOptimisticIds.remove(order.id);
         }
 
+        final idx = _orders.indexWhere((o) => o.id == order.id);
+        final isNew = idx == -1;
+
         final oldStat = isNew ? null : _orders[idx].status;
 
-        if (isNew) {
+        if (isNew && !isOptimisticOrder) {
+          // Only insert if NOT an optimistic order (prevents duplicate insertion)
           _orders.insert(0, order);
-        } else {
+        } else if (!isNew) {
+          // Always update if found (optimistic or not)
+          // This applies server data to the existing list entry
           _orders[idx] = order;
         }
+        // If isNew && isOptimisticOrder, skip insertion (already added optimistically)
+
         notifyListeners();
 
         if (order.createdByUid != _uid) {

@@ -435,7 +435,7 @@ class _PageHeader extends StatelessWidget {
             ],
           ),
         ),
-        GestureDetector(
+        /*   GestureDetector(
           onTap: onAdd,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -452,6 +452,7 @@ class _PageHeader extends StatelessWidget {
             ),
           ),
         ),
+     */
       ],
     );
   }

@@ -1,19 +1,76 @@
-// lib/screens/promo_code_management_screen.dart
-// Admin screen for managing promo codes (creation, editing, deletion)
-
 import 'dart:developer';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:pos_app/models/promo_code_model.dart';
 import 'package:pos_app/providers/promo_code_provider.dart';
 import 'package:pos_app/utils/promo_code_access_control.dart';
-import 'package:pos_app/utils/promo_code_validator.dart';
 import 'package:provider/provider.dart';
 
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+//  DESIGN TOKENS
+// ─────────────────────────────────────────────
+
+abstract class _T {
+  // Palette
+  static const ink = Color(0xFF0F0F0F);
+  static const ink2 = Color(0xFF3A3A3A);
+  static const ink3 = Color(0xFF7A7A7A);
+  static const surface = Color(0xFFFFFFFF);
+  static const surface2 = Color(0xFFF6F5F2);
+  static const surface3 = Color(0xFFEEECE8);
+  static const navy = Color(0xFF1A1A2E);
+  static const tangerine = Color(0xFFE8642C);
+  static const forest = Color(0xFF2D6A4F);
+  static const forestLight = Color(0xFFE6F5EC);
+  static const forestText = Color(0xFF1A6B3A);
+  static const border = Color(0xFFE0DDD6);
+  static const border2 = Color(0xFFC8C4BC);
+  static const errorBg = Color(0xFFFFF0EE);
+  static const errorBorder = Color(0xFFF0C4BA);
+  static const errorText = Color(0xFFC0400A);
+  static const deleteBg = Color(0xFFFFF8F5);
+  static const deleteBorder = Color(0xFFF0C4BA);
+  static const deleteText = Color(0xFFC0440A);
+  static const infoChipBg = Color(0xFFE8F0FE);
+  static const infoChipText = Color(0xFF1A56B0);
+
+  // Radii
+  static const r8 = Radius.circular(8);
+  static const r10 = Radius.circular(10);
+  static const r12 = Radius.circular(12);
+  static const r14 = Radius.circular(14);
+  static const r20 = Radius.circular(20);
+  static final rCard = BorderRadius.circular(14);
+  static final rBtn = BorderRadius.circular(10);
+  static final rTag = BorderRadius.circular(6);
+  static final rPill = BorderRadius.circular(20);
+
+  // Typography helpers
+  static TextStyle head(
+    double size, {
+    Color color = ink,
+    FontWeight w = FontWeight.w800,
+  }) => GoogleFonts.syne(fontSize: size, fontWeight: w, color: color);
+  static TextStyle mono(
+    double size, {
+    Color color = ink,
+    FontWeight w = FontWeight.w500,
+  }) => GoogleFonts.dmMono(fontSize: size, fontWeight: w, color: color);
+  static TextStyle body(
+    double size, {
+    Color color = ink2,
+    FontWeight w = FontWeight.w400,
+  }) => GoogleFonts.dmSans(fontSize: size, fontWeight: w, color: color);
+
+  // Divider
+  static const divider = Divider(height: 1, thickness: 0.5, color: border);
+}
+
+// ─────────────────────────────────────────────
 //  PROMO CODE MANAGEMENT SCREEN
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
 
 class PromoCodeManagementScreen extends StatefulWidget {
   final String businessId;
@@ -32,34 +89,28 @@ class PromoCodeManagementScreen extends StatefulWidget {
       _PromoCodeManagementScreenState();
 }
 
-class _PromoCodeManagementScreenState extends State<PromoCodeManagementScreen> {
+class _PromoCodeManagementScreenState extends State<PromoCodeManagementScreen>
+    with SingleTickerProviderStateMixin {
   late PromoCodeProvider _provider;
   bool _showActive = true;
+  late AnimationController _fabAnim;
 
   @override
   void initState() {
     super.initState();
+    // Initialize animation controller first, before any early returns
+    _fabAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
 
-    // ─ RBAC: Validate user role for promo management access
     if (!PromoCodeAccessControl.canManagePromoCodes(widget.userRole)) {
-      log('[PromoCodeManagementScreen] ❌ UNAUTHORIZED ACCESS ATTEMPT');
-      PromoCodeAccessControl.logAccessAttempt(
-        widget.userRole,
-        'direct_screen_access_denied',
-        false,
-      );
-
-      // Redirect to previous screen with error
+      log('[PromoMgmt] ❌ UNAUTHORIZED ACCESS');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                PromoCodeAccessControl.getAccessDeniedReason(widget.userRole),
-              ),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
+          _showTopSnack(
+            PromoCodeAccessControl.getAccessDeniedReason(widget.userRole),
+            isError: true,
           );
           Navigator.of(context).pop();
         }
@@ -67,381 +118,192 @@ class _PromoCodeManagementScreenState extends State<PromoCodeManagementScreen> {
       return;
     }
 
-    log(
-      '[PromoCodeManagementScreen] ✅ Access granted for role: ${widget.userRole}',
-    );
-    PromoCodeAccessControl.logAccessAttempt(
-      widget.userRole,
-      'promo_management_screen_opened',
-      true,
-    );
-
-    // ─ CREATE PROVIDER LOCALLY (not from tree)
+    // Forward animation after auth check passes
+    _fabAnim.forward();
     _provider = PromoCodeProvider();
-    _loadPromoCodess();
+    _loadCodes();
   }
 
   @override
   void dispose() {
+    _fabAnim.dispose();
     _provider.dispose();
     super.dispose();
   }
 
-  void _loadPromoCodess() {
-    _provider.loadPromoCodesByBusiness(widget.businessId);
+  void _loadCodes() => _provider.loadPromoCodesByBusiness(widget.businessId);
+
+  void _showTopSnack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: _T.body(13, color: Colors.white)),
+        backgroundColor: isError ? _T.errorText : _T.forest,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
   }
 
-  void _navigateToCreateScreen() {
-    Navigator.push(
+  Future<void> _goCreate() async {
+    final result = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (context) => PromoCodeFormScreen(
+      _slideRoute(
+        PromoCodeFormScreen(
           businessId: widget.businessId,
           userId: widget.userId ?? '',
           isEdit: false,
         ),
       ),
-    ).then((result) {
-      if (result == true) _loadPromoCodess();
-    });
+    );
+    if (result == true) _loadCodes();
   }
 
-  void _navigateToEditScreen(PromoCode promoCode) {
-    Navigator.push(
+  Future<void> _goEdit(PromoCode promo) async {
+    final result = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (context) => PromoCodeFormScreen(
+      _slideRoute(
+        PromoCodeFormScreen(
           businessId: widget.businessId,
           userId: widget.userId ?? '',
           isEdit: true,
-          promoCode: promoCode,
+          promoCode: promo,
         ),
       ),
-    ).then((result) {
-      if (result == true) _loadPromoCodess();
-    });
+    );
+    if (result == true) _loadCodes();
   }
 
-  void _confirmDelete(PromoCode promoCode) {
+  void _confirmDelete(PromoCode promo) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Promo Code'),
-        content: Text(
-          'Are you sure you want to delete promo code "${promoCode.code}"? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              final success = await _provider.deletePromoCode(promoCode.id);
-              if (success && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Promo code deleted successfully'),
-                  ),
-                );
-              }
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
+      builder: (_) => _DeleteDialog(
+        code: promo.code,
+        onConfirm: () async {
+          final ok = await _provider.deletePromoCode(promo.id);
+          if (ok && mounted) _showTopSnack('${promo.code} deleted');
+        },
       ),
     );
   }
+
+  PageRouteBuilder<bool> _slideRoute(Widget page) => PageRouteBuilder<bool>(
+    pageBuilder: (_, a, __) => page,
+    transitionsBuilder: (_, a, __, child) => SlideTransition(
+      position: Tween(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+      child: child,
+    ),
+    transitionDuration: const Duration(milliseconds: 340),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Promo Codes'),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: _loadPromoCodess,
+      backgroundColor: _T.surface2,
+      body: Column(
+        children: [
+          _TopNav(userRole: widget.userRole),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: _provider,
+              builder: (_, __) {
+                if (_provider.isLoading) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      color: _T.tangerine,
+                      strokeWidth: 2,
+                    ),
+                  );
+                }
+
+                final all = _provider.promoCodes;
+                final active = all.where((p) => p.isActive).toList();
+                final inactive = all.where((p) => !p.isActive).toList();
+                final shown = _showActive ? active : inactive;
+
+                return CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // ── Page heading ──
+                            _PageHeader(onAdd: _goCreate),
+                            const SizedBox(height: 20),
+                            // ── Stat row ──
+                            _StatRow(
+                              total: all.length,
+                              active: active.length,
+                              expired: inactive.length,
+                            ),
+                            const SizedBox(height: 20),
+                            // ── Filter tabs ──
+                            _FilterTabs(
+                              showActive: _showActive,
+                              activeCount: active.length,
+                              inactiveCount: inactive.length,
+                              onChanged: (v) => setState(() => _showActive = v),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    if (shown.isEmpty)
+                      SliverFillRemaining(
+                        child: _EmptyState(
+                          showActive: _showActive,
+                          onAdd: _goCreate,
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (_, i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _PromoCard(
+                                promo: shown[i],
+                                onEdit: () => _goEdit(shown[i]),
+                                onDelete: () => _confirmDelete(shown[i]),
+                                onToggle: (v) => _provider
+                                    .togglePromoCodeStatus(shown[i].id, v),
+                              ),
+                            ),
+                            childCount: shown.length,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
         ],
       ),
-      body: ListenableBuilder(
-        listenable: _provider,
-        builder: (context, _) {
-          if (_provider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          // For management screen, show all codes regardless of validity
-          final allCodes = _provider.promoCodes;
-
-          // Filter by active/expired status
-          final filteredCodes = _showActive
-              ? allCodes.where((p) => p.isActive).toList()
-              : allCodes.where((p) => !p.isActive).toList();
-
-          if (filteredCodes.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.local_offer_outlined,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _showActive
-                        ? 'No active promo codes'
-                        : 'No inactive promo codes',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: _navigateToCreateScreen,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Promo Code'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          return SingleChildScrollView(
-            child: Column(
-              children: [
-                // ─ Filter chips
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Wrap(
-                    spacing: 8,
-                    children: [
-                      FilterChip(
-                        label: Text(
-                          'Active (${allCodes.where((p) => p.isActive).length})',
-                        ),
-                        selected: _showActive,
-                        onSelected: (selected) {
-                          setState(() => _showActive = true);
-                        },
-                      ),
-                      FilterChip(
-                        label: Text(
-                          'Inactive (${allCodes.where((p) => !p.isActive).length})',
-                        ),
-                        selected: !_showActive,
-                        onSelected: (selected) {
-                          setState(() => _showActive = false);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-
-                // ─ Promo code list
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filteredCodes.length,
-                  itemBuilder: (context, index) {
-                    final promo = filteredCodes[index];
-                    log(
-                      'Rendering promo code: ${promo.code} (Active: ${promo.isActive})',
-                    );
-                    return PromoCodeCard(
-                      promoCode: promo,
-                      onEdit: () => _navigateToEditScreen(promo),
-                      onDelete: () => _confirmDelete(promo),
-                      onToggle: (isActive) async {
-                        await _provider.togglePromoCodeStatus(
-                          promo.id,
-                          isActive,
-                        );
-                      },
-                    );
-                  },
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _navigateToCreateScreen,
-        tooltip: 'Add new promo code',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-//  PROMO CODE CARD
-// ══════════════════════════════════════════════════════════════
-
-class PromoCodeCard extends StatelessWidget {
-  final PromoCode promoCode;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final Function(bool) onToggle;
-
-  const PromoCodeCard({
-    Key? key,
-    required this.promoCode,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onToggle,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    log('promo:${promoCode.isActive}');
-    final isExpired = !promoCode.isValid;
-    final displayText = promoCode.displayText;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: InkWell(
-        onTap: onEdit,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ─ Header: Code + Status badge
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          promoCode.code,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          displayText,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                  // if (isExpired)
-                  promoCode.isActive != true
-                      ? Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade100,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Expired',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.red.shade700,
-                            ),
-                          ),
-                        )
-                      : Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade100,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Active',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.green.shade700,
-                            ),
-                          ),
-                        ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-
-              // ─ Details grid
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 2.5,
-                children: [
-                  _DetailItem(
-                    label: 'Type',
-                    value: promoCode.discountType.label,
-                    icon: Icons.percent,
-                  ),
-                  _DetailItem(
-                    label: 'Min Order',
-                    value: promoCode.minOrderValue > 0
-                        ? '₹${promoCode.minOrderValue.toStringAsFixed(2)}'
-                        : 'None',
-                    icon: Icons.money,
-                  ),
-                  _DetailItem(
-                    label: 'Valid From',
-                    value: DateFormat('dd/MM/yy').format(promoCode.startDate),
-                    icon: Icons.calendar_today,
-                  ),
-                  _DetailItem(
-                    label: 'Expires',
-                    value: DateFormat('dd/MM/yy').format(promoCode.expiryDate),
-                    icon: Icons.event_busy,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              // ─ Customer-specific info
-              if (promoCode.customerId != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '👤 Customer-specific coupon',
-                    style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-
-              // ─ Action buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(onPressed: onEdit, child: const Text('Edit')),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: onDelete,
-                    style: TextButton.styleFrom(foregroundColor: Colors.red),
-                    child: const Text('Delete'),
-                  ),
-                ],
-              ),
-            ],
+      floatingActionButton: ScaleTransition(
+        scale: _fabAnim.status == AnimationStatus.dismissed
+            ? AlwaysStoppedAnimation(0.0)
+            : CurvedAnimation(parent: _fabAnim, curve: Curves.elasticOut),
+        child: FloatingActionButton.extended(
+          onPressed: _goCreate,
+          backgroundColor: _T.navy,
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add_rounded, size: 20),
+          label: Text(
+            'New Code',
+            style: _T.head(13, color: Colors.white, w: FontWeight.w700),
+          ),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
       ),
@@ -449,55 +311,712 @@ class PromoCodeCard extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-//  DETAIL ITEM WIDGET
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+//  TOP NAV
+// ─────────────────────────────────────────────
 
-class _DetailItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-
-  const _DetailItem({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
+class _TopNav extends StatelessWidget {
+  final String? userRole;
+  const _TopNav({this.userRole});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 14, color: Colors.grey),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.grey,
-                fontWeight: FontWeight.w500,
+    return Container(
+      color: _T.navy,
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 10,
+        left: 20,
+        right: 20,
+        bottom: 14,
+      ),
+      child: Row(
+        children: [
+          // Logo mark
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: _T.tangerine,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: const Icon(
+              Icons.local_offer_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text('Promo Manager', style: _T.head(15, color: Colors.white)),
+          const Spacer(),
+          if (userRole != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                borderRadius: _T.rPill,
+              ),
+              child: Text(
+                userRole!.toUpperCase(),
+                style: _T.mono(10, color: Colors.white.withOpacity(0.75)),
               ),
             ),
-          ],
+          const SizedBox(width: 10),
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: _T.tangerine,
+            child: Text(
+              (userRole?.isNotEmpty == true) ? userRole![0].toUpperCase() : 'A',
+              style: _T.head(12, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  PAGE HEADER
+// ─────────────────────────────────────────────
+
+class _PageHeader extends StatelessWidget {
+  final VoidCallback onAdd;
+  const _PageHeader({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'BIZ · PROMO CODES',
+                style: _T.mono(10, color: _T.ink3).copyWith(letterSpacing: 1.4),
+              ),
+              const SizedBox(height: 4),
+              Text('Promo Codes', style: _T.head(28)),
+            ],
+          ),
         ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        GestureDetector(
+          onTap: onAdd,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(color: _T.navy, borderRadius: _T.rBtn),
+            child: Row(
+              children: [
+                const Icon(Icons.add_rounded, color: Colors.white, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'New Code',
+                  style: _T.head(13, color: Colors.white, w: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 }
 
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+//  STAT ROW
+// ─────────────────────────────────────────────
+
+class _StatRow extends StatelessWidget {
+  final int total, active, expired;
+  const _StatRow({
+    required this.total,
+    required this.active,
+    required this.expired,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _StatCard(label: 'Total', value: '$total', bg: _T.surface, fg: _T.ink),
+        const SizedBox(width: 10),
+        _StatCard(
+          label: 'Active',
+          value: '$active',
+          bg: _T.forest,
+          fg: Colors.white,
+          labelFg: Colors.white70,
+        ),
+        const SizedBox(width: 10),
+        _StatCard(
+          label: 'Expired',
+          value: '$expired',
+          bg: _T.surface,
+          fg: _T.ink2,
+        ),
+      ],
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label, value;
+  final Color bg, fg;
+  final Color? labelFg;
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.bg,
+    required this.fg,
+    this.labelFg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: _T.rCard,
+          border: bg == _T.surface ? Border.all(color: _T.border) : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label.toUpperCase(),
+              style: _T
+                  .mono(10, color: labelFg ?? _T.ink3)
+                  .copyWith(letterSpacing: 1.0),
+            ),
+            const SizedBox(height: 4),
+            Text(value, style: _T.head(26, color: fg)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  FILTER TABS
+// ─────────────────────────────────────────────
+
+class _FilterTabs extends StatelessWidget {
+  final bool showActive;
+  final int activeCount, inactiveCount;
+  final ValueChanged<bool> onChanged;
+
+  const _FilterTabs({
+    required this.showActive,
+    required this.activeCount,
+    required this.inactiveCount,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: _T.surface3, borderRadius: _T.rCard),
+      child: Row(
+        children: [
+          _Tab(
+            label: 'Active ($activeCount)',
+            selected: showActive,
+            onTap: () => onChanged(true),
+          ),
+          _Tab(
+            label: 'Inactive ($inactiveCount)',
+            selected: !showActive,
+            onTap: () => onChanged(false),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Tab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _Tab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? _T.navy : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: _T.body(
+              13,
+              color: selected ? Colors.white : _T.ink2,
+              w: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  PROMO CARD
+// ─────────────────────────────────────────────
+
+class _PromoCard extends StatelessWidget {
+  final PromoCode promo;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final ValueChanged<bool> onToggle;
+
+  const _PromoCard({
+    required this.promo,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggle,
+  });
+
+  String get _displayDiscount {
+    if (promo.discountType == DiscountType.percentage) {
+      return '${promo.discountValue.toStringAsFixed(0)}% off';
+    }
+    return '₹${promo.discountValue.toStringAsFixed(0)} off';
+  }
+
+  String get _minText => promo.minOrderValue > 0
+      ? 'Min ₹${promo.minOrderValue.toStringAsFixed(0)}'
+      : 'No minimum';
+
+  String _fmtDate(DateTime d) => DateFormat('dd MMM yy').format(d);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _T.surface,
+        borderRadius: _T.rCard,
+        border: Border.all(color: _T.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Top section ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Code + customer chip
+                      Row(
+                        children: [
+                          Text(promo.code, style: _T.mono(17)),
+                          if (promo.customerId != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _T.infoChipBg,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'CUSTOMER',
+                                style: _T
+                                    .mono(9, color: _T.infoChipText)
+                                    .copyWith(letterSpacing: 0.8),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _displayDiscount,
+                        style: _T.head(
+                          22,
+                          color: promo.isActive ? _T.tangerine : _T.ink3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Status pill
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: promo.isActive ? _T.forestLight : _T.surface3,
+                    borderRadius: _T.rPill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: promo.isActive ? _T.forestText : _T.ink3,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        promo.isActive ? 'Active' : 'Inactive',
+                        style: _T.mono(
+                          11,
+                          color: promo.isActive ? _T.forestText : _T.ink3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Tags row ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _Tag(icon: Icons.money_off_rounded, label: _minText),
+                _Tag(
+                  icon: Icons.date_range_rounded,
+                  label:
+                      '${_fmtDate(promo.startDate)} → ${_fmtDate(promo.expiryDate)}',
+                ),
+              ],
+            ),
+          ),
+
+          // ── Divider ──
+          const Divider(height: 1, thickness: 0.5, color: _T.border),
+
+          // ── Actions ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Row(
+              children: [
+                _ActionBtn(label: 'Edit', onTap: onEdit),
+                const SizedBox(width: 8),
+                _ActionBtn(
+                  label: promo.isActive ? 'Deactivate' : 'Activate',
+                  bg: promo.isActive ? _T.deleteBg : _T.forestLight,
+                  border: promo.isActive
+                      ? _T.deleteBorder
+                      : const Color(0xFFB5D5C5),
+                  fg: promo.isActive ? _T.deleteText : _T.forestText,
+                  onTap: () => onToggle(!promo.isActive),
+                ),
+                const Spacer(),
+                _IconBtn(
+                  icon: Icons.delete_outline_rounded,
+                  color: _T.deleteText,
+                  bg: _T.deleteBg,
+                  border: _T.deleteBorder,
+                  onTap: onDelete,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _Tag({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _T.surface2,
+        borderRadius: _T.rTag,
+        border: Border.all(color: _T.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: _T.ink3),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: _T.mono(11, color: _T.ink2, w: FontWeight.w400),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionBtn extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final Color bg;
+  final Color border;
+  final Color fg;
+
+  const _ActionBtn({
+    required this.label,
+    required this.onTap,
+    this.bg = _T.surface,
+    this.border = _T.border2,
+    this.fg = _T.ink2,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: border),
+        ),
+        child: Text(
+          label,
+          style: _T.body(13, color: fg, w: FontWeight.w500),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final Color color, bg, border;
+  final VoidCallback onTap;
+  const _IconBtn({
+    required this.icon,
+    required this.color,
+    required this.bg,
+    required this.border,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: border),
+        ),
+        child: Icon(icon, size: 16, color: color),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  EMPTY STATE
+// ─────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  final bool showActive;
+  final VoidCallback onAdd;
+  const _EmptyState({required this.showActive, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: _T.surface3,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(
+              Icons.local_offer_outlined,
+              size: 32,
+              color: _T.ink3,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            showActive ? 'No active promo codes' : 'No inactive promo codes',
+            style: _T.head(16, color: _T.ink2, w: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text('Create one to get started', style: _T.body(13, color: _T.ink3)),
+          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: onAdd,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(color: _T.navy, borderRadius: _T.rBtn),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_rounded, color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Create Promo Code',
+                    style: _T.head(13, color: Colors.white, w: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  DELETE DIALOG
+// ─────────────────────────────────────────────
+
+class _DeleteDialog extends StatelessWidget {
+  final String code;
+  final VoidCallback onConfirm;
+  const _DeleteDialog({required this.code, required this.onConfirm});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: _T.surface,
+      shape: RoundedRectangleBorder(borderRadius: _T.rCard),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: _T.deleteBg,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: _T.deleteText,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Delete Promo Code', style: _T.head(17))),
+              ],
+            ),
+            const SizedBox(height: 14),
+            RichText(
+              text: TextSpan(
+                style: _T.body(14, color: _T.ink2),
+                children: [
+                  const TextSpan(text: 'Are you sure you want to delete '),
+                  TextSpan(
+                    text: '"$code"',
+                    style: _T.mono(14, color: _T.ink),
+                  ),
+                  const TextSpan(text: '? This action cannot be undone.'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: _T.border2),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Cancel',
+                        style: _T.body(14, color: _T.ink2, w: FontWeight.w500),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      onConfirm();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        color: _T.deleteText,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Delete',
+                        style: _T.body(
+                          14,
+                          color: Colors.white,
+                          w: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 //  PROMO CODE FORM SCREEN
-// ══════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
 
 class PromoCodeFormScreen extends StatefulWidget {
   final String businessId;
@@ -519,11 +1038,11 @@ class PromoCodeFormScreen extends StatefulWidget {
 
 class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
   late TextEditingController _codeCtrl;
-  late TextEditingController _discountValueCtrl;
-  late TextEditingController _minOrderValueCtrl;
-  late TextEditingController _customerIdCtrl;
+  late TextEditingController _valueCtrl;
+  late TextEditingController _minCtrl;
+  late TextEditingController _cidCtrl;
 
-  late DiscountType _selectedDiscountType;
+  late DiscountType _discountType;
   late DateTime _startDate;
   late DateTime _expiryDate;
 
@@ -533,121 +1052,109 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeControllers();
-  }
-
-  void _initializeControllers() {
-    if (widget.isEdit && widget.promoCode != null) {
-      final promo = widget.promoCode!;
-      _codeCtrl = TextEditingController(text: promo.code);
-      _discountValueCtrl = TextEditingController(
-        text: promo.discountValue.toString(),
-      );
-      _minOrderValueCtrl = TextEditingController(
-        text: promo.minOrderValue.toString(),
-      );
-      _customerIdCtrl = TextEditingController(text: promo.customerId ?? '');
-      _selectedDiscountType = promo.discountType;
-      _startDate = promo.startDate;
-      _expiryDate = promo.expiryDate;
+    final p = widget.promoCode;
+    if (widget.isEdit && p != null) {
+      _codeCtrl = TextEditingController(text: p.code);
+      _valueCtrl = TextEditingController(text: p.discountValue.toString());
+      _minCtrl = TextEditingController(text: p.minOrderValue.toString());
+      _cidCtrl = TextEditingController(text: p.customerId ?? '');
+      _discountType = p.discountType;
+      _startDate = p.startDate;
+      _expiryDate = p.expiryDate;
     } else {
       _codeCtrl = TextEditingController();
-      _discountValueCtrl = TextEditingController();
-      _minOrderValueCtrl = TextEditingController(text: '0');
-      _customerIdCtrl = TextEditingController();
-      _selectedDiscountType = DiscountType.percentage;
+      _valueCtrl = TextEditingController();
+      _minCtrl = TextEditingController(text: '0');
+      _cidCtrl = TextEditingController();
+      _discountType = DiscountType.percentage;
       _startDate = DateTime.now();
       _expiryDate = DateTime.now().add(const Duration(days: 30));
     }
   }
 
-  Future<void> _selectStartDate() async {
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: _startDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (selected != null) {
-      setState(() => _startDate = selected);
-    }
+  @override
+  void dispose() {
+    _codeCtrl.dispose();
+    _valueCtrl.dispose();
+    _minCtrl.dispose();
+    _cidCtrl.dispose();
+    super.dispose();
   }
 
-  Future<void> _selectExpiryDate() async {
-    final selected = await showDatePicker(
+  Future<void> _pickDate({required bool isStart}) async {
+    final picked = await showDatePicker(
       context: context,
-      initialDate: _expiryDate,
-      firstDate: _startDate,
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: isStart ? _startDate : _expiryDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: _T.navy,
+            onPrimary: Colors.white,
+            surface: _T.surface,
+          ),
+        ),
+        child: child!,
+      ),
     );
-    if (selected != null) {
-      setState(() => _expiryDate = selected);
-    }
+    if (picked == null) return;
+    setState(() => isStart ? _startDate = picked : _expiryDate = picked);
   }
 
-  void _validateAndSave() async {
+  Future<void> _save() async {
     setState(() => _error = null);
 
-    // Validate inputs
-    if (_codeCtrl.text.isEmpty) {
+    if (_codeCtrl.text.trim().isEmpty) {
       setState(() => _error = 'Promo code cannot be empty');
       return;
     }
-
-    if (_discountValueCtrl.text.isEmpty) {
-      setState(() => _error = 'Discount value cannot be empty');
+    if (_valueCtrl.text.trim().isEmpty ||
+        double.tryParse(_valueCtrl.text) == null) {
+      setState(() => _error = 'Enter a valid discount value');
       return;
     }
-
     if (_startDate.isAfter(_expiryDate)) {
       setState(() => _error = 'Start date must be before expiry date');
       return;
     }
 
     setState(() => _isLoading = true);
-
     try {
       final provider = context.read<PromoCodeProvider>();
+      bool? ok;
 
       if (widget.isEdit && widget.promoCode != null) {
-        // Update existing promo code
-        final success = await provider.updatePromoCode(widget.promoCode!.id, {
+        ok = await provider.updatePromoCode(widget.promoCode!.id, {
           'code': _codeCtrl.text.toUpperCase().trim(),
-          'discount_type': _selectedDiscountType.value,
-          'discount_value': double.parse(_discountValueCtrl.text),
-          'min_order_value': double.parse(_minOrderValueCtrl.text),
+          'discount_type': _discountType.value,
+          'discount_value': double.parse(_valueCtrl.text),
+          'min_order_value': double.parse(_minCtrl.text),
           'start_date': _startDate.toIso8601String(),
           'expiry_date': _expiryDate.toIso8601String(),
-          'customer_id': _customerIdCtrl.text.trim().isEmpty
+          'customer_id': _cidCtrl.text.trim().isEmpty
               ? null
-              : _customerIdCtrl.text.trim(),
+              : _cidCtrl.text.trim(),
         });
-        log('Update result: $success');
-        if (success) {
-          if (mounted) Navigator.pop(context, true);
-        }
       } else {
-        // Create new promo code
         final result = await provider.createPromoCode(
           businessId: widget.businessId,
-          code: _codeCtrl.text,
-          discountType: _selectedDiscountType.value,
-          discountValue: double.parse(_discountValueCtrl.text),
-          minOrderValue: double.parse(_minOrderValueCtrl.text),
+          code: _codeCtrl.text.toUpperCase().trim(),
+          discountType: _discountType.value,
+          discountValue: double.parse(_valueCtrl.text),
+          minOrderValue: double.parse(_minCtrl.text),
           startDate: _startDate,
           expiryDate: _expiryDate,
           createdBy: widget.userId,
-          customerId: _customerIdCtrl.text.trim().isEmpty
+          customerId: _cidCtrl.text.trim().isEmpty
               ? null
-              : _customerIdCtrl.text.trim(),
+              : _cidCtrl.text.trim(),
         );
-        log('Create result: $result');
-        if (result != null && mounted) {
-          Navigator.pop(context, true);
-        }
+        ok = result != null;
       }
+
+      if (ok == true && mounted) Navigator.pop(context, true);
     } catch (e) {
-      log('Error saving promo code: $e');
       setState(() => _error = 'Error: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -655,158 +1162,360 @@ class _PromoCodeFormScreenState extends State<PromoCodeFormScreen> {
   }
 
   @override
-  void dispose() {
-    _codeCtrl.dispose();
-    _discountValueCtrl.dispose();
-    _minOrderValueCtrl.dispose();
-    _customerIdCtrl.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _T.surface2,
+      body: Column(
+        children: [
+          // ── Form top bar ──
+          Container(
+            color: _T.navy,
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 10,
+              left: 16,
+              right: 20,
+              bottom: 14,
+            ),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: const Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white,
+                      size: 15,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.isEdit ? 'EDIT' : 'NEW',
+                      style: _T
+                          .mono(10, color: Colors.white54)
+                          .copyWith(letterSpacing: 1.2),
+                    ),
+                    Text(
+                      widget.isEdit ? 'Edit Promo Code' : 'Create Promo Code',
+                      style: _T.head(
+                        16,
+                        color: Colors.white,
+                        w: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // ── Form body ──
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: _T.surface,
+                      borderRadius: _T.rCard,
+                      border: Border.all(color: _T.border),
+                    ),
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Code
+                        _FormField(
+                          label: 'Promo Code',
+                          child: TextField(
+                            controller: _codeCtrl,
+                            enabled: !widget.isEdit,
+                            style: _T.mono(15).copyWith(letterSpacing: 1.0),
+                            textCapitalization: TextCapitalization.characters,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[A-Z0-9]'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              final upper = v.toUpperCase().replaceAll(
+                                RegExp(r'[^A-Z0-9]'),
+                                '',
+                              );
+                              if (upper != v) {
+                                _codeCtrl.value = TextEditingValue(
+                                  text: upper,
+                                  selection: TextSelection.collapsed(
+                                    offset: upper.length,
+                                  ),
+                                );
+                              }
+                            },
+                            decoration: _inputDec('e.g. SAVE20'),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Discount type + value
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _FormField(
+                                label: 'Type',
+                                child: DropdownButtonFormField<DiscountType>(
+                                  value: _discountType,
+                                  style: _T.body(14),
+                                  decoration: _inputDec(''),
+                                  items: DiscountType.values
+                                      .map(
+                                        (t) => DropdownMenuItem(
+                                          value: t,
+                                          child: Text(t.label),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (v) {
+                                    if (v != null)
+                                      setState(() => _discountType = v);
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _FormField(
+                                label: 'Value',
+                                child: TextField(
+                                  controller: _valueCtrl,
+                                  style: _T.body(14),
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  decoration: _inputDec('20').copyWith(
+                                    suffixText:
+                                        _discountType == DiscountType.percentage
+                                        ? '%'
+                                        : '₹',
+                                    suffixStyle: _T.mono(14, color: _T.ink3),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Min order value
+                        _FormField(
+                          label: 'Min. Order Value (₹)',
+                          child: TextField(
+                            controller: _minCtrl,
+                            style: _T.body(14),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: _inputDec('0 — no minimum'),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Dates
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _FormField(
+                                label: 'Start Date',
+                                child: _DatePicker(
+                                  date: _startDate,
+                                  onTap: () => _pickDate(isStart: true),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _FormField(
+                                label: 'Expiry Date',
+                                child: _DatePicker(
+                                  date: _expiryDate,
+                                  onTap: () => _pickDate(isStart: false),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Customer ID
+                        _FormField(
+                          label: 'Customer ID (optional)',
+                          child: TextField(
+                            controller: _cidCtrl,
+                            style: _T.body(14),
+                            decoration: _inputDec(
+                              'Leave empty for all customers',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Error banner
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _T.errorBg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _T.errorBorder),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            color: _T.errorText,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: _T.body(13, color: _T.errorText),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 20),
+
+                  // Save button
+                  GestureDetector(
+                    onTap: _isLoading ? null : _save,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      decoration: BoxDecoration(
+                        color: _isLoading ? _T.navy.withOpacity(0.5) : _T.navy,
+                        borderRadius: _T.rBtn,
+                      ),
+                      alignment: Alignment.center,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              widget.isEdit
+                                  ? 'Update Promo Code'
+                                  : 'Create Promo Code',
+                              style: _T.head(
+                                15,
+                                color: Colors.white,
+                                w: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+
+  InputDecoration _inputDec(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: _T.body(13, color: _T.ink3),
+    filled: true,
+    fillColor: _T.surface2,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _T.border),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _T.border, width: 1.5),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _T.navy, width: 1.5),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _T.border),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────
+//  FORM HELPERS
+// ─────────────────────────────────────────────
+
+class _FormField extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _FormField({required this.label, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEdit ? 'Edit Promo Code' : 'Create Promo Code'),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: _T.mono(10, color: _T.ink3).copyWith(letterSpacing: 0.9),
+        ),
+        const SizedBox(height: 6),
+        child,
+      ],
+    );
+  }
+}
+
+class _DatePicker extends StatelessWidget {
+  final DateTime date;
+  final VoidCallback onTap;
+  const _DatePicker({required this.date, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: _T.surface2,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _T.border, width: 1.5),
+        ),
+        child: Row(
           children: [
-            // ─ Code field
-            TextFormField(
-              controller: _codeCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Promo Code',
-                hintText: 'e.g., SAVE20',
-                helperText: 'Alphanumeric, no spaces',
-              ),
-              textCapitalization: TextCapitalization.characters,
-              enabled: !widget.isEdit,
-            ),
-            const SizedBox(height: 16),
-
-            // ─ Discount type and value
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<DiscountType>(
-                    value: _selectedDiscountType,
-                    decoration: const InputDecoration(
-                      labelText: 'Discount Type',
-                    ),
-                    items: DiscountType.values
-                        .map(
-                          (type) => DropdownMenuItem(
-                            value: type,
-                            child: Text(type.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (type) {
-                      if (type != null) {
-                        setState(() => _selectedDiscountType = type);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: TextFormField(
-                    controller: _discountValueCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Discount Value',
-                      suffixText: _selectedDiscountType.symbol,
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // ─ Minimum order value
-            TextFormField(
-              controller: _minOrderValueCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Minimum Order Value (₹)',
-                helperText: 'Optional - Leave 0 if no minimum',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ─ Dates
-            Row(
-              children: [
-                Expanded(
-                  child: ListTile(
-                    title: Text(DateFormat('dd/MM/yyyy').format(_startDate)),
-                    subtitle: const Text('Start Date'),
-                    onTap: _selectStartDate,
-                  ),
-                ),
-                Expanded(
-                  child: ListTile(
-                    title: Text(DateFormat('dd/MM/yyyy').format(_expiryDate)),
-                    subtitle: const Text('Expiry Date'),
-                    onTap: _selectExpiryDate,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // ─ Customer ID (optional)
-            TextFormField(
-              controller: _customerIdCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Customer ID (Optional)',
-                helperText:
-                    'Leave empty to make it available for all customers',
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // ─ Error message
-            if (_error != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ─ Save button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _validateAndSave,
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        widget.isEdit
-                            ? 'Update Promo Code'
-                            : 'Create Promo Code',
-                      ),
-              ),
-            ),
+            const Icon(Icons.calendar_today_rounded, size: 14, color: _T.ink3),
+            const SizedBox(width: 8),
+            Text(DateFormat('dd/MM/yyyy').format(date), style: _T.body(14)),
           ],
         ),
       ),

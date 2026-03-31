@@ -27,6 +27,9 @@ class OrdersProvider extends ChangeNotifier {
   int _unreadCount = 0;
   List<Map<String, dynamic>> _notifications = [];
 
+  // ── Date-based filtering ──────────────────────────────────────────────────
+  late DateTime _selectedDate;
+
   // ── Realtime ──────────────────────────────────────────────────────────────
   RealtimeChannel? _ordersChannel;
   RealtimeChannel? _notifChannel;
@@ -34,6 +37,13 @@ class OrdersProvider extends ChangeNotifier {
   /// IDs of orders that we just created optimistically.
   /// The realtime INSERT callback should skip these to prevent duplicates.
   final Set<String> _pendingOptimisticIds = {};
+
+  OrdersProvider() {
+    // Initialize selectedDate to today (IST)
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+    _selectedDate = DateTime(nowIst.year, nowIst.month, nowIst.day);
+  }
 
   // ── Getters ───────────────────────────────────────────────────────────────
   bool get isLoading => _isLoading;
@@ -45,6 +55,7 @@ class OrdersProvider extends ChangeNotifier {
   String get userRole => _role;
   String get businessId => _businessId;
   String get businessName => _businessName;
+  DateTime get selectedDate => _selectedDate;
 
   bool get isAdminLevel =>
       ['owner', 'system', 'admin', 'manager'].contains(_role.toLowerCase());
@@ -159,9 +170,9 @@ class OrdersProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _orders = await OrdersRepository.instance.fetchTodayOrders(
+      _orders = await OrdersRepository.instance.fetchOrdersByDate(
         businessId: _businessId,
-        staffUid: null,
+        selectedDate: _selectedDate,
       );
     } catch (e, st) {
       _error = e.toString();
@@ -174,18 +185,49 @@ class OrdersProvider extends ChangeNotifier {
     // ── Double-fetch for offline-first ─────────────────────────────────────────
     if (ConnectivityService.instance.isOnline && _businessId.isNotEmpty) {
       try {
-        await OrdersRepository.instance.refreshOrdersFromRemote(
+        await OrdersRepository.instance.refreshAllOrdersFromRemote(
           businessId: _businessId,
         );
-        _orders = await OrdersRepository.instance.fetchTodayOrders(
+        _orders = await OrdersRepository.instance.fetchOrdersByDate(
           businessId: _businessId,
-          staffUid: null,
+          selectedDate: _selectedDate,
         );
         notifyListeners();
       } catch (e) {
         debugPrint('📦 Remote refresh error: $e');
       }
     }
+  }
+
+  /// Set the selected date and fetch orders for that date
+  Future<void> setSelectedDate(DateTime date) async {
+    // Normalize date to just year/month/day
+    _selectedDate = DateTime(date.year, date.month, date.day);
+    await fetchOrders();
+  }
+
+  /// Reset selected date to today and fetch today's orders
+  Future<void> resetToToday() async {
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+    _selectedDate = DateTime(nowIst.year, nowIst.month, nowIst.day);
+    await fetchOrders();
+  }
+
+  /// Check if a given date is in the future (disabled for calendar)
+  bool isFutureDate(DateTime date) {
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+    final today = DateTime(nowIst.year, nowIst.month, nowIst.day);
+    return date.isAfter(today);
+  }
+
+  /// Check if the selected date is today
+  bool get isToday {
+    final nowUtc = DateTime.now().toUtc();
+    final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+    final today = DateTime(nowIst.year, nowIst.month, nowIst.day);
+    return _selectedDate == today;
   }
 
   Future<List<Order>> fetchTableOrders(String tableId) async {

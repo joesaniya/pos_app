@@ -143,6 +143,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
             child: Column(
               children: [
                 _Header(prov: prov, onNavigateToKDS: _navigateToKitchenDisplay),
+                // Date picker
+                _DatePickerBar(prov: prov),
                 // Payment alert banner
                 if (prov.pendingPaymentCount > 0)
                   _PaymentAlertBanner(count: prov.pendingPaymentCount),
@@ -316,7 +318,9 @@ class _Header extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${prov.todayTotal} orders today',
+                  prov.isToday
+                      ? '${prov.todayTotal} orders today'
+                      : '${prov.allOrders.length} orders on ${prov.selectedDate.day} ${_getMonthName(prov.selectedDate.month)}',
                   style: const TextStyle(fontSize: 11, color: OC.textSec),
                 ),
               ],
@@ -565,6 +569,9 @@ class _Body extends StatelessWidget {
     final orders = prov.filteredOrders;
 
     if (orders.isEmpty) {
+      final dateStr = prov.isToday
+          ? 'today'
+          : '${prov.selectedDate.day} ${_getMonthName(prov.selectedDate.month)} ${prov.selectedDate.year}';
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -578,9 +585,9 @@ class _Body extends StatelessWidget {
               child: const Text('📋', style: TextStyle(fontSize: 40)),
             ),
             const SizedBox(height: 20),
-            const Text(
-              'No orders today',
-              style: TextStyle(
+            Text(
+              'No orders for $dateStr',
+              style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
                 color: OC.textPri,
@@ -588,7 +595,7 @@ class _Body extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Tap + New Order to get started',
+              'Select a different date or create a new order',
               style: TextStyle(fontSize: 13, color: OC.textSec),
             ),
             const SizedBox(height: 20),
@@ -1262,4 +1269,132 @@ class _StatChip extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Date Picker Bar ────────────────────────────────────────────────────────────
+class _DatePickerBar extends StatelessWidget {
+  final OrdersProvider prov;
+  const _DatePickerBar({required this.prov});
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+      final today = DateTime(now.year, now.month, now.day);
+      final selectedDate = prov.selectedDate;
+      final isToday = selectedDate == today;
+      
+      final formattedDate = isToday
+          ? 'Today'
+          : '${selectedDate.day} ${_getMonthName(selectedDate.month)}';
+
+      return Container(
+        color: OC.surface,
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: today,
+                    builder: (context, child) {
+                      return Theme(
+                        data: Theme.of(context).copyWith(
+                          colorScheme: const ColorScheme.light(
+                            primary: OC.primary,
+                            surface: OC.surface,
+                            onSurface: OC.textPri,
+                          ),
+                          textButtonTheme: TextButtonThemeData(
+                            style: TextButton.styleFrom(
+                              foregroundColor: OC.primary,
+                            ),
+                          ),
+                        ),
+                        child: child!,
+                      );
+                    },
+                  );
+                  if (picked != null) {
+                    await prov.setSelectedDate(picked);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isToday ? OC.primaryLight : OC.surfaceAlt,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isToday ? OC.primary : OC.border,
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_rounded,
+                        size: 16,
+                        color: OC.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        formattedDate,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: OC.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (!isToday)
+              GestureDetector(
+                onTap: () => prov.resetToToday(),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: OC.surfaceAlt,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: OC.border, width: 1.2),
+                  ),
+                  child: const Text(
+                    'Reset',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: OC.textSec,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Fallback if date is not initialized yet
+      return Container(
+        color: OC.surface,
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: const SizedBox(height: 44),
+      );
+    }
+  }
+}
+
+// ── Helper function to convert month number to name ────────────────────────────
+String _getMonthName(int month) {
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  return months[month - 1];
 }

@@ -154,6 +154,145 @@ class OrdersRepository {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  FETCH ORDERS BY SPECIFIC DATE (with calendar support)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Fetch orders created on a specific date (IST timezone)
+  /// [selectedDate] should be a DateTime with just date components (year, month, day)
+  Future<List<Order>> fetchOrdersByDate({
+    required String businessId,
+    required DateTime selectedDate,
+  }) async {
+    // Convert selectedDate to IST boundaries (start and end of day in IST)
+    final istStart = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+    );
+    final istEnd = istStart.add(const Duration(days: 1));
+
+    // Read from local cache
+    final localRows = await _local.getEntities(
+      table: LocalDatabase.tOrders,
+      businessId: businessId,
+      whereExtra: 'action != ?',
+      whereExtraArgs: [LocalDatabase.actionDelete],
+    );
+
+    // Filter to selected date IST
+    final orders = localRows.map(_rowToOrder).whereType<Order>().where((o) {
+      final t = o.createdAt;
+      return t.isAfter(istStart) && t.isBefore(istEnd);
+    }).toList();
+
+    return orders..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  FETCH ALL ORDERS (not limited to today)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<List<Order>> fetchAllOrders({required String businessId}) async {
+    // Read from local cache (all orders)
+    final localRows = await _local.getEntities(
+      table: LocalDatabase.tOrders,
+      businessId: businessId,
+      whereExtra: 'action != ?',
+      whereExtraArgs: [LocalDatabase.actionDelete],
+    );
+
+    final orders = localRows.map(_rowToOrder).whereType<Order>().toList();
+    return orders..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  /// Pull all orders from Supabase and update local cache.
+  /// Does not filter by date - fetches all orders for the business.
+  Future<void> refreshAllOrdersFromRemote({required String businessId}) async {
+    try {
+      final remoteOrders = await _remote.fetchBusinessOrders(
+        businessId: businessId,
+      );
+      for (final order in remoteOrders) {
+        // FIX: Check if local order has higher status that shouldn't be downgraded
+        final existingRows = await _local.getEntities(
+          table: LocalDatabase.tOrders,
+          businessId: businessId,
+        );
+        final existingOrder = existingRows
+            .where((r) => r['id'] == order.id)
+            .firstOrNull;
+
+        // Status hierarchy: pending < preparing < ready < completed
+        // Never downgrade completed orders
+        if (existingOrder != null) {
+          final localStatus = existingOrder['status'] as String? ?? '';
+          final remoteStatus = order.status.value;
+
+          // If local is completed and we're trying to change it, keep completed
+          if (localStatus == 'completed' && remoteStatus != 'completed') {
+            log(
+              '[OrdersRepo] ✅ Protected completed order from being downgraded to $remoteStatus: ${order.id}',
+            );
+            // Merge remote data but preserve completed status and payment info
+            final data = order.toSyncMap();
+            data['status'] = 'completed';
+            // Preserve payment and bill info if not in remote
+            if (existingOrder['payment_status'] != null) {
+              data['payment_status'] = existingOrder['payment_status'];
+            }
+            if (existingOrder['payment_mode'] != null) {
+              data['payment_mode'] = existingOrder['payment_mode'];
+            }
+            if (existingOrder['paid_by_uid'] != null) {
+              data['paid_by_uid'] = existingOrder['paid_by_uid'];
+            }
+            if (existingOrder['paid_by_name'] != null) {
+              data['paid_by_name'] = existingOrder['paid_by_name'];
+            }
+            if (existingOrder['paid_at'] != null) {
+              data['paid_at'] = existingOrder['paid_at'];
+            }
+            if (existingOrder['completed_at'] != null) {
+              data['completed_at'] = existingOrder['completed_at'];
+            }
+            if (existingOrder['bill_number'] != null) {
+              data['bill_number'] = existingOrder['bill_number'];
+            }
+            if (existingOrder['bill_generated_at'] != null) {
+              data['bill_generated_at'] = existingOrder['bill_generated_at'];
+            }
+            await _local.upsertEntity(
+              table: LocalDatabase.tOrders,
+              id: order.id,
+              businessId: businessId,
+              data: data,
+              syncStatus: LocalDatabase.syncSynced,
+              action: LocalDatabase.actionUpdate,
+            );
+            continue;
+          }
+        }
+
+        // Normal sync for non-completed orders
+        final data = order.toSyncMap();
+        await _local.upsertEntity(
+          table: LocalDatabase.tOrders,
+          id: order.id,
+          businessId: businessId,
+          data: data,
+          syncStatus: LocalDatabase.syncSynced,
+          action: LocalDatabase.actionUpdate,
+        );
+      }
+      log(
+        '[OrdersRepo] Remote refresh (all orders): ${remoteOrders.length} orders cached',
+      );
+    } catch (e) {
+      debugPrint('[OrdersRepo] Remote refresh error: $e');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  FETCH TABLE ORDERS  (FIX: offline fallback + session isolation)
   // ══════════════════════════════════════════════════════════════════════════
 

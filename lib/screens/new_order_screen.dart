@@ -4059,7 +4059,8 @@ class _CartView extends StatelessWidget {
             children: [
               _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
               const SizedBox(height: 6),
-              _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+              // _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
+              _BillRow('Tax', '₹${cartTax.toStringAsFixed(0)}'),
               const Divider(color: _C.border, height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

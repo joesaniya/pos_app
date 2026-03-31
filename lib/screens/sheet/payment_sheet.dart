@@ -9,8 +9,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pos_app/models/order_modal.dart';
+import 'package:pos_app/models/promo_code_model.dart';
 import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/screens/orders_bill_preview_screen.dart';
+import 'package:pos_app/services/promo_code_service.dart';
+import 'package:pos_app/widgets/promo_code_input_widget.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/providers/qr_code_provider.dart';
 import 'package:pos_app/widgets/payment_qr_code_display.dart';
@@ -67,21 +70,62 @@ class _PaymentSheetState extends State<PaymentSheet>
   final _refCtrl = TextEditingController();
   final _tipCtrl = TextEditingController();
   final _discountCtrl = TextEditingController();
+  final _promoCodeCtrl = TextEditingController();
 
   bool _loading = false;
   String? _error;
+
+  // ═══════════════════════════════════════════════════════════
+  //  PROMO CODE STATE
+  // ═══════════════════════════════════════════════════════════
+  PromoCode? _appliedPromoCode;
+  double _promoDiscountAmount = 0;
 
   late AnimationController _successAnim;
   bool _showSuccess = false;
 
   // Computed
   double get _tipAmount => double.tryParse(_tipCtrl.text) ?? 0;
-  double get _discountAmount => double.tryParse(_discountCtrl.text) ?? 0;
-  double get _grandTotal =>
-      widget.order.subtotal +
-      widget.order.taxAmount +
-      _tipAmount -
-      _discountAmount;
+
+  /// Get discountable amount (subtotal + tax for full order applicability)
+  double get _discountableAmount =>
+      widget.order.subtotal + widget.order.taxAmount;
+
+  /// Calculate manual discount amount with validation
+  /// Supports both fixed and percentage-based discounts
+  double get _manualDiscountAmount {
+    final input = _discountCtrl.text.trim();
+    if (input.isEmpty) return 0;
+
+    final parsed = double.tryParse(input) ?? 0;
+    if (parsed <= 0) return 0;
+
+    // Detect if it's a percentage (assume input > 100 or ends with % would be percentage)
+    // For now, treat all manual input as fixed amount
+    // Promo codes handle percentage calculation via PromoCodeService
+    return parsed.clamp(0, _discountableAmount);
+  }
+
+  /// Calculate effective discount amount
+  /// Priority: Promo discount (if applicable) > Manual discount
+  /// Always validates against discountable amount to prevent over-discounting
+  double get _totalDiscountAmount {
+    // Promo takes priority when applied
+    if (_appliedPromoCode != null && _promoDiscountAmount > 0) {
+      return _promoDiscountAmount.clamp(0, _discountableAmount);
+    }
+    // Fall back to manual discount
+    return _manualDiscountAmount;
+  }
+
+  /// Calculate the base amount before any discounts (includes tax)
+  double get _baseAmount => widget.order.subtotal + widget.order.taxAmount;
+
+  /// Calculate the amount after discount but before tip
+  double get _discountedAmount => _baseAmount - _totalDiscountAmount;
+
+  /// Final payable amount: base - discount + tip
+  double get _grandTotal => _baseAmount + _tipAmount - _totalDiscountAmount;
 
   @override
   void initState() {
@@ -100,8 +144,94 @@ class _PaymentSheetState extends State<PaymentSheet>
     _refCtrl.dispose();
     _tipCtrl.dispose();
     _discountCtrl.dispose();
+    _promoCodeCtrl.dispose();
     _successAnim.dispose();
     super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  PROMO CODE CALLBACK HANDLERS
+  // ═══════════════════════════════════════════════════════════
+
+  void _onPromoCodeApplied(PromoCode? promoCode, double discountAmount) {
+    setState(() {
+      _appliedPromoCode = promoCode;
+      _promoDiscountAmount = discountAmount;
+      // Clear manual discount if promo is applied
+      if (promoCode != null) {
+        _discountCtrl.clear();
+      }
+    });
+  }
+
+  void _onPromoCodeRemoved() {
+    setState(() {
+      _appliedPromoCode = null;
+      _promoDiscountAmount = 0;
+    });
+  }
+
+  /// Calculate discount percentage for display
+  /// Returns 0 if discount type is not percentage-based
+  double _getDiscountPercentage() {
+    if (_appliedPromoCode != null &&
+        _appliedPromoCode!.discountType == 'percentage' &&
+        _baseAmount > 0) {
+      return (_promoDiscountAmount / _baseAmount * 100).clamp(0, 100);
+    }
+    return 0;
+  }
+
+  /// Validate discount doesn't exceed discountable amount
+  bool _isDiscountValid() {
+    return _totalDiscountAmount <= _discountableAmount &&
+        _totalDiscountAmount >= 0;
+  }
+
+  /// Get discount summary for display
+  String _getDiscountSummary() {
+    if (_appliedPromoCode == null) {
+      return 'No promo applied';
+    }
+    final percentage = _getDiscountPercentage();
+    if (percentage > 0) {
+      return '${_appliedPromoCode!.code} • ${percentage.toStringAsFixed(0)}% off';
+    }
+    return '${_appliedPromoCode!.code} • ₹${_promoDiscountAmount.toStringAsFixed(2)} off';
+  }
+
+  /// Check if current order has restricted items for applied promo
+  bool _hasRestrictedItems() {
+    if (_appliedPromoCode == null) return false;
+    if (_appliedPromoCode!.applicableItems == null ||
+        _appliedPromoCode!.applicableItems!.isEmpty) {
+      return false; // No restrictions
+    }
+    final orderItemIds = widget.order.items.map((item) => item.id).toList();
+    final restrictedItems = _appliedPromoCode!.getRestrictedItems(orderItemIds);
+    return restrictedItems.isNotEmpty;
+  }
+
+  /// Get list of restricted items
+  List<String> _getRestrictedItemNames() {
+    if (_appliedPromoCode == null) return [];
+    if (_appliedPromoCode!.applicableItems == null ||
+        _appliedPromoCode!.applicableItems!.isEmpty) {
+      return [];
+    }
+    final orderItemIds = widget.order.items.map((item) => item.id).toList();
+    final restrictedIds = _appliedPromoCode!.getRestrictedItems(orderItemIds);
+    return widget.order.items
+        .where((item) => restrictedIds.contains(item.id))
+        .map((item) => item.itemName)
+        .toList();
+  }
+
+  /// Get formatted restriction warning message
+  String _getRestrictionWarning() {
+    final restrictedNames = _getRestrictedItemNames();
+    if (restrictedNames.isEmpty) return '';
+    return 'Note: Discount not applied to: ${restrictedNames.join(", ")}';
   }
 
   Future<void> _confirmPayment() async {
@@ -123,8 +253,20 @@ class _PaymentSheetState extends State<PaymentSheet>
         mode: _mode,
         paymentRef: _refCtrl.text.trim(),
         tipAmount: _tipAmount,
-        discountAmount: _discountAmount,
+        discountAmount: _totalDiscountAmount,
       );
+
+      // NEW: Record promo code usage if applied
+      if (_appliedPromoCode != null && _promoDiscountAmount > 0) {
+        final service = PromoCodeService.instance;
+        await service.recordPromoUsageAfterPayment(
+          businessId: widget.order.businessId,
+          promoCodeId: _appliedPromoCode!.id,
+          orderId: widget.order.id,
+          customerId: widget.order.customerPhone ?? 'guest',
+          discountAmount: _promoDiscountAmount,
+        );
+      }
 
       if (!mounted) return;
 
@@ -249,38 +391,126 @@ class _PaymentSheetState extends State<PaymentSheet>
                     _BillSummaryCard(
                       order: order,
                       tipAmount: _tipAmount,
-                      discountAmount: _discountAmount,
+                      discountAmount: _manualDiscountAmount,
                       grandTotal: _grandTotal,
+                      appliedPromoCode: _appliedPromoCode,
+                      promoDiscountAmount: _promoDiscountAmount,
                     ),
 
                     const SizedBox(height: 18),
 
-                    // ── Tip & Discount ──────────────────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _AmountField(
-                            label: 'Tip (₹)',
-                            hint: '0',
-                            ctrl: _tipCtrl,
-                            emoji: '🙏',
-                            color: PC.gold,
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _AmountField(
-                            label: 'Discount (₹)',
-                            hint: '0',
-                            ctrl: _discountCtrl,
-                            emoji: '🏷️',
-                            color: PC.accent,
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                      ],
+                    // ═══════════════════════════════════════════════
+                    //  PROMO CODE INPUT SECTION
+                    // ═══════════════════════════════════════════════
+                    PromoCodeInputWidget(
+                      businessId: widget.order.businessId,
+                      customerId: widget.order.customerPhone ?? 'guest',
+                      orderAmount:
+                          widget.order.subtotal + widget.order.taxAmount,
+                      selectedItemIds: widget.order.items
+                          .map((item) => item.id)
+                          .toList(),
+                      selectedCategoryIds: widget.order.items
+                          .map((item) => item.menuItemId)
+                          .toList(),
+                      controller: _promoCodeCtrl,
+                      onPromoApplied: _onPromoCodeApplied,
+                      onPromoRemoved: _onPromoCodeRemoved,
                     ),
+
+                    const SizedBox(height: 12),
+
+                    // ═══════════════════════════════════════════════
+                    //  RESTRICTION WARNING (if promo has restricted items)
+                    // ═══════════════════════════════════════════════
+                    if (_hasRestrictedItems()) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF7E1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFFD4A017).withOpacity(0.5),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.info_outline_rounded,
+                              color: Color(0xFFD4A017),
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Item Restrictions',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF8B6914),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _getRestrictionWarning(),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF8B6914),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ── Tip & Discount (Only if no promo) ────
+                    if (_appliedPromoCode == null)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _AmountField(
+                              label: 'Tip (₹)',
+                              hint: '0',
+                              ctrl: _tipCtrl,
+                              emoji: '🙏',
+                              color: PC.gold,
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _AmountField(
+                              label: 'Discount (₹)',
+                              hint: '0',
+                              ctrl: _discountCtrl,
+                              emoji: '🏷️',
+                              color: PC.accent,
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      // Show tip only when promo is applied
+                      Expanded(
+                        child: _AmountField(
+                          label: 'Tip (₹)',
+                          hint: '0',
+                          ctrl: _tipCtrl,
+                          emoji: '🙏',
+                          color: PC.gold,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ),
 
                     const SizedBox(height: 18),
 
@@ -634,12 +864,16 @@ class _BillSummaryCard extends StatelessWidget {
   final double tipAmount;
   final double discountAmount;
   final double grandTotal;
+  final PromoCode? appliedPromoCode;
+  final double promoDiscountAmount;
 
   const _BillSummaryCard({
     required this.order,
     required this.tipAmount,
     required this.discountAmount,
     required this.grandTotal,
+    this.appliedPromoCode,
+    this.promoDiscountAmount = 0,
   });
 
   @override
@@ -654,6 +888,34 @@ class _BillSummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Promo code badge (if applied)
+          if (appliedPromoCode != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD8F3DC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF40916C)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('✨', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Promo Applied: ${appliedPromoCode!.code}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1B4332),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
           // Table / seat info row (if applicable)
           if (order.tableNumber != null) ...[
             _Row(
@@ -697,19 +959,37 @@ class _BillSummaryCard extends StatelessWidget {
             false,
           ),
           const SizedBox(height: 6),
-          _Row(
+          /*  _Row(
             'Tax (${order.taxRate.toInt()}%)',
             '₹${order.taxAmount.toStringAsFixed(2)}',
             false,
-          ),
-          if (discountAmount > 0) ...[
+          ),*/
+          _Row('Tax ', '₹${order.taxAmount.toStringAsFixed(2)}', false),
+          // Discount row with type indication
+          if (promoDiscountAmount > 0) ...[
             const SizedBox(height: 6),
             _Row(
-              'Discount',
+              'Promo Discount (${appliedPromoCode!.code})',
+              '- ₹${promoDiscountAmount.toStringAsFixed(2)}',
+              false,
+              color: const Color(0xFF40916C),
+              discountType: appliedPromoCode!.discountType
+                  .toString()
+                  .split('.')
+                  .last,
+            ),
+          ] else if (discountAmount > 0) ...[
+            const SizedBox(height: 6),
+            _Row(
+              'Manual Discount',
               '- ₹${discountAmount.toStringAsFixed(2)}',
               false,
               color: const Color(0xFF059669),
+              discountType: 'fixed',
             ),
+          ] else ...[
+            const SizedBox(height: 6),
+            _Row('Discount', '- ₹0.00', false, color: const Color(0xFF95A3B3)),
           ],
           if (tipAmount > 0) ...[
             const SizedBox(height: 6),
@@ -806,19 +1086,48 @@ class _Row extends StatelessWidget {
   final String value;
   final bool bold;
   final Color? color;
+  final String? discountType;
 
-  const _Row(this.label, this.value, this.bold, {this.color});
+  const _Row(
+    this.label,
+    this.value,
+    this.bold, {
+    this.color,
+    this.discountType,
+  });
 
   @override
   Widget build(BuildContext context) => Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
-      Text(
-        label,
-        style: TextStyle(
-          fontSize: bold ? 14 : 12,
-          fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-          color: bold ? PC.textPri : PC.textSec,
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: bold ? 14 : 12,
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                color: bold ? PC.textPri : PC.textSec,
+              ),
+            ),
+            // Show discount type indicator
+            if (discountType != null && discountType!.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                discountType == 'percentage'
+                    ? '(Percentage-based)'
+                    : '(Fixed amount)',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: (color ?? PC.textSec).withOpacity(0.7),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
       Text(

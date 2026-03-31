@@ -3,13 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:pos_app/providers/app_auth_provider.dart';
 import 'package:pos_app/providers/employee_management_provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
+import 'package:pos_app/providers/promo_code_provider.dart';
 import 'package:pos_app/screens/change_pwd_screen.dart';
 import 'package:pos_app/screens/create_account_screen.dart';
 import 'package:pos_app/screens/edit_profile_Screen.dart';
 import 'package:pos_app/screens/login_screen.dart';
+import 'package:pos_app/screens/promo_code_management_screen.dart';
 import 'package:pos_app/screens/qr_code_upload_screen.dart';
 import 'package:pos_app/screens/tables_screen/widgets/team_member_quick_Action_card_widget.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
+import 'package:pos_app/utils/promo_code_access_control.dart';
 import 'package:provider/provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2586,6 +2589,10 @@ class _ActionsGrid extends StatelessWidget {
     return r == 'owner' || r == 'admin' || r == 'manager' || r == 'system';
   }
 
+  bool get _canManagePromos {
+    return PromoCodeAccessControl.canManagePromoCodes(p.role.label);
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -2593,69 +2600,115 @@ class _ActionsGrid extends StatelessWidget {
       children: [
         Row(
           children: [
-        Expanded(
-          child: _ACard(
-            icon: Icons.person_add_alt_1_rounded,
-            lbl: 'Create\nAccount',
-            sub: _canCreate ? 'Add new staff' : 'No permission',
-            c: _canCreate ? _C.royal : _C.muted,
-            disabled: !_canCreate,
-            onTap: _canCreate
-                ? () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CreateAccountScreen(
-                        businessId: p.businessId,
-                        businessName: p.businessName,
-                      ),
-                    ),
-                  )
-                : null,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _ACard(
-            icon: Icons.lock_reset_rounded,
-            lbl: 'Change\nPassword',
-            sub: 'Update security',
-            c: _C.amber,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
-            ).then((_) => prov.loadProfile()),
-          ),
-        ),
-      ],
-    ),
-    const SizedBox(height: 12),
-    Row(
-      children: [
-        Expanded(
-          child: _ACard(
-            icon: Icons.qr_code_2_rounded,
-            lbl: 'Payment\nQR Code',
-            sub: _canCreate ? 'Billing QR' : 'No permission',
-            c: _canCreate ? _C.teal : _C.muted,
-            disabled: !_canCreate,
-            onTap: _canCreate
-                ? () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => QrCodeUploadScreen(
-                          businessId: p.businessId,
+            Expanded(
+              child: _ACard(
+                icon: Icons.person_add_alt_1_rounded,
+                lbl: 'Create\nAccount',
+                sub: _canCreate ? 'Add new staff' : 'No permission',
+                c: _canCreate ? _C.royal : _C.muted,
+                disabled: !_canCreate,
+                onTap: _canCreate
+                    ? () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CreateAccountScreen(
+                            businessId: p.businessId,
+                            businessName: p.businessName,
+                          ),
                         ),
-                      ),
-                    )
-                : null,
-          ),
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ACard(
+                icon: Icons.lock_reset_rounded,
+                lbl: 'Change\nPassword',
+                sub: 'Update security',
+                c: _C.amber,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ChangePasswordScreen(),
+                  ),
+                ).then((_) => prov.loadProfile()),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        const Expanded(child: SizedBox()), // Empty slot for grid alignment
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _ACard(
+                icon: Icons.qr_code_2_rounded,
+                lbl: 'Payment\nQR Code',
+                sub: _canCreate ? 'Billing QR' : 'No permission',
+                c: _canCreate ? _C.teal : _C.muted,
+                disabled: !_canCreate,
+                onTap: _canCreate
+                    ? () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              QrCodeUploadScreen(businessId: p.businessId),
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ACard(
+                icon: Icons.discount_rounded,
+                lbl: 'Promo Codes',
+                sub: _canManagePromos ? 'Manage discounts' : 'No permission',
+                c: _canManagePromos ? _C.violet : _C.muted,
+                disabled: !_canManagePromos,
+                onTap: _canManagePromos
+                    ? () {
+                        PromoCodeAccessControl.logAccessAttempt(
+                          p.role.label,
+                          'navigate_to_promo_management',
+                          true,
+                        );
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PromoCodeManagementScreen(
+                              businessId: p.businessId,
+                              userId: p.id,
+                              userRole: p.role.label,
+                            ),
+                          ),
+                        );
+                      }
+                    : () {
+                        PromoCodeAccessControl.logAccessAttempt(
+                          p.role.label,
+                          'promo_management_denied',
+                          false,
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              PromoCodeAccessControl.getAccessDeniedReason(
+                                p.role.label,
+                              ),
+                            ),
+                            backgroundColor: _C.rose,
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                      },
+              ),
+            ),
+          ],
+        ),
       ],
     ),
-  ],
-));
+  );
 }
 
 class _ACard extends StatelessWidget {

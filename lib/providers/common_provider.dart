@@ -10,6 +10,7 @@ import 'package:pos_app/providers/onboard_provider.dart';
 import 'package:pos_app/providers/orders_provider.dart';
 import 'package:pos_app/providers/page_switcher_provider.dart';
 import 'package:pos_app/providers/profile_provider.dart';
+import 'package:pos_app/providers/promo_code_provider.dart';
 import 'package:pos_app/providers/report_provider.dart';
 import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
@@ -54,6 +55,7 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => ProfileProvider()),
     ChangeNotifierProvider(create: (_) => CreateAccountProvider()),
     ChangeNotifierProvider(create: (_) => QrCodeProvider()),
+    ChangeNotifierProvider(create: (_) => PromoCodeProvider()),
     ChangeNotifierProvider(create: (_) => NetworkSyncProvider()),
   ];
 }

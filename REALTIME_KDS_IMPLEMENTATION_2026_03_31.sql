@@ -583,11 +583,12 @@ BEGIN
   END IF;
 
   -- Map POS status to KOT status
+  -- ✅ FIX: 'completed' → 'served' (KOT doesn't support 'completed' status)
   v_kot_status := CASE NEW.status
     WHEN 'pending' THEN 'pending'
     WHEN 'preparing' THEN 'in_progress'
     WHEN 'ready' THEN 'ready'
-    WHEN 'completed' THEN 'completed'
+    WHEN 'completed' THEN 'served'
     WHEN 'cancelled' THEN 'cancelled'
     ELSE 'pending'
   END;
@@ -661,11 +662,12 @@ BEGIN
   END IF;
 
   -- Map KOT status back to POS status
+  -- ✅ FIX: 'served' → 'completed' (proper status mapping for POS)
   v_order_status := CASE NEW.status
     WHEN 'pending' THEN 'pending'
     WHEN 'in_progress' THEN 'preparing'
     WHEN 'ready' THEN 'ready'
-    WHEN 'completed' THEN 'completed'
+    WHEN 'served' THEN 'completed'
     WHEN 'cancelled' THEN 'cancelled'
     ELSE 'pending'
   END;

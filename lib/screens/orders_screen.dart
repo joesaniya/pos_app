@@ -2,6 +2,8 @@
 // v2: Payment-gated completion. 'ready' orders show "Collect Payment" button.
 // Completed orders show "View Bill" button.
 
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/kitchen_order_Taken.dart';
 import 'package:pos_app/screens/new_orders_work.dart';
@@ -567,7 +569,7 @@ class _Body extends StatelessWidget {
     }
 
     final orders = prov.filteredOrders;
-
+    log('today orders:${orders.toList()}');
     if (orders.isEmpty) {
       final dateStr = prov.isToday
           ? 'today'
@@ -1279,11 +1281,13 @@ class _DatePickerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     try {
-      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+      final now = DateTime.now().toUtc().add(
+        const Duration(hours: 5, minutes: 30),
+      );
       final today = DateTime(now.year, now.month, now.day);
       final selectedDate = prov.selectedDate;
       final isToday = selectedDate == today;
-      
+
       final formattedDate = isToday
           ? 'Today'
           : '${selectedDate.day} ${_getMonthName(selectedDate.month)}';
@@ -1324,7 +1328,10 @@ class _DatePickerBar extends StatelessWidget {
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: isToday ? OC.primaryLight : OC.surfaceAlt,
                     borderRadius: BorderRadius.circular(10),
@@ -1360,7 +1367,10 @@ class _DatePickerBar extends StatelessWidget {
               GestureDetector(
                 onTap: () => prov.resetToToday(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: OC.surfaceAlt,
                     borderRadius: BorderRadius.circular(10),
@@ -1393,8 +1403,18 @@ class _DatePickerBar extends StatelessWidget {
 // ── Helper function to convert month number to name ────────────────────────────
 String _getMonthName(int month) {
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return months[month - 1];
 }

@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/report_screen.dart';
 import 'package:pos_app/screens/revenue_analytics_screen.dart';
@@ -627,6 +629,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ── KPI cards ────────────────────────────────────────────────────────────────
   Widget _buildKPICards(DashboardProvider prov) {
     final s = prov.stats;
+    log(
+      'dashboard stats: ${s.revenue}, order count: ${s.ordersCount}, average order: ${s.averageOrder}, completed orders: ${s.completedOrders}, cancelled orders: ${s.cancelledOrders}',
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

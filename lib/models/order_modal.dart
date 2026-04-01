@@ -388,18 +388,30 @@ class OrderItem {
     this.notes,
   });
 
-  factory OrderItem.fromJson(Map<String, dynamic> j) => OrderItem(
-    id: j['id'] as String? ?? '',
-    orderId: j['order_id'] as String? ?? '',
-    menuItemId: j['menu_item_id'] as String? ?? '',
-    itemName: j['item_name'] as String? ?? '',
-    itemPrice: (j['item_price'] as num? ?? 0).toDouble(),
-    categoryName: j['category_name'] as String?,
-    isVeg: j['is_veg'] as bool? ?? true,
-    quantity: j['quantity'] as int? ?? 1,
-    subtotal: (j['subtotal'] as num? ?? 0).toDouble(),
-    notes: j['notes'] as String?,
-  );
+  factory OrderItem.fromJson(Map<String, dynamic> j) {
+    final quantity = j['quantity'] as int? ?? 1;
+    final subtotal = (j['subtotal'] as num? ?? 0).toDouble();
+    var itemPrice = (j['item_price'] as num? ?? 0).toDouble();
+
+    // ✅ FIX: If itemPrice is 0 or missing, calculate from subtotal/quantity
+    // This ensures per-item pricing is always available even if not stored
+    if (itemPrice == 0 && subtotal > 0 && quantity > 0) {
+      itemPrice = subtotal / quantity;
+    }
+
+    return OrderItem(
+      id: j['id'] as String? ?? '',
+      orderId: j['order_id'] as String? ?? '',
+      menuItemId: j['menu_item_id'] as String? ?? '',
+      itemName: j['item_name'] as String? ?? '',
+      itemPrice: itemPrice,
+      categoryName: j['category_name'] as String?,
+      isVeg: j['is_veg'] as bool? ?? true,
+      quantity: quantity,
+      subtotal: subtotal,
+      notes: j['notes'] as String?,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'order_id': orderId,
@@ -752,4 +764,38 @@ class Order {
     cancelledAt: cancelledAt ?? this.cancelledAt,
     updatedAt: updatedAt,
   );
+
+  // ── PRICING VALIDATION & FIXUP ──────────────────────────────
+  /// ✅ Validates and fixes item pricing to ensure:
+  /// - Each item has a proper unit price (itemPrice)
+  /// - If itemPrice is 0, calculates from subtotal/quantity
+  /// - Returns a new Order with corrected items
+  Order withFixedPricing() {
+    final fixedItems = items.map((item) {
+      // If itemPrice is 0 or missing, calculate from subtotal/quantity
+      var correctedPrice = item.itemPrice;
+      if (correctedPrice == 0 && item.subtotal > 0 && item.quantity > 0) {
+        correctedPrice = item.subtotal / item.quantity;
+      }
+
+      // If corrected, create new OrderItem with proper pricing
+      if (correctedPrice != item.itemPrice) {
+        return OrderItem(
+          id: item.id,
+          orderId: item.orderId,
+          menuItemId: item.menuItemId,
+          itemName: item.itemName,
+          itemPrice: correctedPrice,
+          categoryName: item.categoryName,
+          isVeg: item.isVeg,
+          quantity: item.quantity,
+          subtotal: item.subtotal,
+          notes: item.notes,
+        );
+      }
+      return item;
+    }).toList();
+
+    return copyWith(items: fixedItems);
+  }
 }

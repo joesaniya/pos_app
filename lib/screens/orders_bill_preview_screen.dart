@@ -61,7 +61,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   // ── PDF Generation ────────────────────────────────────────────
   Future<Uint8List> _generatePdf() async {
-    final order = widget.order;
+    // ✅ FIX: Ensure all items have proper unit pricing
+    final order = widget.order.withFixedPricing();
     final pdf = pw.Document();
 
     pdf.addPage(
@@ -467,7 +468,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final order = widget.order;
+    // ✅ FIX: Ensure all items have proper unit pricing
+    final order = widget.order.withFixedPricing();
 
     return Scaffold(
       backgroundColor: BC.bg,
@@ -912,7 +914,8 @@ class _ReceiptCard extends StatelessWidget {
                 _TotalRow('Subtotal', fmtFn(order.subtotal), false),
                 const SizedBox(height: 5),
                 _TotalRow(
-                  'Tax (${order.taxRate.toInt()}%)',
+                  // 'Tax (${order.taxRate.toInt()}%)',
+                  'Tax %',
                   fmtFn(order.taxAmount),
                   false,
                 ),

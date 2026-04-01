@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:pos_app/providers/expense_provider.dart';
 import 'package:pos_app/services/excel_validation_service.dart';
 import 'package:pos_app/models/expense_model.dart';
+import 'package:pos_app/screens/excel_expense_import_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DESIGN TOKENS
@@ -312,7 +313,41 @@ class _UploadBillScreenState extends State<UploadBillScreen> {
               _buildImportProgress(),
             ],
             SizedBox(height: 24.h),
-            if (!_isImporting) _buildActionRow(),
+            if (!_isImporting) ...[
+              Center(
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ExcelExpenseImportScreen(),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 12.h),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.bolt_rounded,
+                          size: 14.sp,
+                          color: _T.emerald,
+                        ),
+                        SizedBox(width: 6.w),
+                        Text(
+                          'Want to import multiple expenses? Use Bulk Excel Import →',
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.w600,
+                            color: _T.emerald,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              _buildActionRow(),
+            ],
           ],
         ),
       ),

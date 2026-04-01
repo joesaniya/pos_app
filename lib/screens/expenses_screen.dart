@@ -2,6 +2,7 @@ import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:pos_app/screens/excel_expense_import_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:pos_app/models/expense_model.dart';
 import 'package:pos_app/providers/expense_provider.dart';
@@ -366,7 +367,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               borderColor: _T.indigo.withOpacity(0.3),
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const UploadBillScreen()),
+                MaterialPageRoute(
+                  builder: (_) =>
+                      // const UploadBillScreen()
+                      const ExcelExpenseImportScreen(),
+                ),
               ),
             ),
           ),

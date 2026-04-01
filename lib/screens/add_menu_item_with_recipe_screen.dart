@@ -357,8 +357,132 @@ class _AddMenuItemWithRecipeScreenState
           _availableInventory = items;
           _loadingInventory = false;
         });
+
+      // ── Load existing recipe if editing ──────────────────────────────
+      if (_isEdit && widget.editItem != null) {
+        await _loadRecipe(widget.editItem!.id);
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingInventory = false);
+    }
+  }
+
+  // ── Load existing recipe from database ───────────────────────────────
+  Future<void> _loadRecipe(String menuItemId) async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Fetch the recipe for this menu item
+      final recipeResponse = await supabase
+          .from('recipes')
+          .select()
+          .eq('menu_item_id', menuItemId)
+          .maybeSingle();
+
+      if (recipeResponse == null) {
+        log('ℹ️ No recipe found for menu item: $menuItemId');
+        return;
+      }
+
+      // Parse ingredients from the recipe
+      final ingredientsArray = recipeResponse['ingredients'] as List? ?? [];
+
+      if (ingredientsArray.isEmpty) {
+        log('ℹ️ Recipe has no ingredients for menu item: $menuItemId');
+        return;
+      }
+
+      // Load recipe metadata
+      final recipeNotes = recipeResponse['notes'] as String? ?? '';
+      final nutritionalInfo =
+          recipeResponse['nutritional_info'] as Map<String, dynamic>? ?? {};
+
+      if (mounted) {
+        setState(() {
+          // Populate recipe ingredients from the saved data
+          for (final ing in ingredientsArray) {
+            try {
+              final inventoryItemId = ing['inventory_item_id'] as String? ?? '';
+              final ingredientName =
+                  ing['inventory_item_name'] as String? ?? 'Unknown';
+              final unit = ing['unit'] as String? ?? 'unit';
+              final requiredQty =
+                  double.tryParse(
+                    ing['required_quantity']?.toString() ?? '0',
+                  ) ??
+                  0.0;
+              final notes = ing['notes'] as String? ?? '';
+
+              // Find the inventory item from available inventory
+              InventoryItem? inventoryItem;
+              try {
+                inventoryItem = _availableInventory.firstWhere(
+                  (item) => item.id == inventoryItemId,
+                );
+              } catch (e) {
+                inventoryItem = null;
+              }
+
+              if (inventoryItem != null) {
+                final entry = RecipeIngredientEntry(
+                  item: inventoryItem,
+                  requiredQty: requiredQty,
+                  selectedUnit: unit,
+                  notes: notes,
+                );
+                _validateEntry(entry);
+                _recipeIngredients.add(entry);
+              } else {
+                log(
+                  '⚠️ Inventory item not found: $inventoryItemId ($ingredientName)',
+                );
+              }
+            } catch (e) {
+              log('❌ Error parsing ingredient: $e');
+            }
+          }
+
+          // Set recipe toggle ON if ingredients were loaded
+          if (_recipeIngredients.isNotEmpty) {
+            _hasRecipe = true;
+            _recipeNotesCtrl.text = recipeNotes;
+
+            // Load additional nutrition fields from recipe if not already set in menu item
+            if (nutritionalInfo.isNotEmpty) {
+              if (_proteinCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('protein_g')) {
+                _proteinCtrl.text =
+                    nutritionalInfo['protein_g']?.toString() ?? '';
+              }
+              if (_carbsCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('carbs_g')) {
+                _carbsCtrl.text = nutritionalInfo['carbs_g']?.toString() ?? '';
+              }
+              if (_fatCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('fat_g')) {
+                _fatCtrl.text = nutritionalInfo['fat_g']?.toString() ?? '';
+              }
+              if (_fiberCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('fiber_g')) {
+                _fiberCtrl.text = nutritionalInfo['fiber_g']?.toString() ?? '';
+              }
+              if (_sodiumCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('sodium_mg')) {
+                _sodiumCtrl.text =
+                    nutritionalInfo['sodium_mg']?.toString() ?? '';
+              }
+              if (_sugarCtrl.text.isEmpty &&
+                  nutritionalInfo.containsKey('sugar_g')) {
+                _sugarCtrl.text = nutritionalInfo['sugar_g']?.toString() ?? '';
+              }
+            }
+
+            log('✅ Loaded ${_recipeIngredients.length} ingredients for recipe');
+          }
+        });
+      }
+    } catch (e) {
+      log('❌ Error loading recipe: $e');
     }
   }
 
@@ -542,20 +666,25 @@ class _AddMenuItemWithRecipeScreenState
       }
 
       // ── Recipe + inventory deduction ─────────────────────
+      // Only deduct inventory on CREATION, not on edit
       if (_hasRecipe &&
           _recipeIngredients.isNotEmpty &&
           menuItemId != null &&
           menuItemId.isNotEmpty) {
         await _saveRecipe(menuItemId, menu, allergenList);
-        for (final entry in _recipeIngredients) {
-          if (entry.isValid) {
-            await inv.recordTransaction(
-              itemId: entry.item.id,
-              type: TransactionType.stockOut,
-              quantity: entry.qtyInBaseUnit,
-              note: 'Recipe: ${_nameCtrl.text.trim()}',
-              updatedBy: menu.businessId,
-            );
+
+        // Only record inventory transactions for NEW items, not edits
+        if (!_isEdit) {
+          for (final entry in _recipeIngredients) {
+            if (entry.isValid) {
+              await inv.recordTransaction(
+                itemId: entry.item.id,
+                type: TransactionType.stockOut,
+                quantity: entry.qtyInBaseUnit,
+                note: 'Recipe: ${_nameCtrl.text.trim()}',
+                updatedBy: menu.businessId,
+              );
+            }
           }
         }
       }

@@ -1446,6 +1446,17 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
         return;
       }
 
+      // Get business ID from storage
+      final userData = await StorageService.instance.getUserData();
+      final businessId = userData['businessId'] as String? ?? '';
+
+      if (businessId.isEmpty) {
+        if (mounted) {
+          setState(() => _statusMessage = '❌ Business ID not found in session');
+        }
+        return;
+      }
+
       // Get reference data from providers
       final invProvider = context.read<InventoryProvider>();
       final categories = invProvider.categories
@@ -1475,12 +1486,14 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
         return;
       }
 
-      // Validate Excel content
+      // Validate Excel content with supplier auto-creation enabled
       final result =
           await InventoryExcelValidationService.parseAndValidateExcelFile(
             filePath: tempFilePath,
             validCategories: categories,
             supplierMap: supplierMap,
+            businessId: businessId,
+            enableSupplierAutoCreation: true,
           );
 
       if (mounted) {

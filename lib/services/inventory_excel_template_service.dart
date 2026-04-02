@@ -6,8 +6,7 @@ import 'public_storage_service.dart';
 
 /// Service to handle Excel template generation for bulk inventory uploads
 class InventoryExcelTemplateService {
-  static const String templateFileName =
-      'Inventory_Bulk_Upload_Template_check.xlsx';
+  static const String templateFileName = 'Inventory_Bulk_Upload_Template.xlsx';
 
   // Expected column headers for inventory (required)
   static const List<String> requiredHeaders = [

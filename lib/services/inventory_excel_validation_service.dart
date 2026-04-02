@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'dart:developer' as developer;
 import '../models/inventory_modal.dart';
+import 'supplier_validation_service.dart';
 
 /// Model to represent a duplicate item that needs to be updated with appended stock
 class DuplicateUpdate {
@@ -117,11 +118,20 @@ class InventoryExcelValidationService {
 
   /// Validates and parses an Excel inventory file
   /// Returns map with 'data' (list of ValidatedInventoryData), 'errors', and 'newCategories'
+  ///
+  /// Parameters:
+  ///   - filePath: Path to the Excel file
+  ///   - validCategories: List of existing category names
+  ///   - supplierMap: Map of supplier names -> IDs (will be updated with newly created suppliers)
+  ///   - businessId: Business ID (required for auto-creating suppliers)
+  ///   - enableSupplierAutoCreation: If true, auto-creates missing suppliers under "Other Suppliers"
   static Future<Map<String, dynamic>> parseAndValidateExcelFile({
     required String filePath,
     required List<String> validCategories,
     required Map<String, String>
-    supplierMap, // supplierName -> supplierId mapping
+    supplierMap, // supplierName -> supplierId mapping (modified in place)
+    String? businessId,
+    bool enableSupplierAutoCreation = true,
   }) async {
     final List<ValidatedInventoryData> validItems = [];
     final List<InventoryValidationError> errors = [];
@@ -196,7 +206,12 @@ class InventoryExcelValidationService {
 
           if (validationErrors.isEmpty) {
             // Row is valid, convert to ValidatedInventoryData
-            final item = _convertToInventoryData(rowData, supplierMap);
+            final item = await _convertToInventoryDataAsync(
+              rowData,
+              supplierMap,
+              businessId,
+              enableSupplierAutoCreation,
+            );
             if (item != null) {
               validItems.add(item);
 
@@ -685,6 +700,94 @@ class InventoryExcelValidationService {
     } catch (e) {
       developer.log(
         '❌ Error converting row data: $e',
+        name: 'InventoryExcelValidationService',
+        error: e,
+      );
+      return null;
+    }
+  }
+
+  /// Converts validated row data to InventoryData with async supplier validation/creation
+  ///
+  /// This version:
+  /// 1. Validates supplier name and auto-creates if doesn't exist (if enabled)
+  /// 2. Updates the supplier map with newly created suppliers
+  /// 3. Converts row to ValidatedInventoryData
+  static Future<ValidatedInventoryData?> _convertToInventoryDataAsync(
+    Map<String, String> rowData,
+    Map<String, String> supplierMap,
+    String? businessId,
+    bool enableSupplierAutoCreation,
+  ) async {
+    try {
+      final name = rowData['Item Name']!.trim();
+      final category = rowData['Category']!.trim();
+      final unitStr = rowData['Unit']!.trim().toLowerCase();
+      final currentStock = double.parse(rowData['Current Stock']!.trim());
+      final minThreshold = double.parse(rowData['Min Threshold']!.trim());
+      final maxCapacity = double.parse(rowData['Max Capacity']!.trim());
+      final costPerUnit = double.parse(rowData['Cost Per Unit']!.trim());
+
+      // Convert unit string to StockUnit enum
+      final unit = StockUnitExt.fromString(unitStr);
+
+      // Get supplier name from row data
+      String? supplierName = rowData['Supplier Name']?.trim();
+      String? supplierId;
+
+      // Validate supplier and auto-create if needed and enabled
+      if (supplierName != null &&
+          supplierName.isNotEmpty &&
+          enableSupplierAutoCreation &&
+          businessId != null) {
+        try {
+          supplierId = await SupplierValidationService.instance
+              .validateAndGetSupplierIdWithAutoCreation(
+                supplierName: supplierName,
+                supplierMap: supplierMap,
+                businessId: businessId,
+              );
+        } catch (e) {
+          developer.log(
+            '⚠️ Error validating supplier "$supplierName": $e',
+            name: 'InventoryExcelValidationService',
+            error: e,
+          );
+          // Continue without supplier ID - allow item creation even if supplier creation fails
+        }
+      } else if (supplierName != null && supplierName.isNotEmpty) {
+        // If auto-creation is disabled, try to get ID from existing suppliers only
+        supplierId = supplierMap[supplierName];
+      }
+
+      // Get emoji
+      final emoji = rowData['Emoji']?.trim() ?? '📦';
+
+      // Get notes
+      final notes = rowData['Notes']?.trim();
+
+      // Get optional SKU and Reference ID
+      final sku = rowData['SKU']?.trim();
+      final referenceId = rowData['Reference ID']?.trim();
+
+      return ValidatedInventoryData(
+        name: name,
+        category: category,
+        unit: unit,
+        currentStock: currentStock,
+        minThreshold: minThreshold,
+        maxCapacity: maxCapacity,
+        costPerUnit: costPerUnit,
+        supplierName: supplierName,
+        supplierId: supplierId,
+        emoji: emoji,
+        notes: notes,
+        sku: sku,
+        referenceId: referenceId,
+      );
+    } catch (e) {
+      developer.log(
+        '❌ Error converting row data (async): $e',
         name: 'InventoryExcelValidationService',
         error: e,
       );

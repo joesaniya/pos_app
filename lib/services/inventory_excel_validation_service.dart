@@ -3,6 +3,7 @@ import 'package:excel/excel.dart';
 import 'dart:developer' as developer;
 import '../models/inventory_modal.dart';
 import 'supplier_validation_service.dart';
+import 'fuzzy_matching_service.dart';
 
 /// Model to represent a duplicate item that needs to be updated with appended stock
 class DuplicateUpdate {
@@ -47,13 +48,21 @@ class InventoryValidationError {
 class ValidatedInventoryData {
   final String name;
   final String category;
+  final String?
+  originalCategory; // Original category as entered by user (for audit trail)
   final StockUnit unit;
   final double currentStock;
   final double minThreshold;
   final double maxCapacity;
   final double costPerUnit;
   final String? supplierName;
+  final String?
+  originalSupplierName; // Original supplier name as entered by user (for audit trail)
   final String? supplierId;
+  final String?
+  supplierMappingType; // 'exact', 'auto_mapped', 'fallback_mapped', 'fallback_created'
+  final double?
+  supplierMatchScore; // Fuzzy match score if auto-mapped (0.0-1.0)
   final String emoji;
   final String? notes;
   final String? sku; // Stock Keeping Unit for duplicate detection
@@ -63,18 +72,45 @@ class ValidatedInventoryData {
   ValidatedInventoryData({
     required this.name,
     required this.category,
+    this.originalCategory,
     required this.unit,
     required this.currentStock,
     required this.minThreshold,
     required this.maxCapacity,
     required this.costPerUnit,
     this.supplierName,
+    this.originalSupplierName,
     this.supplierId,
+    this.supplierMappingType,
+    this.supplierMatchScore,
     required this.emoji,
     this.notes,
     this.sku,
     this.referenceId,
   });
+
+  /// Gets audit trail information for this item
+  String getAuditTrail() {
+    final parts = <String>[];
+
+    if (originalCategory != null && originalCategory != category) {
+      parts.add('Category mapped: $originalCategory → $category');
+    }
+
+    if (originalSupplierName != null && originalSupplierName != supplierName) {
+      parts.add('Supplier mapped: $originalSupplierName → $supplierName');
+      if (supplierMappingType != null) {
+        parts.add('(Type: $supplierMappingType)');
+      }
+      if (supplierMatchScore != null) {
+        parts.add(
+          '(Match score: ${(supplierMatchScore! * 100).toStringAsFixed(1)}%)',
+        );
+      }
+    }
+
+    return parts.isNotEmpty ? parts.join(' | ') : 'No mappings applied';
+  }
 }
 
 /// Service to validate and parse Excel inventory bulk upload files
@@ -398,7 +434,7 @@ class InventoryExcelValidationService {
     return rowData;
   }
 
-  /// Validates a single row of data
+  /// Validates a single row of data with intelligent category/supplier matching
   static List<InventoryValidationError> _validateRow(
     Map<String, String> rowData,
     int rowIndex,
@@ -428,7 +464,7 @@ class InventoryExcelValidationService {
       );
     }
 
-    // Validate Category (required) - Must be from existing or create new
+    // Validate Category (required) - With fuzzy matching support
     final category = rowData['Category']?.trim() ?? '';
     String? validatedCategory;
 
@@ -441,28 +477,42 @@ class InventoryExcelValidationService {
         ),
       );
     } else {
-      // Case-insensitive category matching against existing categories
-      final matchingCategory = validCategories.firstWhere(
+      // Try exact case-insensitive match first
+      final exactMatch = validCategories.firstWhere(
         (c) => c.toLowerCase() == category.toLowerCase(),
         orElse: () => '',
       );
 
-      if (matchingCategory.isEmpty) {
-        // Category doesn't exist - will be auto-created when inventory item is added
-        // This is allowed as new categories can be created during upload
-        validatedCategory = category; // Use as-is for new category creation
-
-        developer.log(
-          '⚠️ Row $displayRowIndex: New category "$category" will be created during import',
-          name: 'InventoryExcelValidationService',
-        );
+      if (exactMatch.isNotEmpty) {
+        // Exact case-insensitive match found
+        validatedCategory = exactMatch;
       } else {
-        // Category exists - use the exact case from valid list
-        validatedCategory = matchingCategory;
+        // Try fuzzy matching for partial/abbreviated names
+        final fuzzyMatch = FuzzyMatchingService.findBestMatch(
+          input: category,
+          candidates: validCategories,
+        );
+
+        if (fuzzyMatch != null && fuzzyMatch.isMatch) {
+          // Fuzzy match found (score >= 0.6)
+          validatedCategory = fuzzyMatch.matchedValue;
+          developer.log(
+            '🔗 Category fuzzy matched: "$category" → "$validatedCategory" (${(fuzzyMatch.matchScore * 100).toStringAsFixed(1)}%) | ${fuzzyMatch.reason}',
+            name: 'InventoryExcelValidationService',
+          );
+        } else {
+          // No match - will create new category during import
+          validatedCategory = category; // Use entered category as-is
+
+          developer.log(
+            '⚠️ Row $displayRowIndex: New category "$category" will be created during import',
+            name: 'InventoryExcelValidationService',
+          );
+        }
       }
     }
 
-    // Validate Unit (required)
+    // Validate Unit (required) - With fuzzy matching for typos
     final unit = rowData['Unit']?.trim() ?? '';
     if (unit.isEmpty) {
       errors.add(
@@ -473,13 +523,29 @@ class InventoryExcelValidationService {
         ),
       );
     } else if (!validUnits.contains(unit.toLowerCase())) {
-      errors.add(
-        InventoryValidationError(
-          rowNumber: displayRowIndex,
-          field: 'Unit',
-          error: 'Invalid unit "$unit". Valid units: ${validUnits.join(", ")}',
-        ),
+      // Try fuzzy matching for unit misspellings
+      final unitLower = unit.toLowerCase();
+      final fuzzyUnitMatch = FuzzyMatchingService.findBestMatch(
+        input: unitLower,
+        candidates: validUnits,
       );
+
+      if (fuzzyUnitMatch != null && fuzzyUnitMatch.isMatch) {
+        // Fuzzy matched unit
+        developer.log(
+          '🔗 Unit fuzzy matched: "$unit" → "${fuzzyUnitMatch.matchedValue}"',
+          name: 'InventoryExcelValidationService',
+        );
+      } else {
+        errors.add(
+          InventoryValidationError(
+            rowNumber: displayRowIndex,
+            field: 'Unit',
+            error:
+                'Invalid unit "$unit". Valid units: ${validUnits.join(", ")}',
+          ),
+        );
+      }
     }
 
     // Validate Current Stock (required, numeric, >= 0)
@@ -707,12 +773,14 @@ class InventoryExcelValidationService {
     }
   }
 
-  /// Converts validated row data to InventoryData with async supplier validation/creation
+  /// Converts validated row data to InventoryData with intelligent supplier/category mapping
   ///
   /// This version:
-  /// 1. Validates supplier name and auto-creates if doesn't exist (if enabled)
-  /// 2. Updates the supplier map with newly created suppliers
-  /// 3. Converts row to ValidatedInventoryData
+  /// 1. Validates/matches category with fuzzy matching
+  /// 2. Validates supplier name with intelligent fuzzy matching and fallback
+  /// 3. Auto-creates suppliers/categories if needed
+  /// 4. Tracks original values for audit trail
+  /// 5. Converts row to ValidatedInventoryData
   static Future<ValidatedInventoryData?> _convertToInventoryDataAsync(
     Map<String, String> rowData,
     Map<String, String> supplierMap,
@@ -721,7 +789,6 @@ class InventoryExcelValidationService {
   ) async {
     try {
       final name = rowData['Item Name']!.trim();
-      final category = rowData['Category']!.trim();
       final unitStr = rowData['Unit']!.trim().toLowerCase();
       final currentStock = double.parse(rowData['Current Stock']!.trim());
       final minThreshold = double.parse(rowData['Min Threshold']!.trim());
@@ -731,40 +798,95 @@ class InventoryExcelValidationService {
       // Convert unit string to StockUnit enum
       final unit = StockUnitExt.fromString(unitStr);
 
-      // Get supplier name from row data
-      String? supplierName = rowData['Supplier Name']?.trim();
-      String? supplierId;
+      // ═══════════════════════════════════════════════════════════════════════
+      // CATEGORY MAPPING WITH FUZZY MATCHING
+      // ═══════════════════════════════════════════════════════════════════════
+      String? categoryAsEntered = rowData['Category']?.trim();
+      String? finalCategory = categoryAsEntered;
 
-      // Validate supplier and auto-create if needed and enabled
-      if (supplierName != null &&
-          supplierName.isNotEmpty &&
+      // Attempt fuzzy matching for category if it doesn't exist
+      // (This will be handled when category is created during inventory item insertion)
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // SUPPLIER MAPPING WITH INTELLIGENT FUZZY MATCHING & FALLBACK
+      // ═══════════════════════════════════════════════════════════════════════
+      String? supplierName;
+      String? originalSupplierName;
+      String? supplierId;
+      String? supplierMappingType;
+      double? supplierMatchScore;
+
+      final enteredSupplierName = rowData['Supplier Name']?.trim();
+
+      if (enteredSupplierName != null &&
+          enteredSupplierName.isNotEmpty &&
           enableSupplierAutoCreation &&
           businessId != null) {
         try {
-          supplierId = await SupplierValidationService.instance
-              .validateAndGetSupplierIdWithAutoCreation(
-                supplierName: supplierName,
+          // Use intelligent supplier validation with fuzzy matching and fallback
+          final mappingResult = await SupplierValidationService.instance
+              .validateSupplierWithIntelligentMapping(
+                supplierName: enteredSupplierName,
                 supplierMap: supplierMap,
                 businessId: businessId,
+                useAutoMapping: true,
+                createFallbackSupplier: true,
               );
+
+          supplierId = mappingResult['id'] as String?;
+          supplierName = mappingResult['name'] as String?;
+          originalSupplierName = mappingResult['originalName'] as String?;
+          supplierMappingType = mappingResult['mappingType'] as String?;
+          supplierMatchScore = mappingResult['matchScore'] as double?;
+
+          if (supplierId != null && supplierMappingType != 'exact') {
+            developer.log(
+              '🔗 Supplier intelligent mapping: "$enteredSupplierName" → "$supplierName" (${supplierMappingType})',
+              name: 'InventoryExcelValidationService',
+            );
+          }
         } catch (e) {
           developer.log(
-            '⚠️ Error validating supplier "$supplierName": $e',
+            '⚠️ Error validating supplier "$enteredSupplierName": $e',
             name: 'InventoryExcelValidationService',
             error: e,
           );
-          // Continue without supplier ID - allow item creation even if supplier creation fails
+          // Continue without supplier ID - allow item creation even if supplier mapping fails
         }
-      } else if (supplierName != null && supplierName.isNotEmpty) {
+      } else if (enteredSupplierName != null &&
+          enteredSupplierName.isNotEmpty) {
         // If auto-creation is disabled, try to get ID from existing suppliers only
-        supplierId = supplierMap[supplierName];
+        originalSupplierName = enteredSupplierName;
+        supplierId = supplierMap[enteredSupplierName];
+        supplierName = enteredSupplierName;
+        supplierMappingType = 'exact';
       }
 
       // Get emoji
       final emoji = rowData['Emoji']?.trim() ?? '📦';
 
-      // Get notes
-      final notes = rowData['Notes']?.trim();
+      // Get notes and append audit trail information if mappings were applied
+      String? notes = rowData['Notes']?.trim();
+      if ((categoryAsEntered != null && categoryAsEntered != finalCategory) ||
+          (originalSupplierName != null &&
+              originalSupplierName != supplierName)) {
+        final auditParts = <String>[];
+        if (categoryAsEntered != null && categoryAsEntered != finalCategory) {
+          auditParts.add(
+            'Category mapped: $categoryAsEntered → $finalCategory',
+          );
+        }
+        if (originalSupplierName != null &&
+            originalSupplierName != supplierName) {
+          auditParts.add(
+            'Supplier mapped: $originalSupplierName → $supplierName (via $supplierMappingType)',
+          );
+        }
+        final auditTrail = auditParts.join(' | ');
+        notes = notes != null
+            ? '$notes\n[AUDIT: $auditTrail]'
+            : '[AUDIT: $auditTrail]';
+      }
 
       // Get optional SKU and Reference ID
       final sku = rowData['SKU']?.trim();
@@ -772,14 +894,18 @@ class InventoryExcelValidationService {
 
       return ValidatedInventoryData(
         name: name,
-        category: category,
+        category: finalCategory ?? categoryAsEntered ?? 'Uncategorized',
+        originalCategory: categoryAsEntered,
         unit: unit,
         currentStock: currentStock,
         minThreshold: minThreshold,
         maxCapacity: maxCapacity,
         costPerUnit: costPerUnit,
         supplierName: supplierName,
+        originalSupplierName: originalSupplierName,
         supplierId: supplierId,
+        supplierMappingType: supplierMappingType,
+        supplierMatchScore: supplierMatchScore,
         emoji: emoji,
         notes: notes,
         sku: sku,
@@ -912,5 +1038,109 @@ class InventoryExcelValidationService {
         'willUpdate': updates.length,
       },
     };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CATEGORY FUZZY MATCHING & VALIDATION
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Validates and maps a category name with intelligent fuzzy matching
+  ///
+  /// Strategy:
+  /// 1. Exact case-insensitive match - return exact category
+  /// 2. Fuzzy match with score >= 0.8 - return fuzzy matched category
+  /// 3. Fuzzy match with score >= 0.6 - return fuzzy matched category
+  /// 4. No match - return original name (will be created as new category)
+  ///
+  /// Returns a map with:
+  /// - 'category': Final category name to use
+  /// - 'original': Original category as entered
+  /// - 'matched': True if a match was found
+  /// - 'matchType': 'exact', 'fuzzy', or 'new'
+  /// - 'matchScore': Match score if fuzzy matched (0.0-1.0)
+  static Map<String, dynamic> validateCategoryWithFuzzyMatching({
+    required String categoryName,
+    required List<String> validCategories,
+  }) {
+    if (categoryName.trim().isEmpty) {
+      return {
+        'category': null,
+        'original': categoryName,
+        'matched': false,
+        'matchType': 'none',
+        'matchScore': 0.0,
+      };
+    }
+
+    final trimmedCategory = categoryName.trim();
+
+    // Step 1: Exact case-insensitive match
+    final exactMatch = validCategories.firstWhere(
+      (c) => c.toLowerCase() == trimmedCategory.toLowerCase(),
+      orElse: () => '',
+    );
+
+    if (exactMatch.isNotEmpty) {
+      return {
+        'category': exactMatch,
+        'original': trimmedCategory,
+        'matched': true,
+        'matchType': 'exact',
+        'matchScore': 1.0,
+      };
+    }
+
+    // Step 2: Fuzzy matching
+    final fuzzyMatch = FuzzyMatchingService.findBestMatch(
+      input: trimmedCategory,
+      candidates: validCategories,
+    );
+
+    if (fuzzyMatch != null && fuzzyMatch.isMatch) {
+      return {
+        'category': fuzzyMatch.matchedValue,
+        'original': trimmedCategory,
+        'matched': true,
+        'matchType': 'fuzzy',
+        'matchScore': fuzzyMatch.matchScore,
+      };
+    }
+
+    // Step 3: No match - will create as new category
+    return {
+      'category': trimmedCategory,
+      'original': trimmedCategory,
+      'matched': false,
+      'matchType': 'new',
+      'matchScore': 0.0,
+    };
+  }
+
+  /// Gets all possible category matches sorted by match score
+  static List<Map<String, dynamic>> getCategoryMatches({
+    required String categoryName,
+    required List<String> validCategories,
+    double minScore = 0.5,
+  }) {
+    if (categoryName.trim().isEmpty) {
+      return [];
+    }
+
+    final matches = FuzzyMatchingService.findAllMatches(
+      input: categoryName.trim(),
+      candidates: validCategories,
+      minScore: minScore,
+    );
+
+    return matches
+        .map(
+          (match) => {
+            'category': match.matchedValue,
+            'matchScore': match.matchScore,
+            'matchType': match.matchType,
+            'reason': match.reason,
+          },
+        )
+        .toList();
   }
 }

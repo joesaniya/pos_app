@@ -261,18 +261,17 @@ class StockTransaction {
   });
 
   factory StockTransaction.fromJson(Map<String, dynamic> j) => StockTransaction(
-        id: j['id'] as String,
-        type: TransactionTypeExt.fromString(
-            j['transaction_type'] ?? 'stock_in'),
-        quantity: (j['quantity'] as num).toDouble(),
-        stockBefore: (j['stock_before'] as num).toDouble(),
-        stockAfter: (j['stock_after'] as num).toDouble(),
-        unit: StockUnitExt.fromString(j['unit'] ?? 'kg'),
-        date: DateTime.parse(j['created_at'] as String),
-        note: j['note'] as String? ?? '—',
-        updatedBy: j['updated_by_name'] as String? ?? 'Unknown',
-        updatedByRole: j['updated_by_role'] as String? ?? '',
-      );
+    id: j['id'] as String,
+    type: TransactionTypeExt.fromString(j['transaction_type'] ?? 'stock_in'),
+    quantity: (j['quantity'] as num).toDouble(),
+    stockBefore: (j['stock_before'] as num).toDouble(),
+    stockAfter: (j['stock_after'] as num).toDouble(),
+    unit: StockUnitExt.fromString(j['unit'] ?? 'kg'),
+    date: DateTime.parse(j['created_at'] as String),
+    note: j['note'] as String? ?? '—',
+    updatedBy: j['updated_by_name'] as String? ?? 'Unknown',
+    updatedByRole: j['updated_by_role'] as String? ?? '',
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +319,9 @@ class InventoryItem {
   final DateTime lastUpdated;
   final List<StockTransaction> transactions;
   final String? notes;
+  final String? sku; // Stock Keeping Unit - for duplicate detection
+  final String?
+  referenceId; // Reference ID (e.g., for supplier reference) - for duplicate detection
 
   const InventoryItem({
     required this.id,
@@ -336,6 +338,8 @@ class InventoryItem {
     required this.lastUpdated,
     this.transactions = const [],
     this.notes,
+    this.sku,
+    this.referenceId,
   });
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -391,6 +395,8 @@ class InventoryItem {
           : DateTime.now(),
       transactions: txList,
       notes: j['notes'] as String?,
+      sku: j['sku'] as String?,
+      referenceId: j['reference_id'] as String?,
     );
   }
 
@@ -400,21 +406,23 @@ class InventoryItem {
   /// prevents "invalid input syntax for type uuid" Postgres errors that happen
   /// when sentinel strings like "other" are stored in a UUID column.
   Map<String, dynamic> toJson(String businessId) => {
-        'business_id': businessId,
-        'name': name,
-        'category': category,
-        'emoji': emoji,
-        'current_stock': currentStock,
-        'min_threshold': minThreshold,
-        'max_capacity': maxCapacity,
-        'unit': unit.dbValue,
-        'cost_per_unit': costPerUnit,
-        'supplier_name': supplier,
-        'supplier_id': isValidSupplierId(supplierId) ? supplierId : null,
-        'last_updated': lastUpdated.toIso8601String(),
-        'notes': notes,
-        'is_active': true,
-      };
+    'business_id': businessId,
+    'name': name,
+    'category': category,
+    'emoji': emoji,
+    'current_stock': currentStock,
+    'min_threshold': minThreshold,
+    'max_capacity': maxCapacity,
+    'unit': unit.dbValue,
+    'cost_per_unit': costPerUnit,
+    'supplier_name': supplier,
+    'supplier_id': isValidSupplierId(supplierId) ? supplierId : null,
+    'last_updated': lastUpdated.toIso8601String(),
+    'notes': notes,
+    'sku': sku,
+    'reference_id': referenceId,
+    'is_active': true,
+  };
 
   InventoryItem copyWith({
     double? currentStock,
@@ -423,23 +431,26 @@ class InventoryItem {
     String? notes,
     String? supplier,
     String? supplierId,
-  }) =>
-      InventoryItem(
-        id: id,
-        name: name,
-        category: category,
-        emoji: emoji,
-        currentStock: currentStock ?? this.currentStock,
-        minThreshold: minThreshold,
-        maxCapacity: maxCapacity,
-        unit: unit,
-        costPerUnit: costPerUnit,
-        supplier: supplier ?? this.supplier,
-        supplierId: supplierId ?? this.supplierId,
-        lastUpdated: lastUpdated ?? this.lastUpdated,
-        transactions: transactions ?? this.transactions,
-        notes: notes ?? this.notes,
-      );
+    String? sku,
+    String? referenceId,
+  }) => InventoryItem(
+    id: id,
+    name: name,
+    category: category,
+    emoji: emoji,
+    currentStock: currentStock ?? this.currentStock,
+    minThreshold: minThreshold,
+    maxCapacity: maxCapacity,
+    unit: unit,
+    costPerUnit: costPerUnit,
+    supplier: supplier ?? this.supplier,
+    supplierId: supplierId ?? this.supplierId,
+    lastUpdated: lastUpdated ?? this.lastUpdated,
+    transactions: transactions ?? this.transactions,
+    notes: notes ?? this.notes,
+    sku: sku ?? this.sku,
+    referenceId: referenceId ?? this.referenceId,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -517,4 +528,3 @@ class StockNotificationRecord {
     }
   }
 }
-

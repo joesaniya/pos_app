@@ -15,6 +15,8 @@ class IColors {
   static const inStockBg = Color(0xFFE6F5EE);
   static const lowStock = Color(0xFFB8800A);
   static const lowStockBg = Color(0xFFFFF3DC);
+  static const warning = Color(0xFFE8A000);
+  static const warnBg = Color(0xFFFFF0DB);
   static const critical = Color(0xFFCC3300);
   static const criticalBg = Color(0xFFFFEDE8);
   static const outOfStock = Color(0xFF5A5A6E);

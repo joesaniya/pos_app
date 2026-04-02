@@ -264,7 +264,8 @@ class _BillPreviewScreenState extends State<BillPreviewScreen> {
               // ── Totals ──────────────────────────────────────────
               _pdfRow('Subtotal', _fmt(order.subtotal)),
               pw.SizedBox(height: 3),
-              _pdfRow('Tax (${order.taxRate.toInt()}%)', _fmt(order.taxAmount)),
+              _pdfRow('Tax', _fmt(order.taxAmount)),
+              // _pdfRow('Tax (${order.taxRate.toInt()}%)', _fmt(order.taxAmount)),
               if (order.discountAmount > 0) ...[
                 pw.SizedBox(height: 3),
                 _pdfRow('Discount', '- ${_fmt(order.discountAmount)}'),

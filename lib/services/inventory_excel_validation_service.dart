@@ -3,6 +3,27 @@ import 'package:excel/excel.dart';
 import 'dart:developer' as developer;
 import '../models/inventory_modal.dart';
 
+/// Model to represent a duplicate item that needs to be updated with appended stock
+class DuplicateUpdate {
+  final String existingItemId;
+  final String existingItemName;
+  final double newQuantity;
+  final ValidatedInventoryData newItemData;
+  final String? matchReason;
+
+  DuplicateUpdate({
+    required this.existingItemId,
+    required this.existingItemName,
+    required this.newQuantity,
+    required this.newItemData,
+    this.matchReason,
+  });
+
+  @override
+  String toString() =>
+      'Update $existingItemName: append $newQuantity ($matchReason)';
+}
+
 /// Model to represent validation errors for Excel file entries
 class InventoryValidationError {
   final int rowNumber;
@@ -34,6 +55,9 @@ class ValidatedInventoryData {
   final String? supplierId;
   final String emoji;
   final String? notes;
+  final String? sku; // Stock Keeping Unit for duplicate detection
+  final String?
+  referenceId; // Reference ID (e.g., supplier reference) for duplicate detection
 
   ValidatedInventoryData({
     required this.name,
@@ -47,6 +71,8 @@ class ValidatedInventoryData {
     this.supplierId,
     required this.emoji,
     this.notes,
+    this.sku,
+    this.referenceId,
   });
 }
 
@@ -54,8 +80,8 @@ class ValidatedInventoryData {
 class InventoryExcelValidationService {
   static const String templateSheetName = 'Inventory Data';
 
-  // Expected column headers
-  static const List<String> expectedHeaders = [
+  // Expected column headers (required columns)
+  static const List<String> requiredHeaders = [
     'Item Name',
     'Category',
     'Unit',
@@ -66,6 +92,15 @@ class InventoryExcelValidationService {
     'Supplier Name',
     'Emoji',
     'Notes',
+  ];
+
+  // Optional columns for enhanced duplicate detection
+  static const List<String> optionalHeaders = ['SKU', 'Reference ID'];
+
+  // All headers (required + optional)
+  static List<String> get allExpectedHeaders => [
+    ...requiredHeaders,
+    ...optionalHeaders,
   ];
 
   // Valid stock units
@@ -81,7 +116,7 @@ class InventoryExcelValidationService {
   ];
 
   /// Validates and parses an Excel inventory file
-  /// Returns map with 'data' (list of ValidatedInventoryData) and 'errors' (list of InventoryValidationError)
+  /// Returns map with 'data' (list of ValidatedInventoryData), 'errors', and 'newCategories'
   static Future<Map<String, dynamic>> parseAndValidateExcelFile({
     required String filePath,
     required List<String> validCategories,
@@ -90,6 +125,8 @@ class InventoryExcelValidationService {
   }) async {
     final List<ValidatedInventoryData> validItems = [];
     final List<InventoryValidationError> errors = [];
+    final Set<String> newCategories =
+        {}; // Track categories that will be created
 
     try {
       developer.log(
@@ -126,6 +163,7 @@ class InventoryExcelValidationService {
         return {
           'data': <ValidatedInventoryData>[],
           'errors': errors,
+          'newCategories': <String>[],
           'summary':
               'Invalid Excel template format. Please ensure column headers match the template.',
         };
@@ -161,6 +199,14 @@ class InventoryExcelValidationService {
             final item = _convertToInventoryData(rowData, supplierMap);
             if (item != null) {
               validItems.add(item);
+
+              // Track if this is a new category (case-insensitive check)
+              final isNewCategory = !validCategories.any(
+                (c) => c.toLowerCase() == item.category.toLowerCase(),
+              );
+              if (isNewCategory) {
+                newCategories.add(item.category);
+              }
             }
           } else {
             // Add errors for this row
@@ -178,15 +224,17 @@ class InventoryExcelValidationService {
       }
 
       developer.log(
-        '✅ Validation complete: ${validItems.length} valid, ${errors.length} errors',
+        '✅ Validation complete: ${validItems.length} valid, ${errors.length} errors, ${newCategories.length} new categories',
         name: 'InventoryExcelValidationService',
       );
 
       return {
         'data': validItems,
         'errors': errors,
+        'newCategories': newCategories.toList(),
         'summary': errors.isEmpty
-            ? '✅ All ${validItems.length} items are valid and ready to import!'
+            ? '✅ All ${validItems.length} items are valid!'
+                  '${newCategories.isNotEmpty ? '\n📁 ${newCategories.length} new category(ies) will be created: ${newCategories.join(", ")}' : ''}'
             : '⚠️ ${validItems.length} valid items, ${errors.length} errors found',
       };
     } catch (e) {
@@ -204,41 +252,69 @@ class InventoryExcelValidationService {
             error: 'Failed to parse Excel file: $e',
           ),
         ],
+        'newCategories': <String>[],
         'summary': 'Error reading Excel file: $e',
       };
     }
   }
 
-  /// Validates Excel file headers
+  /// Validates Excel file headers (required only, optional are flexible)
   static void _validateHeaders(
     Sheet sheet,
     List<InventoryValidationError> errors,
   ) {
-    for (int colIndex = 0; colIndex < expectedHeaders.length; colIndex++) {
+    for (int colIndex = 0; colIndex < requiredHeaders.length; colIndex++) {
       final cell = sheet.cell(
         CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
       );
       final headerValue = _getCellStringValue(cell.value);
 
-      if (headerValue?.trim() != expectedHeaders[colIndex]) {
+      if (headerValue?.trim() != requiredHeaders[colIndex]) {
         errors.add(
           InventoryValidationError(
             rowNumber: 1,
             field: 'Header Column ${colIndex + 1}',
             error:
-                'Expected "${expectedHeaders[colIndex]}", got "$headerValue"',
+                'Expected "${requiredHeaders[colIndex]}", got "$headerValue"',
           ),
         );
       }
     }
   }
 
-  /// Gets indices of each header column
+  /// Gets indices of each header column (including optional ones if present)
   static Map<String, int> _getHeaderIndices(Sheet sheet) {
     final indices = <String, int>{};
-    for (int colIndex = 0; colIndex < expectedHeaders.length; colIndex++) {
-      indices[expectedHeaders[colIndex]] = colIndex;
+
+    // Add required headers
+    for (int colIndex = 0; colIndex < requiredHeaders.length; colIndex++) {
+      indices[requiredHeaders[colIndex]] = colIndex;
     }
+
+    // Check for optional headers after required ones
+    // Excel sheets can have many columns, so check up to a reasonable limit
+    final maxColumnsToCheck =
+        requiredHeaders.length + optionalHeaders.length + 10;
+    for (
+      int colIndex = requiredHeaders.length;
+      colIndex < maxColumnsToCheck;
+      colIndex++
+    ) {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
+      );
+      final headerValue = _getCellStringValue(cell.value)?.trim() ?? '';
+
+      // Stop checking if we find an empty header (no more optional headers)
+      if (headerValue.isEmpty) {
+        break;
+      }
+
+      if (optionalHeaders.contains(headerValue)) {
+        indices[headerValue] = colIndex;
+      }
+    }
+
     return indices;
   }
 
@@ -273,7 +349,7 @@ class InventoryExcelValidationService {
         (_getCellStringValue(unitCell.value)?.isEmpty ?? true);
   }
 
-  /// Extracts row data into a map
+  /// Extracts row data into a map (including optional columns if present)
   static Map<String, String> _extractRowData(
     Sheet sheet,
     int rowIndex,
@@ -281,12 +357,27 @@ class InventoryExcelValidationService {
   ) {
     final rowData = <String, String>{};
 
-    for (final header in expectedHeaders) {
+    // Extract required headers
+    for (final header in requiredHeaders) {
       final colIndex = headerIndices[header]!;
       final cell = sheet.cell(
         CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: rowIndex),
       );
       rowData[header] = _getCellStringValue(cell.value) ?? '';
+    }
+
+    // Extract optional headers if they exist
+    for (final header in optionalHeaders) {
+      if (headerIndices.containsKey(header)) {
+        final colIndex = headerIndices[header]!;
+        final cell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: rowIndex),
+        );
+        final value = _getCellStringValue(cell.value) ?? '';
+        if (value.isNotEmpty) {
+          rowData[header] = value;
+        }
+      }
     }
 
     return rowData;
@@ -322,8 +413,10 @@ class InventoryExcelValidationService {
       );
     }
 
-    // Validate Category (required)
+    // Validate Category (required) - Must be from existing or create new
     final category = rowData['Category']?.trim() ?? '';
+    String? validatedCategory;
+
     if (category.isEmpty) {
       errors.add(
         InventoryValidationError(
@@ -333,21 +426,24 @@ class InventoryExcelValidationService {
         ),
       );
     } else {
-      // Case-insensitive category matching
+      // Case-insensitive category matching against existing categories
       final matchingCategory = validCategories.firstWhere(
         (c) => c.toLowerCase() == category.toLowerCase(),
         orElse: () => '',
       );
 
       if (matchingCategory.isEmpty) {
-        errors.add(
-          InventoryValidationError(
-            rowNumber: displayRowIndex,
-            field: 'Category',
-            error:
-                'Category "$category" not found. Valid categories: ${validCategories.join(", ")}',
-          ),
+        // Category doesn't exist - will be auto-created when inventory item is added
+        // This is allowed as new categories can be created during upload
+        validatedCategory = category; // Use as-is for new category creation
+
+        developer.log(
+          '⚠️ Row $displayRowIndex: New category "$category" will be created during import',
+          name: 'InventoryExcelValidationService',
         );
+      } else {
+        // Category exists - use the exact case from valid list
+        validatedCategory = matchingCategory;
       }
     }
 
@@ -567,6 +663,10 @@ class InventoryExcelValidationService {
       // Get notes
       final notes = rowData['Notes']?.trim();
 
+      // Get optional SKU and Reference ID
+      final sku = rowData['SKU']?.trim();
+      final referenceId = rowData['Reference ID']?.trim();
+
       return ValidatedInventoryData(
         name: name,
         category: category,
@@ -579,6 +679,8 @@ class InventoryExcelValidationService {
         supplierId: supplierId,
         emoji: emoji,
         notes: notes,
+        sku: sku,
+        referenceId: referenceId,
       );
     } catch (e) {
       developer.log(
@@ -606,5 +708,106 @@ class InventoryExcelValidationService {
     }
 
     return cellValue.toString();
+  }
+
+  /// Detects duplicate inventory items based on product name, SKU, and reference ID
+  /// Returns a map of:
+  /// - 'newItems': List of validated items with no duplicates
+  /// - 'duplicates': List of duplicate items (with existing item info)
+  /// - 'updates': List of items to update (quantity appended to existing)
+  static Future<Map<String, dynamic>> detectAndHandleDuplicates({
+    required List<ValidatedInventoryData> validatedItems,
+    required List<InventoryItem> existingItems,
+  }) async {
+    final List<ValidatedInventoryData> newItems = [];
+    final List<Map<String, dynamic>> duplicates = [];
+    final List<DuplicateUpdate> updates = [];
+
+    // Create lookup maps for efficient searching
+    final nameMap = <String, InventoryItem>{};
+    final skuMap = <String, InventoryItem>{};
+    final refIdMap = <String, InventoryItem>{};
+
+    for (final item in existingItems) {
+      nameMap[item.name.toLowerCase().trim()] = item;
+      if (item.sku != null && item.sku!.isNotEmpty) {
+        skuMap[item.sku!.toLowerCase().trim()] = item;
+      }
+      if (item.referenceId != null && item.referenceId!.isNotEmpty) {
+        refIdMap[item.referenceId!.toLowerCase().trim()] = item;
+      }
+    }
+
+    for (final newItem in validatedItems) {
+      InventoryItem? matchedExisting;
+      String? matchReason;
+
+      // Check for duplicates in order of priority: SKU > Reference ID > Product Name
+      if (newItem.sku != null && newItem.sku!.isNotEmpty) {
+        final key = newItem.sku!.toLowerCase().trim();
+        if (skuMap.containsKey(key)) {
+          matchedExisting = skuMap[key];
+          matchReason = 'SKU match (${newItem.sku})';
+        }
+      }
+
+      if (matchedExisting == null &&
+          newItem.referenceId != null &&
+          newItem.referenceId!.isNotEmpty) {
+        final key = newItem.referenceId!.toLowerCase().trim();
+        if (refIdMap.containsKey(key)) {
+          matchedExisting = refIdMap[key];
+          matchReason = 'Reference ID match (${newItem.referenceId})';
+        }
+      }
+
+      if (matchedExisting == null) {
+        final key = newItem.name.toLowerCase().trim();
+        if (nameMap.containsKey(key)) {
+          matchedExisting = nameMap[key];
+          matchReason = 'Product name match (${newItem.name})';
+        }
+      }
+
+      if (matchedExisting != null) {
+        // Duplicate found
+        duplicates.add({
+          'newItem': newItem,
+          'existingItem': matchedExisting,
+          'matchReason': matchReason,
+        });
+
+        // Track for update (append stock quantity)
+        updates.add(
+          DuplicateUpdate(
+            existingItemId: matchedExisting.id,
+            existingItemName: matchedExisting.name,
+            newQuantity: newItem.currentStock,
+            newItemData: newItem,
+            matchReason: matchReason,
+          ),
+        );
+      } else {
+        // New item, no duplicate
+        newItems.add(newItem);
+      }
+    }
+
+    developer.log(
+      '🔍 Duplicate detection: ${newItems.length} new, ${duplicates.length} duplicates, ${updates.length} updates',
+      name: 'InventoryExcelValidationService',
+    );
+
+    return {
+      'newItems': newItems,
+      'duplicates': duplicates,
+      'updates': updates,
+      'summary': {
+        'total': validatedItems.length,
+        'new': newItems.length,
+        'duplicates': duplicates.length,
+        'willUpdate': updates.length,
+      },
+    };
   }
 }

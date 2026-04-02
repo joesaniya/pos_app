@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:developer' as developer;
-import 'package:uuid/uuid.dart';
 import '../services/inventory_excel_template_service.dart';
 import '../services/inventory_excel_validation_service.dart';
 import '../services/file_upload_service.dart';
+import '../services/bulk_inventory_upload_service.dart';
+import '../services/public_storage_service.dart';
 import '../models/inventory_modal.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/supplier_provider.dart';
-import '../repositories/inventory_repository.dart';
 import '../services/storage_service.dart';
 import '../screens/widgets/inventory_widgets.dart';
 
@@ -29,8 +29,10 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
   bool _isValidating = false;
   List<InventoryValidationError> _errors = [];
   List<ValidatedInventoryData>? _validatedData;
+  List<String> _newCategories = []; // Track categories that will be created
   String _statusMessage = '';
   double _uploadProgress = 0;
+  BulkUploadResult? _uploadResult;
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +70,9 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
               const SizedBox(height: 24),
 
               // Main content based on state
-              if (_validatedData == null || _errors.isNotEmpty)
+              if (_uploadResult != null)
+                _buildUploadResultsSection()
+              else if (_validatedData == null || _errors.isNotEmpty)
                 _buildUploadSection()
               else
                 _buildConfirmationSection(),
@@ -82,9 +86,16 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
   /// Builds step indicators
   Widget _buildStepIndicators() {
     final steps = [
-      ('Download Template', _validatedData == null),
-      ('Upload File', _validatedData == null || _errors.isNotEmpty),
-      ('Review & Confirm', _validatedData != null && _errors.isEmpty),
+      ('Download Template', _validatedData == null && _uploadResult == null),
+      (
+        'Upload File',
+        (_validatedData == null || _errors.isNotEmpty) && _uploadResult == null,
+      ),
+      (
+        'Review & Confirm',
+        _validatedData != null && _errors.isEmpty && _uploadResult == null,
+      ),
+      ('Import Complete', _uploadResult != null),
     ];
 
     return Row(
@@ -98,7 +109,13 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
                   height: 40,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: i < (_validatedData != null ? 2 : 0)
+                    color:
+                        i <
+                            (_uploadResult != null
+                                ? 3
+                                : _validatedData != null
+                                ? 2
+                                : 0)
                         ? IColors.accent
                         : IColors.divider,
                   ),
@@ -106,7 +123,13 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
                   child: Text(
                     '${i + 1}',
                     style: TextStyle(
-                      color: i < (_validatedData != null ? 2 : 0)
+                      color:
+                          i <
+                              (_uploadResult != null
+                                  ? 3
+                                  : _validatedData != null
+                                  ? 2
+                                  : 0)
                           ? IColors.surface
                           : IColors.textSecondary,
                       fontWeight: FontWeight.bold,
@@ -656,7 +679,7 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'All $count items are valid and ready to import. This action cannot be undone.',
+                'All $count items are valid and ready to import. Duplicates will be detected and handled by appending stock to existing items. This action cannot be undone.',
                 style: const TextStyle(
                   fontSize: 13,
                   color: IColors.textSecondary,
@@ -667,6 +690,81 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
           ),
         ),
         const SizedBox(height: 16),
+
+        // Show new categories section if any
+        if (_newCategories.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: IColors.warnBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: IColors.warning),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.info_rounded, color: IColors.warning, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'New Categories Will Be Created',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: IColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'The following ${_newCategories.length} new category(ies) will be automatically created:',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: IColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Column(
+                  children: [
+                    for (String category in _newCategories)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 4,
+                              height: 4,
+                              decoration: const BoxDecoration(
+                                color: IColors.warning,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                category,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: IColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         _buildItemsPreview(),
         const SizedBox(height: 20),
         SizedBox(
@@ -708,6 +806,412 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Builds upload results section - displays detailed results with duplicate handling
+  Widget _buildUploadResultsSection() {
+    if (_uploadResult == null) return const SizedBox.shrink();
+
+    final result = _uploadResult!;
+    final isSuccess =
+        result.success && result.newItemsCreated + result.itemsUpdated > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Success/Failure banner
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSuccess ? IColors.inStockBg : IColors.criticalBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSuccess ? IColors.inStock : IColors.critical,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isSuccess
+                        ? Icons.check_circle_rounded
+                        : Icons.error_rounded,
+                    color: isSuccess ? IColors.inStock : IColors.critical,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isSuccess ? 'Import Successful!' : 'Import Failed',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: isSuccess
+                                ? IColors.inStock
+                                : IColors.critical,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          result.summary,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: IColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Detailed results breakdown
+        _buildResultsBreakdown(result),
+
+        const SizedBox(height: 20),
+
+        // Action buttons
+        if (isSuccess)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: IColors.inStock,
+                foregroundColor: IColors.surface,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+              child: const Text(
+                'Done',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            ),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _resetAll,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: IColors.critical,
+                    foregroundColor: IColors.surface,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'Try Again',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// Builds detailed results breakdown with duplicate handling info
+  Widget _buildResultsBreakdown(BulkUploadResult result) {
+    final detailedResults = result.detailedResults;
+    final createdItems = detailedResults
+        .where((r) => r['action'] == 'create' && r['status'] == 'success')
+        .toList();
+    final updatedItems = detailedResults
+        .where((r) => r['action'] == 'update' && r['status'] == 'success')
+        .toList();
+    final failedItems = detailedResults
+        .where((r) => r['status'] == 'failed')
+        .toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: IColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: IColors.divider),
+        boxShadow: [
+          BoxShadow(
+            color: IColors.cardShadow,
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Summary cards
+          Row(
+            children: [
+              Expanded(
+                child: _buildResultCard(
+                  icon: Icons.add_circle_rounded,
+                  label: 'New Items',
+                  count: result.newItemsCreated,
+                  color: IColors.accent,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildResultCard(
+                  icon: Icons.update_rounded,
+                  label: 'Updated',
+                  count: result.itemsUpdated,
+                  color: IColors.inStock,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildResultCard(
+                  icon: Icons.content_copy_rounded,
+                  label: 'Duplicates',
+                  count: result.duplicatesSkipped,
+                  color: IColors.lowStock,
+                ),
+              ),
+              if (result.errorMessages.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildResultCard(
+                    icon: Icons.error_outline_rounded,
+                    label: 'Errors',
+                    count: result.errorMessages.length,
+                    color: IColors.critical,
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Detailed items list
+          if (createdItems.isNotEmpty) ...[
+            _buildResultSection(
+              title: '✅ New Items Created (${createdItems.length})',
+              items: createdItems,
+              color: IColors.accent,
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          if (updatedItems.isNotEmpty) ...[
+            _buildResultSection(
+              title:
+                  '📈 Existing Items Updated with Appended Stock (${updatedItems.length})',
+              items: updatedItems,
+              color: IColors.inStock,
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          if (failedItems.isNotEmpty) ...[
+            _buildResultSection(
+              title: '❌ Failed Items (${failedItems.length})',
+              items: failedItems,
+              color: IColors.critical,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Builds individual result card (stats)
+  Widget _buildResultCard({
+    required IconData icon,
+    required String label,
+    required int count,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 6),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: IColors.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds result section with collapsible items
+  Widget _buildResultSection({
+    required String title,
+    required List<Map<String, dynamic>> items,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...items.map((item) {
+            if (item.containsKey('error')) {
+              // Failed item
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 4,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: IColors.critical,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item['itemName'] ?? 'Unknown',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: IColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            item['error'] ?? 'Unknown error',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: IColors.critical,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            } else {
+              // Success item
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 4,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: IColors.inStock,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item['itemName'] ?? 'Unknown',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: IColors.textPrimary,
+                            ),
+                          ),
+                          if (item['action'] == 'create')
+                            Text(
+                              'Created with quantity: ${item['quantity']}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: IColors.textSecondary,
+                              ),
+                            )
+                          else
+                            Text(
+                              'Appended stock: +${item['quantityAdded']}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: IColors.inStock,
+                              ),
+                            ),
+                          if (item['sku'] != null ||
+                              item['referenceId'] != null)
+                            Text(
+                              'SKU: ${item['sku'] ?? '-'} | Ref ID: ${item['referenceId'] ?? '-'}',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: IColors.textMuted,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+          }),
+        ],
+      ),
     );
   }
 
@@ -842,13 +1346,54 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
       );
 
       if (mounted) {
-        setState(() => _statusMessage = '✅ Template downloaded successfully');
-        developer.log('Template saved to: $filePath');
+        if (filePath != null && filePath.isNotEmpty) {
+          final fileName = filePath.split('/').last;
+          final locationDescription =
+              PublicStorageService.getLocationDescription(filePath);
+
+          setState(
+            () => _statusMessage =
+                '✅ Template downloaded!\n$locationDescription\nFile: $fileName',
+          );
+          developer.log(
+            'Template saved to: $filePath',
+            name: 'InventoryBulkUploadScreen',
+          );
+
+          // Show detailed success message
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ Template Ready!\n\nFile: $fileName\n\nLocation: $locationDescription',
+              ),
+              duration: const Duration(seconds: 5),
+              backgroundColor: IColors.inStock,
+            ),
+          );
+        } else {
+          setState(() => _statusMessage = '❌ Failed to generate template');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Failed to generate template. Please try again.'),
+              backgroundColor: IColors.critical,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
-      log('error downloading template: $e');
+      log('error downloading template: $e', name: 'InventoryBulkUploadScreen');
       if (mounted) {
-        setState(() => _statusMessage = '❌ Error downloading template: $e');
+        setState(() => _statusMessage = '❌ Error: ${e.toString()}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error generating template:\n${e.toString()}'),
+            backgroundColor: IColors.critical,
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -942,6 +1487,7 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
         setState(() {
           _validatedData = result['data'] as List<ValidatedInventoryData>;
           _errors = result['errors'] as List<InventoryValidationError>;
+          _newCategories = result['newCategories'] as List<String>;
           _statusMessage = result['summary'] as String;
         });
       }
@@ -955,11 +1501,25 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
   }
 
   Future<void> _importItems() async {
-    if (_validatedData == null || _validatedData!.isEmpty) return;
+    if (_validatedData == null || _validatedData!.isEmpty) {
+      return;
+    }
 
     setState(() => _isProcessing = true);
 
     try {
+      // Get reference data from providers BEFORE async operations
+      final invProvider = context.read<InventoryProvider>();
+      final categories = invProvider.categories
+          .where((c) => c != 'All')
+          .toList();
+
+      final supplierProvider = context.read<SupplierProvider>();
+      final supplierMap = {
+        for (var supplier in supplierProvider.filtered)
+          supplier.name: supplier.id,
+      };
+
       // Get user data from storage
       final userData = await StorageService.instance.getUserData();
       final businessId = userData['businessId'] as String? ?? '';
@@ -971,65 +1531,64 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
         throw 'Business ID not found';
       }
 
-      // Convert validated data to InventoryItem objects
-      final uuid = const Uuid();
-      final itemsToImport = _validatedData!.map((validated) {
-        return InventoryItem(
-          id: uuid.v4(),
-          name: validated.name,
-          category: validated.category,
-          emoji: validated.emoji,
-          currentStock: validated.currentStock,
-          minThreshold: validated.minThreshold,
-          maxCapacity: validated.maxCapacity,
-          unit: validated.unit,
-          costPerUnit: validated.costPerUnit,
-          supplier: validated.supplierName ?? 'Unknown',
-          supplierId: validated.supplierId,
-          lastUpdated: DateTime.now(),
-          notes: validated.notes,
-        );
-      }).toList();
+      if (_selectedFilePath == null) {
+        throw 'File path not found';
+      }
 
-      // Bulk insert via repository
-      final repo = InventoryRepository.instance;
-      final (successCount, failureCount, errors) = await repo.bulkInsertItems(
-        items: itemsToImport,
-        businessId: businessId,
-        userUid: userUid,
-        userName: userName,
-        userRole: userRole,
+      developer.log(
+        '🏷️ New categories detected and will be auto-created with items: ${_newCategories.length}',
+        name: 'InventoryBulkUploadScreen',
       );
 
-      if (mounted) {
-        if (successCount > 0) {
-          // Refresh inventory provider
-          final invProvider = context.read<InventoryProvider>();
-          await invProvider.fetchItems();
+      developer.log(
+        '🚀 Starting bulk upload with BulkInventoryUploadService',
+        name: 'InventoryBulkUploadScreen',
+      );
 
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '✅ Successfully imported $successCount items${failureCount > 0 ? ' ($failureCount failed)' : ''}',
-              ),
-              backgroundColor: IColors.inStock,
-              duration: const Duration(seconds: 3),
-            ),
+      // Use BulkInventoryUploadService for intelligent duplicate handling
+      final result = await BulkInventoryUploadService.instance
+          .processBulkUpload(
+            filePath: _selectedFilePath!,
+            businessId: businessId,
+            userUid: userUid,
+            userName: userName,
+            userRole: userRole,
+            validCategories: categories,
+            supplierMap: supplierMap,
           );
 
-          // Close screen after success
-          await Future.delayed(const Duration(milliseconds: 500));
-          if (mounted) Navigator.pop(context);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Import failed: ${errors.join(', ')}'),
-              backgroundColor: IColors.critical,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
+      if (!mounted) return;
+
+      developer.log(
+        '📊 Bulk upload result: ${result.summary}',
+        name: 'InventoryBulkUploadScreen',
+      );
+
+      // Display results
+      setState(() => _uploadResult = result);
+
+      // Refresh inventory provider
+      await invProvider.fetchItems();
+
+      if (!mounted) return;
+
+      // Show detailed toast
+      if (result.success && result.newItemsCreated + result.itemsUpdated > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.summary),
+            backgroundColor: IColors.inStock,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      } else if (result.errorMessages.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${result.errorMessages.first}'),
+            backgroundColor: IColors.critical,
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1064,8 +1623,10 @@ class _InventoryBulkUploadScreenState extends State<InventoryBulkUploadScreen> {
       _selectedFilePath = null;
       _validatedData = null;
       _errors = [];
+      _newCategories = [];
       _statusMessage = '';
       _uploadProgress = 0;
+      _uploadResult = null;
     });
   }
 }

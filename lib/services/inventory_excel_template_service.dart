@@ -2,13 +2,15 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:developer' as developer;
+import 'public_storage_service.dart';
 
 /// Service to handle Excel template generation for bulk inventory uploads
 class InventoryExcelTemplateService {
-  static const String templateFileName = 'Inventory_Bulk_Upload_Template.xlsx';
+  static const String templateFileName =
+      'Inventory_Bulk_Upload_Template_check.xlsx';
 
-  // Expected column headers for inventory
-  static const List<String> templateHeaders = [
+  // Expected column headers for inventory (required)
+  static const List<String> requiredHeaders = [
     'Item Name',
     'Category',
     'Unit',
@@ -21,12 +23,21 @@ class InventoryExcelTemplateService {
     'Notes',
   ];
 
+  // Optional columns for enhanced duplicate detection and data richness
+  static const List<String> optionalHeaders = ['SKU', 'Reference ID'];
+
+  // All headers (required + optional)
+  static List<String> get templateHeaders => [
+    ...requiredHeaders,
+    ...optionalHeaders,
+  ];
+
   // Column descriptions for user guidance
   static const Map<String, String> columnDescriptions = {
     'Item Name':
         'Name of the inventory item (e.g., "Tomatoes", "Cooking Oil") - Required',
     'Category':
-        'Category of the item - must match a category from "Categories Reference" sheet - Required',
+        'Category of the item - must match a category from "Master Data" sheet - Required',
     'Unit':
         'Unit of measurement (kg, g, litre, ml, pieces, dozen, packet, bottle) - Required',
     'Current Stock':
@@ -42,6 +53,10 @@ class InventoryExcelTemplateService {
     'Emoji':
         'Icon/emoji to represent the item (e.g., 🍅, 🍖) - Optional, improves UI',
     'Notes': 'Additional notes or remarks about the item - Optional',
+    'SKU':
+        'Stock Keeping Unit - Unique product identifier for duplicate detection - Optional',
+    'Reference ID':
+        'Reference ID (e.g., supplier product reference) for duplicate detection - Optional',
   };
 
   // Valid stock units
@@ -56,15 +71,23 @@ class InventoryExcelTemplateService {
     'bottle',
   ];
 
-  /// Generates an Excel template for inventory bulk upload
+  /// Generates an Excel template for inventory bulk upload with dynamic master data dropdowns
+  /// Parameters:
+  /// - categories: List of valid category names (fetched from system)
+  /// - suppliers: List of valid supplier names (fetched from system)
+  /// - tags: Optional list of tags for tagging inventory items
+  /// - subCategories: Optional list of sub-categories for nested categorization
+  ///
   /// Returns the file path of the generated template
   static Future<String?> generateTemplate({
     required List<String> categories,
     required List<String> suppliers,
+    List<String>? tags,
+    List<String>? subCategories,
   }) async {
     try {
       developer.log(
-        '📦 Generating Excel inventory template...',
+        '📦 Generating Excel inventory template with dynamic master data...',
         name: 'InventoryExcelTemplateService',
       );
 
@@ -76,45 +99,49 @@ class InventoryExcelTemplateService {
       // 1. Create template sheet
       _createTemplateSheet(excel);
 
-      // 2. Create categories reference sheet
-      _createCategoriesReferenceSheet(excel, categories);
+      // 2. Create master data reference sheet
+      _createMasterDataReferenceSheet(
+        excel,
+        categories,
+        suppliers,
+        tags ?? [],
+        subCategories ?? [],
+      );
 
-      // 3. Create suppliers reference sheet
-      _createSuppliersReferenceSheet(excel, suppliers);
-
-      // 4. Create units reference sheet
+      // 3. Create units reference sheet
       _createUnitsReferenceSheet(excel);
 
-      // 5. Create instructions sheet
+      // 4. Create instructions sheet
       _createInstructionsSheet(excel);
 
-      // 6. Create sample data sheet
+      // 5. Create sample data sheet
       _createSampleDataSheet(excel, categories, suppliers);
 
-      // Save file to Downloads folder
-      final downloadPath = '/storage/emulated/0/Download';
-      final directory = Directory(downloadPath);
-
-      // Ensure directory exists
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-
-      final templateFilePath = '$downloadPath/$templateFileName';
-      final file = File(templateFilePath);
-
+      // Encode Excel file to bytes
       final fileBytes = excel.encode();
-      if (fileBytes != null) {
-        await file.writeAsBytes(fileBytes);
-
-        developer.log(
-          '✅ Inventory template generated successfully: $templateFilePath',
-          name: 'InventoryExcelTemplateService',
-        );
-        return templateFilePath;
-      } else {
+      if (fileBytes == null) {
         developer.log(
           '❌ Failed to encode Excel file',
+          name: 'InventoryExcelTemplateService',
+        );
+        return null;
+      }
+
+      // Save to public Downloads folder using PublicStorageService
+      final filePath = await PublicStorageService.saveFileToPublicDownloads(
+        fileName: templateFileName,
+        fileBytes: fileBytes,
+      );
+
+      if (filePath != null && filePath.isNotEmpty) {
+        developer.log(
+          '✅ Inventory template generated successfully: $filePath',
+          name: 'InventoryExcelTemplateService',
+        );
+        return filePath;
+      } else {
+        developer.log(
+          '❌ Failed to save Excel file',
           name: 'InventoryExcelTemplateService',
         );
         return null;
@@ -140,21 +167,19 @@ class InventoryExcelTemplateService {
       );
       cell.value = TextCellValue(templateHeaders[i]);
 
-      // Style header - bold
+      // Style header - bold and wrapped
       cell.cellStyle = CellStyle(
         bold: true,
         textWrapping: TextWrapping.WrapText,
       );
     }
 
-    // Add 50 empty rows for data entry (more than expenses for inventory)
-    for (int row = 1; row <= 50; row++) {
+    // Add 100 empty rows for data entry
+    for (int row = 1; row <= 100; row++) {
       for (int col = 0; col < templateHeaders.length; col++) {
         final cell = sheet.cell(
           CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row),
         );
-
-        // Cells formatted with standard style
         cell.cellStyle = CellStyle();
       }
     }
@@ -170,60 +195,110 @@ class InventoryExcelTemplateService {
     sheet.setColumnWidth(7, 25); // Supplier Name
     sheet.setColumnWidth(8, 10); // Emoji
     sheet.setColumnWidth(9, 30); // Notes
+    sheet.setColumnWidth(10, 15); // SKU
+    sheet.setColumnWidth(11, 15); // Reference ID
   }
 
-  /// Creates a categories reference sheet
-  static void _createCategoriesReferenceSheet(
+  /// Creates unified master data reference sheet with all dynamic master data
+  static void _createMasterDataReferenceSheet(
     Excel excel,
     List<String> categories,
-  ) {
-    final sheet = excel['Categories Reference'];
-
-    // Add header
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
-        TextCellValue('Category Name');
-
-    final headerCell = sheet.cell(
-      CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
-    );
-    headerCell.cellStyle = CellStyle(bold: true);
-
-    // Add category data
-    for (int row = 0; row < categories.length; row++) {
-      final cell = sheet.cell(
-        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row + 1),
-      );
-      cell.value = TextCellValue(categories[row]);
-    }
-
-    sheet.setColumnWidth(0, 30);
-  }
-
-  /// Creates a suppliers reference sheet
-  static void _createSuppliersReferenceSheet(
-    Excel excel,
     List<String> suppliers,
+    List<String> tags,
+    List<String> subCategories,
   ) {
-    final sheet = excel['Suppliers Reference'];
+    final sheet = excel['Master Data'];
 
-    // Add header
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
-        TextCellValue('Supplier Name');
+    int colIndex = 0;
 
-    final headerCell = sheet.cell(
-      CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0),
-    );
-    headerCell.cellStyle = CellStyle(bold: true);
-
-    // Add supplier data
-    for (int row = 0; row < suppliers.length; row++) {
+    // ─── CATEGORIES ───
+    {
       final cell = sheet.cell(
-        CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row + 1),
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
       );
-      cell.value = TextCellValue(suppliers[row]);
+      cell.value = TextCellValue('Categories');
+      cell.cellStyle = CellStyle(bold: true);
+
+      for (int row = 0; row < categories.length; row++) {
+        final dataCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: row + 1),
+        );
+        dataCell.value = TextCellValue(categories[row]);
+      }
+      sheet.setColumnWidth(colIndex, 20);
+      colIndex++;
     }
 
-    sheet.setColumnWidth(0, 30);
+    // ─── SUPPLIERS ───
+    {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
+      );
+      cell.value = TextCellValue('Suppliers');
+      cell.cellStyle = CellStyle(bold: true);
+
+      for (int row = 0; row < suppliers.length; row++) {
+        final dataCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: row + 1),
+        );
+        dataCell.value = TextCellValue(suppliers[row]);
+      }
+      sheet.setColumnWidth(colIndex, 25);
+      colIndex++;
+    }
+
+    // ─── UNITS ───
+    {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
+      );
+      cell.value = TextCellValue('Units');
+      cell.cellStyle = CellStyle(bold: true);
+
+      for (int row = 0; row < validUnits.length; row++) {
+        final dataCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: row + 1),
+        );
+        dataCell.value = TextCellValue(validUnits[row]);
+      }
+      sheet.setColumnWidth(colIndex, 15);
+      colIndex++;
+    }
+
+    // ─── TAGS (if provided) ───
+    if (tags.isNotEmpty) {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
+      );
+      cell.value = TextCellValue('Tags');
+      cell.cellStyle = CellStyle(bold: true);
+
+      for (int row = 0; row < tags.length; row++) {
+        final dataCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: row + 1),
+        );
+        dataCell.value = TextCellValue(tags[row]);
+      }
+      sheet.setColumnWidth(colIndex, 15);
+      colIndex++;
+    }
+
+    // ─── SUB-CATEGORIES (if provided) ───
+    if (subCategories.isNotEmpty) {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 0),
+      );
+      cell.value = TextCellValue('Sub-Categories');
+      cell.cellStyle = CellStyle(bold: true);
+
+      for (int row = 0; row < subCategories.length; row++) {
+        final dataCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: row + 1),
+        );
+        dataCell.value = TextCellValue(subCategories[row]);
+      }
+      sheet.setColumnWidth(colIndex, 20);
+    }
   }
 
   /// Creates a units reference sheet
@@ -365,7 +440,7 @@ class InventoryExcelTemplateService {
     sheet.setColumnWidth(0, 100);
   }
 
-  /// Creates a sample data sheet with example entries
+  /// Creates a sample data sheet with example entries including SKU and Reference ID
   static void _createSampleDataSheet(
     Excel excel,
     List<String> categories,
@@ -382,7 +457,7 @@ class InventoryExcelTemplateService {
       cell.cellStyle = CellStyle(bold: true);
     }
 
-    // Sample data - 5 realistic examples
+    // Sample data - 5 realistic examples with SKU and Reference ID
     final sampleData = [
       [
         'Tomatoes',
@@ -395,6 +470,8 @@ class InventoryExcelTemplateService {
         suppliers.isNotEmpty ? suppliers[0] : 'Local Market',
         '🍅',
         'Fresh red tomatoes, daily supply',
+        'ITEM-001-TOM',
+        'FARM-2026-TMAT-001',
       ],
       [
         'Cooking Oil',
@@ -406,7 +483,9 @@ class InventoryExcelTemplateService {
         '250',
         suppliers.length > 1 ? suppliers[1] : 'Premium Food Supplier',
         '🛢️',
-        'Refined vegetable oil for cooking',
+        'Refined vegetable oil',
+        'ITEM-002-OIL',
+        'SUPP-2026-OIL-COOK',
       ],
       [
         'Chicken Breast',
@@ -419,6 +498,8 @@ class InventoryExcelTemplateService {
         suppliers.isNotEmpty ? suppliers[0] : 'Fresh Meat Co',
         '🍗',
         'Fresh boneless chicken breast',
+        'ITEM-003-CHIC',
+        'FARM-2026-CHIC-001',
       ],
       [
         'Basmati Rice',
@@ -431,6 +512,8 @@ class InventoryExcelTemplateService {
         suppliers.length > 1 ? suppliers[1] : 'Bulk Supplier',
         '🍚',
         'Premium quality basmati rice',
+        'ITEM-004-RICE',
+        'SUPP-2026-RICE-BASM',
       ],
       [
         'All-Purpose Flour',
@@ -443,6 +526,8 @@ class InventoryExcelTemplateService {
         suppliers.isNotEmpty ? suppliers.first : 'General Supplier',
         '🌾',
         'Refined all-purpose flour',
+        'ITEM-005-FLOUR',
+        'MILL-2026-FLOUR-APT',
       ],
     ];
 
@@ -458,8 +543,6 @@ class InventoryExcelTemplateService {
           ),
         );
         cell.value = TextCellValue(rowData[colIdx]);
-
-        // Sample data formatted with standard style
         cell.cellStyle = CellStyle();
       }
     }
@@ -475,5 +558,7 @@ class InventoryExcelTemplateService {
     sheet.setColumnWidth(7, 25);
     sheet.setColumnWidth(8, 10);
     sheet.setColumnWidth(9, 30);
+    sheet.setColumnWidth(10, 15);
+    sheet.setColumnWidth(11, 15);
   }
 }

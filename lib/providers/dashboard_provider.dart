@@ -452,6 +452,14 @@ class DashboardProvider extends ChangeNotifier {
     DateTime prevFrom,
     DateTime prevTo,
   ) async {
+    // Skip offline data fetch on web — web is always online
+    if (kIsWeb) {
+      _isLoading = false;
+      _isReady = true;
+      notifyListeners();
+      return;
+    }
+
     try {
       final local = LocalDatabase.instance;
       final rows = await local.getEntities(

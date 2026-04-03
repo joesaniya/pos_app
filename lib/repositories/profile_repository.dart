@@ -30,11 +30,19 @@ class ProfileRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>?> loadProfile(String uid) async {
+    // Skip local cache on web
+    if (kIsWeb) {
+      if (_connectivity.isOnline) {
+        return await _refreshFromFirestore(uid).catchError((_) => null);
+      }
+      return null;
+    }
+
     final cached = await _local.getProfile(uid);
 
     if (cached != null) {
       if (_connectivity.isOnline) {
-        _refreshFromFirestore(uid).catchError((_) {});
+        _refreshFromFirestore(uid).catchError((_) => null);
       }
       return cached;
     }
@@ -47,6 +55,25 @@ class ProfileRepository {
   }
 
   Future<Map<String, dynamic>?> refreshProfile(String uid) async {
+    // Skip local cache on web
+    if (kIsWeb) {
+      if (_connectivity.isOnline) {
+        try {
+          final doc = await _fs.collection('users').doc(uid).get();
+          if (!doc.exists || doc.data() == null) return null;
+          final data = doc.data()!;
+          // Convert Timestamp to ISO string
+          final serialized = _serializeFirestoreData(data);
+          serialized['uid'] = uid;
+          return serialized;
+        } catch (e) {
+          debugPrint('[ProfileRepo] Web refresh error: $e');
+          return null;
+        }
+      }
+      return null;
+    }
+
     if (!_connectivity.isOnline) {
       return _local.getProfile(uid);
     }
@@ -61,7 +88,12 @@ class ProfileRepository {
       // Convert Timestamp to ISO string for local storage
       final serialized = _serializeFirestoreData(data);
       serialized['uid'] = uid;
-      await _local.saveProfile(uid, serialized);
+
+      // Skip caching on web
+      if (!kIsWeb) {
+        await _local.saveProfile(uid, serialized);
+      }
+
       log('[ProfileRepo] Refreshed from Firestore for uid=$uid');
       return serialized;
     } catch (e) {
@@ -75,30 +107,37 @@ class ProfileRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> updateProfile(String uid, Map<String, dynamic> updates) async {
-    // 1. Update local cache immediately
-    await _local.updateProfileField(uid, updates);
+    // Skip local cache on web
+    if (!kIsWeb) {
+      // 1. Update local cache immediately
+      await _local.updateProfileField(uid, updates);
+    }
 
     if (_connectivity.isOnline) {
       try {
         final fsUpdates = Map<String, dynamic>.from(updates);
         fsUpdates['updatedAt'] = FieldValue.serverTimestamp();
         await _fs.collection('users').doc(uid).update(fsUpdates);
-        // Refresh local cache with server data
-        await _refreshFromFirestore(uid);
+        // Refresh local cache with server data (skip on web)
+        if (!kIsWeb) {
+          await _refreshFromFirestore(uid);
+        }
         return;
       } catch (e) {
         debugPrint('[ProfileRepo] Online updateProfile failed: $e');
       }
     }
 
-    // Queue for sync
-    await _local.enqueue(
-      id: _uuid.v4(),
-      entityType: EntityType.profile,
-      entityId: uid,
-      action: LocalDatabase.actionUpdate,
-      payload: {...updates, 'uid': uid},
-    );
+    // Queue for sync (skip on web - no offline support)
+    if (!kIsWeb) {
+      await _local.enqueue(
+        id: _uuid.v4(),
+        entityType: EntityType.profile,
+        entityId: uid,
+        action: LocalDatabase.actionUpdate,
+        payload: {...updates, 'uid': uid},
+      );
+    }
     log('[ProfileRepo] Profile update queued for uid=$uid');
   }
 

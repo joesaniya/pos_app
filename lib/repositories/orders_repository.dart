@@ -45,6 +45,33 @@ class OrdersRepository {
     required String businessId,
     String? staffUid,
   }) async {
+    // Skip local cache on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        // Build today's IST date boundaries
+        final nowUtc = DateTime.now().toUtc();
+        final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
+        final istStart = DateTime(nowIst.year, nowIst.month, nowIst.day);
+        final istEnd = istStart.add(const Duration(days: 1));
+
+        final rows = await Supabase.instance.client
+            .from('orders')
+            .select()
+            .eq('business_id', businessId)
+            .gte('created_at', istStart.toIso8601String())
+            .lt('created_at', istEnd.toIso8601String())
+            .order('created_at', ascending: false);
+
+        final orders = (rows as List)
+            .map((r) => Order.fromJson(r as Map<String, dynamic>))
+            .toList();
+        return orders;
+      } catch (e) {
+        log('[OrdersRepo] Web fetchTodayOrders error: $e');
+        return [];
+      }
+    }
+
     // Build today's IST date boundaries
     final nowUtc = DateTime.now().toUtc();
     final nowIst = nowUtc.add(const Duration(hours: 5, minutes: 30));
@@ -71,6 +98,9 @@ class OrdersRepository {
   /// Pull orders from Supabase and update local cache.
   /// FIX: Prevents overwriting completed orders with ready status.
   Future<void> refreshOrdersFromRemote({required String businessId}) async {
+    // Skip local caching on web
+    if (kIsWeb) return;
+
     try {
       final remoteOrders = await _remote.fetchTodayOrders(
         businessId: businessId,
@@ -94,7 +124,7 @@ class OrdersRepository {
           // If local is completed and we're trying to change it, keep completed
           if (localStatus == 'completed' && remoteStatus != 'completed') {
             log(
-              '[OrdersRepo] ✅ Protected completed order from being downgraded to $remoteStatus: ${order.id}',
+              '[OrdersRepo] Protected completed order from being downgraded to $remoteStatus: ${order.id}',
             );
             // Merge remote data but preserve completed status and payment info
             final data = order.toSyncMap();
@@ -163,6 +193,35 @@ class OrdersRepository {
     required String businessId,
     required DateTime selectedDate,
   }) async {
+    // Skip local cache on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        // Query Supabase directly for orders on this date
+        final istStart = DateTime(
+          selectedDate.year,
+          selectedDate.month,
+          selectedDate.day,
+        );
+        final istEnd = istStart.add(const Duration(days: 1));
+
+        final rows = await Supabase.instance.client
+            .from('orders')
+            .select()
+            .eq('business_id', businessId)
+            .gte('created_at', istStart.toIso8601String())
+            .lt('created_at', istEnd.toIso8601String())
+            .order('created_at', ascending: false);
+
+        final orders = (rows as List)
+            .map((r) => Order.fromJson(r as Map<String, dynamic>))
+            .toList();
+        return orders;
+      } catch (e) {
+        log('[OrdersRepo] Web fetchOrdersByDate error: $e');
+        return [];
+      }
+    }
+
     // Convert selectedDate to IST boundaries (start and end of day in IST)
     final istStart = DateTime(
       selectedDate.year,
@@ -193,6 +252,25 @@ class OrdersRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<Order>> fetchAllOrders({required String businessId}) async {
+    // Skip local cache on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        final rows = await Supabase.instance.client
+            .from('orders')
+            .select()
+            .eq('business_id', businessId)
+            .order('created_at', ascending: false);
+
+        final orders = (rows as List)
+            .map((r) => Order.fromJson(r as Map<String, dynamic>))
+            .toList();
+        return orders;
+      } catch (e) {
+        log('[OrdersRepo] Web fetchAllOrders error: $e');
+        return [];
+      }
+    }
+
     // Read from local cache (all orders)
     final localRows = await _local.getEntities(
       table: LocalDatabase.tOrders,
@@ -208,6 +286,9 @@ class OrdersRepository {
   /// Pull all orders from Supabase and update local cache.
   /// Does not filter by date - fetches all orders for the business.
   Future<void> refreshAllOrdersFromRemote({required String businessId}) async {
+    // Skip local caching on web
+    if (kIsWeb) return;
+
     try {
       final remoteOrders = await _remote.fetchBusinessOrders(
         businessId: businessId,
@@ -309,6 +390,20 @@ class OrdersRepository {
     required String tableId,
     required String businessId,
   }) async {
+    // Skip local cache entirely on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        final orders = await _remote.fetchTableOrders(
+          tableId: tableId,
+          businessId: businessId,
+        );
+        return orders;
+      } catch (e) {
+        log('[OrdersRepo] Web fetchTableOrders error: $e');
+        return [];
+      }
+    }
+
     if (_connectivity.isOnline) {
       try {
         // Online path — delegates to remote service

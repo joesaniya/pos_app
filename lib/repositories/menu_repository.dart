@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'package:flutter/foundation.dart';
 import 'package:pos_app/models/menu_item.dart';
 import 'package:pos_app/models/menu_category.dart';
 import 'package:pos_app/database/local_database.dart';
@@ -25,6 +26,11 @@ class MenuRepository {
   Future<List<SupabaseMenuCategory>> fetchCategories(String businessId) async {
     try {
       if (businessId.isEmpty) return [];
+
+      // Skip local database on web platform
+      if (kIsWeb) {
+        return await _fetchCategoriesFromRemote(businessId);
+      }
 
       // Step 1: Load from local cache immediately
       final localRows = await _localDb.getEntities(
@@ -81,16 +87,18 @@ class MenuRepository {
           .map((e) => SupabaseMenuCategory.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Cache locally
-      for (final cat in categories) {
-        await _localDb.upsertEntity(
-          table: LocalDatabase.tMenuCategories,
-          id: cat.id,
-          businessId: businessId,
-          data: cat.toJson(),
-          syncStatus: LocalDatabase.syncSynced,
-          action: LocalDatabase.actionUpdate,
-        );
+      // Cache locally (skip on web — no local database)
+      if (!kIsWeb) {
+        for (final cat in categories) {
+          await _localDb.upsertEntity(
+            table: LocalDatabase.tMenuCategories,
+            id: cat.id,
+            businessId: businessId,
+            data: cat.toJson(),
+            syncStatus: LocalDatabase.syncSynced,
+            action: LocalDatabase.actionUpdate,
+          );
+        }
       }
 
       log('[MenuRepo] 🔄 Synced ${categories.length} categories from remote');
@@ -103,6 +111,7 @@ class MenuRepository {
 
   /// Background refresh — doesn't block UI
   void _refreshCategoriesInBackground(String businessId) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _fetchCategoriesFromRemote(businessId);
@@ -303,6 +312,7 @@ class MenuRepository {
     String businessId,
     Map<String, dynamic> updates,
   ) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _supabase
@@ -381,6 +391,7 @@ class MenuRepository {
 
   /// Sync category delete to backend in background (non-blocking)
   void _syncCategoryDeleteInBackground(String categoryId, String businessId) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _supabase
@@ -405,6 +416,11 @@ class MenuRepository {
     String categoryId,
   ) async {
     try {
+      // Skip local database on web platform
+      if (kIsWeb) {
+        return await _fetchItemsFromRemote(businessId, categoryId);
+      }
+
       // Load from local cache
       final localRows = await _localDb.getEntities(
         table: LocalDatabase.tMenuItems,
@@ -456,17 +472,19 @@ class MenuRepository {
           .map((e) => SupabaseMenuItem.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Cache locally with complete JSON representation
-      for (final item in items) {
-        await _localDb.upsertEntity(
-          table: LocalDatabase.tMenuItems,
-          id: item.id,
-          businessId: businessId,
-          data: item.toJson(),
-          syncStatus: LocalDatabase.syncSynced,
-          action: LocalDatabase.actionUpdate,
-          extraColumns: {'category': categoryId},
-        );
+      // Cache locally with complete JSON representation (skip on web)
+      if (!kIsWeb) {
+        for (final item in items) {
+          await _localDb.upsertEntity(
+            table: LocalDatabase.tMenuItems,
+            id: item.id,
+            businessId: businessId,
+            data: item.toJson(),
+            syncStatus: LocalDatabase.syncSynced,
+            action: LocalDatabase.actionUpdate,
+            extraColumns: {'category': categoryId},
+          );
+        }
       }
 
       return items;
@@ -477,6 +495,7 @@ class MenuRepository {
   }
 
   void _refreshItemsInBackground(String businessId, String categoryId) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _fetchItemsFromRemote(businessId, categoryId);
@@ -570,6 +589,18 @@ class MenuRepository {
         'business_id': businessId,
       };
 
+      // On web: Create directly in Supabase (no local caching)
+      if (kIsWeb) {
+        try {
+          await _supabase.from('menu_items').insert(itemJson);
+          log('[MenuRepo] ✅ Menu item created on web: $itemId');
+          return item;
+        } catch (e) {
+          log('[MenuRepo] ❌ Web creation failed: $e');
+          rethrow;
+        }
+      }
+
       // 1. Save to local cache
       await _localDb.upsertEntity(
         table: LocalDatabase.tMenuItems,
@@ -653,6 +684,28 @@ class MenuRepository {
     String? updatedByRole,
   }) async {
     try {
+      // On web: Update directly in Supabase (no local caching)
+      if (kIsWeb) {
+        try {
+          final updateData = {
+            ...updates,
+            'updated_by_uid': updatedByUid,
+            'updated_by_name': updatedByName,
+            'updated_by_role': updatedByRole,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          };
+          await _supabase
+              .from('menu_items')
+              .update(updateData)
+              .eq('id', itemId);
+          log('[MenuRepo] ✅ Menu item updated on web: $itemId');
+          return;
+        } catch (e) {
+          log('[MenuRepo] ❌ Web update failed: $e');
+          rethrow;
+        }
+      }
+
       // Get current item from local cache
       final rows = await _localDb.getEntities(
         table: LocalDatabase.tMenuItems,
@@ -732,6 +785,7 @@ class MenuRepository {
     String businessId,
     Map<String, dynamic> updates,
   ) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _supabase
@@ -760,48 +814,59 @@ class MenuRepository {
     try {
       final now = DateTime.now().toUtc().toIso8601String();
 
-      // ✅ STEP 1: Mark as deleted in local cache IMMEDIATELY (optimistic)
-      await _localDb.upsertEntity(
-        table: LocalDatabase.tMenuItems,
-        id: itemId,
-        businessId: businessId,
-        data: {
-          'is_active': false,
-          'updated_by_uid': deletedByUid,
-          'updated_by_name': deletedByName,
-          'updated_at': now,
-        },
-        syncStatus: LocalDatabase.syncSynced, // Optimistic
-        action: LocalDatabase.actionDelete,
-        extraColumns: {'category': categoryId},
-      );
+      // Skip local cache on web
+      if (!kIsWeb) {
+        // ✅ STEP 1: Mark as deleted in local cache IMMEDIATELY (optimistic)
+        await _localDb.upsertEntity(
+          table: LocalDatabase.tMenuItems,
+          id: itemId,
+          businessId: businessId,
+          data: {
+            'is_active': false,
+            'updated_by_uid': deletedByUid,
+            'updated_by_name': deletedByName,
+            'updated_at': now,
+          },
+          syncStatus: LocalDatabase.syncSynced, // Optimistic
+          action: LocalDatabase.actionDelete,
+          extraColumns: {'category': categoryId},
+        );
 
-      // ✅ STEP 2: Queue for sync (always, as fallback)
-      await _localDb.enqueue(
-        id: _uuid.v4(),
-        entityType: EntityType.menuItem,
-        entityId: itemId,
-        action: LocalDatabase.actionDelete,
-        payload: {
-          'id': itemId,
-          'business_id': businessId,
-          'is_active': false,
-          'updated_by_uid': deletedByUid,
-          'updated_by_name': deletedByName,
-        },
-        businessId: businessId,
-      );
+        // ✅ STEP 2: Queue for sync (always, as fallback)
+        await _localDb.enqueue(
+          id: _uuid.v4(),
+          entityType: EntityType.menuItem,
+          entityId: itemId,
+          action: LocalDatabase.actionDelete,
+          payload: {
+            'id': itemId,
+            'business_id': businessId,
+            'is_active': false,
+            'updated_by_uid': deletedByUid,
+            'updated_by_name': deletedByName,
+          },
+          businessId: businessId,
+        );
+      }
 
       log(
-        '[MenuRepo] ✅ Menu item deleted locally: $itemId (sync in background)',
+        '[MenuRepo] ✅ Menu item deleted${kIsWeb ? ' (web, remote only)' : ' locally'}: $itemId',
       );
 
       // ✅ STEP 3: Return IMMEDIATELY
       // (Provider will handle notifying listeners)
 
-      // ✅ STEP 4: Sync to backend in background
-      if (_connectivity.isOnline) {
-        _syncMenuItemDeleteInBackground(itemId, businessId);
+      // ✅ STEP 4: Sync to backend in background (or directly on web)
+      if (_connectivity.isOnline || kIsWeb) {
+        if (kIsWeb) {
+          // On web, delete directly
+          await _supabase
+              .from('menu_items')
+              .update({'is_active': false})
+              .eq('id', itemId);
+        } else {
+          _syncMenuItemDeleteInBackground(itemId, businessId);
+        }
       }
     } catch (e, st) {
       log('[MenuRepo] ❌ deleteMenuItem error: $e\n$st');
@@ -811,6 +876,7 @@ class MenuRepository {
 
   /// Sync menu item delete to backend in background (non-blocking)
   void _syncMenuItemDeleteInBackground(String itemId, String businessId) {
+    if (kIsWeb) return; // Skip background sync on web
     Future.microtask(() async {
       try {
         await _supabase
@@ -832,31 +898,53 @@ class MenuRepository {
   /// Fetch Menu Items (legacy support)
   Future<List<MenuItem>> fetchMenuItems(String businessId) async {
     List<MenuItem> items = [];
-    final localData = await _localDb.getEntities(
-      table: LocalDatabase.tMenuItems,
-      businessId: businessId,
-    );
-    bool hasLocalRecords = false;
 
-    for (final row in localData) {
-      hasLocalRecords = true;
+    // On native platforms, try local cache first
+    if (!kIsWeb) {
       try {
-        items.add(MenuItem.fromJson(row));
+        final localData = await _localDb.getEntities(
+          table: LocalDatabase.tMenuItems,
+          businessId: businessId,
+        );
+
+        for (final row in localData) {
+          try {
+            items.add(MenuItem.fromJson(row));
+          } catch (e) {
+            // parsing error
+          }
+        }
+
+        if (items.isNotEmpty) {
+          // Trigger background refresh in background
+          _refreshMenuItemsInBackground(businessId);
+          return items;
+        }
       } catch (e) {
-        // parsing error
+        debugPrint('[MenuRepo] Local fetch failed: $e');
       }
     }
 
-    if (!hasLocalRecords) {
-      // Fetch from Supabase if local is empty
-      try {
-        final rows = await _supabase
-            .from('menu_items')
-            .select('*')
-            .eq('business_id', businessId)
-            .eq('is_active', true)
-            .order('name');
+    // Fetch from Supabase (either on web or if local was empty)
+    try {
+      final rows = await _supabase
+          .from('menu_items')
+          .select('*')
+          .eq('business_id', businessId)
+          .eq('is_active', true)
+          .order('name');
 
+      for (final row in (rows as List)) {
+        try {
+          final item = MenuItem.fromJson(row as Map<String, dynamic>);
+          items.add(item);
+        } catch (e) {
+          debugPrint('[MenuRepo] Parse error: $e');
+        }
+      }
+
+      // Cache to local on native platforms
+      if (!kIsWeb) {
         await _localDb.replaceAll(
           table: LocalDatabase.tMenuItems,
           businessId: businessId,
@@ -864,23 +952,16 @@ class MenuRepository {
               .map((r) => r as Map<String, dynamic>)
               .toList(),
         );
-
-        for (final row in (rows as List)) {
-          final item = MenuItem.fromJson(row as Map<String, dynamic>);
-          items.add(item);
-        }
-      } catch (e) {
-        // Fallback to empty list
       }
-    } else {
-      // Trigger background refresh
-      _refreshBackground(businessId);
+    } catch (e) {
+      debugPrint('[MenuRepo] Remote fetch failed: $e');
     }
 
     return items;
   }
 
-  Future<void> _refreshBackground(String businessId) async {
+  Future<void> _refreshMenuItemsInBackground(String businessId) async {
+    if (kIsWeb) return; // Skip background sync on web
     try {
       final rows = await _supabase
           .from('menu_items')
@@ -906,31 +987,55 @@ class MenuRepository {
   }) async {
     final data = item.toJson();
 
-    await _localDb.upsertEntity(
-      table: LocalDatabase.tMenuItems,
-      id: item.id,
-      businessId: businessId,
-      data: data,
-      syncStatus: LocalDatabase.syncPending,
-      action: isCreate
-          ? LocalDatabase.actionCreate
-          : LocalDatabase.actionUpdate,
-    );
+    // Save to local database only on native platforms
+    if (!kIsWeb) {
+      await _localDb.upsertEntity(
+        table: LocalDatabase.tMenuItems,
+        id: item.id,
+        businessId: businessId,
+        data: data,
+        syncStatus: LocalDatabase.syncPending,
+        action: isCreate
+            ? LocalDatabase.actionCreate
+            : LocalDatabase.actionUpdate,
+      );
 
-    await _localDb.enqueue(
-      id: _uuid.v4(),
-      entityType: EntityType.menuItem,
-      entityId: item.id,
-      action: isCreate
-          ? LocalDatabase.actionCreate
-          : LocalDatabase.actionUpdate,
-      payload: {...data, 'business_id': businessId},
-      businessId: businessId,
-    );
+      await _localDb.enqueue(
+        id: _uuid.v4(),
+        entityType: EntityType.menuItem,
+        entityId: item.id,
+        action: isCreate
+            ? LocalDatabase.actionCreate
+            : LocalDatabase.actionUpdate,
+        payload: {...data, 'business_id': businessId},
+        businessId: businessId,
+      );
+    } else {
+      // On web, send to remote directly
+      try {
+        if (isCreate) {
+          await _supabase.from('menu_items').insert({
+            ...data,
+            'business_id': businessId,
+          });
+        } else {
+          await _supabase.from('menu_items').update(data).eq('id', item.id);
+        }
+      } catch (e) {
+        log('[MenuRepo] Web saveMenuItem error: $e');
+        rethrow;
+      }
+    }
   }
 
   // ── Subscriptions ──────────────────────────────────────────────────────────
   void subscribeRealtime(String businessId, void Function() onUpdate) {
+    // Skip realtime subscriptions on web
+    if (kIsWeb) {
+      log('[MenuRepo] Skipping realtime subscription on web');
+      return;
+    }
+
     _supabase
         .channel('menu_rt_$businessId')
         .onPostgresChanges(

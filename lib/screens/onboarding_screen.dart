@@ -637,8 +637,9 @@ class _PageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.symmetric(horizontal: 24.w),
+      physics: const ClampingScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -841,42 +842,45 @@ class _IllustrationCard extends StatelessWidget {
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Transform.translate(
-                    offset: Offset(0, -t * 6),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Outer glow ring
-                        Container(
-                          width: 110.w,
-                          height: 110.w,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: meta.accent.withOpacity(0.08),
+                  LimitedBox(
+                    maxHeight: 150.h,
+                    child: Transform.translate(
+                      offset: Offset(0, -t * 6),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Outer glow ring
+                          Container(
+                            width: 110.w,
+                            height: 110.w,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: meta.accent.withOpacity(0.08),
+                            ),
                           ),
-                        ),
-                        // Inner circle
-                        Container(
-                          width: 84.w,
-                          height: 84.w,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: meta.accent,
-                            boxShadow: [
-                              BoxShadow(
-                                color: meta.accent.withOpacity(0.30),
-                                blurRadius: 24,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
+                          // Inner circle
+                          Container(
+                            width: 84.w,
+                            height: 84.w,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: meta.accent,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: meta.accent.withOpacity(0.30),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              meta.icon,
+                              size: 38.w,
+                              color: Colors.white,
+                            ),
                           ),
-                          child: Icon(
-                            meta.icon,
-                            size: 38.w,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],

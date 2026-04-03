@@ -111,7 +111,7 @@ class InventoryExcelTemplateService {
       _createUnitsReferenceSheet(excel);
 
       // 4. Create instructions sheet
-      _createInstructionsSheet(excel);
+      // _createInstructionsSheet(excel);
 
       // 5. Create sample data sheet
       _createSampleDataSheet(excel, categories, suppliers);

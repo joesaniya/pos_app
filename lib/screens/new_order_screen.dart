@@ -8,6 +8,7 @@ import 'dart:developer';
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
 import 'package:pos_app/services/order_service.dart';
@@ -326,6 +327,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
 
   /// Cache menu items to local database for offline use
   Future<void> _cacheMenuItemsLocally(List<Map<String, dynamic>> items) async {
+    // Skip local caching on web
+    if (kIsWeb) return;
+
     try {
       final localDb = LocalDatabase.instance;
       if (!localDb.isInitialized) await localDb.init();
@@ -368,6 +372,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   Future<void> _loadMenuOffline() async {
+    // Skip offline menu loading on web
+    if (kIsWeb) return;
+
     if (_businessId.isEmpty) return;
     try {
       if (!mounted) setState(() => _isLoadingOfflineData = true);
@@ -482,6 +489,9 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   Future<void> _loadTablesOffline() async {
+    // Skip offline table loading on web
+    if (kIsWeb) return;
+
     if (_businessId.isEmpty) return;
     try {
       final localDb = LocalDatabase.instance;

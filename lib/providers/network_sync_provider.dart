@@ -50,8 +50,12 @@ class NetworkSyncProvider extends ChangeNotifier {
   NetworkSyncProvider() {
     // Seed with current values
     _isOnline = _connectivity.isOnline;
-    _syncPhase = _syncService.syncState.value.phase;
-    _pendingCount = _syncService.syncState.value.pendingCount;
+
+    // Only access sync service on native platforms
+    if (!kIsWeb) {
+      _syncPhase = _syncService.syncState.value.phase;
+      _pendingCount = _syncService.syncState.value.pendingCount;
+    }
 
     log('[NetworkSyncProvider] ✅ Initialized');
     log(
@@ -61,9 +65,11 @@ class NetworkSyncProvider extends ChangeNotifier {
     // Listen to connectivity changes
     _networkSub = _connectivity.onStatusChange.listen(_onNetworkChange);
 
-    // Listen to sync state changes
-    _syncStateListener = _onSyncStateChange;
-    _syncService.syncState.addListener(_syncStateListener!);
+    // Listen to sync state changes (native only)
+    if (!kIsWeb) {
+      _syncStateListener = _onSyncStateChange;
+      _syncService.syncState.addListener(_syncStateListener!);
+    }
   }
 
   // ── Handlers ────────────────────────────────────────────────────────────────

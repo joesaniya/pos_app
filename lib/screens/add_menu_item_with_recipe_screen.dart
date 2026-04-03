@@ -9,6 +9,7 @@
 
 import 'dart:developer';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -764,6 +765,22 @@ class _AddMenuItemWithRecipeScreenState
     final _localDb = LocalDatabase.instance;
 
     try {
+      // On web: Save directly to Supabase (no local caching)
+      if (kIsWeb) {
+        try {
+          await Supabase.instance.client
+              .from('recipes')
+              .upsert(supabaseRecipeData);
+          log(
+            '[Recipe] ✅ Recipe saved on web: $recipeId → menu_item: $menuItemId',
+          );
+          return;
+        } catch (e) {
+          log('[Recipe] ❌ Web save failed: $e');
+          rethrow;
+        }
+      }
+
       // 1. Save to local cache
       await _localDb.upsertEntity(
         table: 'local_recipes',

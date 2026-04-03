@@ -3,6 +3,7 @@ import 'dart:developer';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -57,11 +58,17 @@ class AppAuthenticationProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final StorageService _storage = StorageService.instance;
-  // final GoogleSignIn _googleSignIn = GoogleSignIn();
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    serverClientId:
-        '229109371607-rc6ni047aee8g0r9f7pt9pfrvpo4h0mi.apps.googleusercontent.com',
-  );
+
+  // Lazy-initialized GoogleSignIn (null on web or if initialization fails)
+  GoogleSignIn? _googleSignIn;
+  GoogleSignIn? get _gsi {
+    if (kIsWeb) return null; // GoogleSignIn not supported on web
+    _googleSignIn ??= GoogleSignIn(
+      serverClientId:
+          '229109371607-rc6ni047aee8g0r9f7pt9pfrvpo4h0mi.apps.googleusercontent.com',
+    );
+    return _googleSignIn;
+  }
 
   StreamSubscription<DocumentSnapshot>? _sessionWatcher;
   StreamSubscription<DocumentSnapshot>? _subscriptionWatcher;
@@ -496,7 +503,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     _cancelSubscriptionWatcher();
     try {
       await _auth.signOut();
-      await _googleSignIn.signOut();
+      await _gsi?.signOut();
     } catch (_) {}
     await _storage.clearUserData();
     _userData = {};
@@ -756,7 +763,7 @@ class AppAuthenticationProvider with ChangeNotifier {
     setLoading(true);
     HapticFeedback.mediumImpact();
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      final GoogleSignInAccount? googleUser = await _gsi?.signIn();
       if (googleUser == null) {
         setLoading(false);
         return 'cancelled';
@@ -797,7 +804,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       final bool foundByEmail = emailSnap != null && emailSnap.docs.isNotEmpty;
       if (!foundByUid && !foundByEmail) {
         await _auth.signOut();
-        await _googleSignIn.signOut();
+        await _gsi?.signOut();
         setLoading(false);
         return 'not_found';
       }
@@ -808,7 +815,7 @@ class AppAuthenticationProvider with ChangeNotifier {
 
       if (data['isActive'] != true || data['isDeleted'] == true) {
         await _auth.signOut();
-        await _googleSignIn.signOut();
+        await _gsi?.signOut();
         setLoading(false);
         return 'inactive';
       }
@@ -817,7 +824,7 @@ class AppAuthenticationProvider with ChangeNotifier {
       if (await _isSubscriptionExpired(bizId)) {
         _subscriptionExpired = true;
         await _auth.signOut();
-        await _googleSignIn.signOut();
+        await _gsi?.signOut();
         setLoading(false);
         return 'subscriptionExpired';
       }
@@ -1324,7 +1331,7 @@ class AppAuthenticationProvider with ChangeNotifier {
   Future<void> logout1() async {
     stopSessionWatcher();
     await _auth.signOut();
-    await _googleSignIn.signOut();
+    await _gsi?.signOut();
     await _storage.clearUserData();
     if (!_rememberMe) {
       await _storage.clearRememberedCredentials();

@@ -38,6 +38,27 @@ class InventoryRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<InventoryItem>> fetchItems(String businessId) async {
+    // Skip local database on web platform — fetch from remote only
+    if (kIsWeb) {
+      try {
+        final rows = await _sb
+            .from('inventory_items')
+            .select('*, stock_transactions(*)')
+            .eq('business_id', businessId)
+            .eq('is_active', true)
+            .order('name');
+        final items = (rows as List)
+            .map((r) => _rowToItem(r as Map<String, dynamic>))
+            .whereType<InventoryItem>()
+            .toList();
+        log('[InventoryRepo] Fetched ${items.length} items from remote (web)');
+        return items;
+      } catch (e) {
+        log('[InventoryRepo] Remote fetch error: $e');
+        return [];
+      }
+    }
+
     final rows = await _local.getEntities(
       table: LocalDatabase.tInventory,
       businessId: businessId,
@@ -59,11 +80,16 @@ class InventoryRepository {
       final items = (rows as List)
           .map((r) => r as Map<String, dynamic>)
           .toList();
-      await _local.replaceAll(
-        table: LocalDatabase.tInventory,
-        businessId: businessId,
-        entities: items,
-      );
+
+      // Cache to local database only on native platforms
+      if (!kIsWeb) {
+        await _local.replaceAll(
+          table: LocalDatabase.tInventory,
+          businessId: businessId,
+          entities: items,
+        );
+      }
+
       log('[InventoryRepo] Remote refresh: ${items.length} items cached');
     } catch (e) {
       debugPrint('[InventoryRepo] Remote refresh error: $e');
@@ -95,17 +121,19 @@ class InventoryRepository {
       'last_updated': now,
     };
 
-    // Local first
-    await _local.upsertEntity(
-      table: LocalDatabase.tInventory,
-      id: id,
-      businessId: businessId,
-      data: data,
-      syncStatus: _connectivity.isOnline
-          ? LocalDatabase.syncSynced
-          : LocalDatabase.syncPending,
-      action: LocalDatabase.actionCreate,
-    );
+    // Local first (skip on web)
+    if (!kIsWeb) {
+      await _local.upsertEntity(
+        table: LocalDatabase.tInventory,
+        id: id,
+        businessId: businessId,
+        data: data,
+        syncStatus: _connectivity.isOnline
+            ? LocalDatabase.syncSynced
+            : LocalDatabase.syncPending,
+        action: LocalDatabase.actionCreate,
+      );
+    }
 
     if (_connectivity.isOnline) {
       try {

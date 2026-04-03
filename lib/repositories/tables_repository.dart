@@ -79,6 +79,43 @@ class TablesRepository {
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<List<RestaurantTable>> fetchTables(String businessId) async {
+    // Skip local cache on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        final rows = await _sb
+            .from(_kView)
+            .select()
+            .eq('business_id', businessId)
+            .eq('is_active', true)
+            .order('table_number');
+
+        final seatRows = await _sb
+            .from('table_seats')
+            .select()
+            .eq('business_id', businessId);
+
+        final tables = (rows as List)
+            .map<RestaurantTable?>((r) {
+              final row = r as Map<String, dynamic>;
+              final tableId = row['id'] as String?;
+              final seats = seatRows
+                  .where(
+                    (s) => (s as Map<String, dynamic>)['table_id'] == tableId,
+                  )
+                  .toList();
+              row['seats'] = seats;
+              return _rowToTable(row);
+            })
+            .whereType<RestaurantTable>()
+            .toList();
+
+        return tables..sort((a, b) => a.tableNumber.compareTo(b.tableNumber));
+      } catch (e) {
+        debugPrint('[TablesRepo] Web fetchTables error: $e');
+        return [];
+      }
+    }
+
     final rows = await _local.getEntities(
       table: LocalDatabase.tTables,
       businessId: businessId,
@@ -90,6 +127,23 @@ class TablesRepository {
   }
 
   Future<void> refreshFromRemote(String businessId) async {
+    // Skip local caching on web — just validate data exists
+    if (kIsWeb) {
+      try {
+        final rowsFut = _sb
+            .from(_kView)
+            .select()
+            .eq('business_id', businessId)
+            .eq('is_active', true)
+            .order('table_number');
+        await rowsFut; // Just ensure the query succeeds
+        log('[TablesRepo] Web refresh OK');
+      } catch (e) {
+        debugPrint('[TablesRepo] Web refresh error: $e');
+      }
+      return;
+    }
+
     try {
       final rowsFut = _sb
           .from(_kView)
@@ -168,6 +222,46 @@ class TablesRepository {
   Future<List<ReservationHistoryItem>> fetchUpcomingReservations(
     String businessId,
   ) async {
+    // Skip local cache on web — fetch from remote only
+    if (kIsWeb) {
+      try {
+        final from = DateTime.now()
+            .subtract(const Duration(days: 1))
+            .toUtc()
+            .toIso8601String();
+        final to = DateTime.now()
+            .add(const Duration(days: 60))
+            .toUtc()
+            .toIso8601String();
+
+        final rows = await _sb
+            .from(_kReservations)
+            .select('*, restaurant_tables(table_number, section)')
+            .eq('business_id', businessId)
+            .inFilter('status', ['active', 'seated'])
+            .gte('reserved_for', from)
+            .lte('reserved_for', to)
+            .order('reserved_for', ascending: true);
+
+        return (rows as List)
+            .map<ReservationHistoryItem?>((r) {
+              try {
+                return ReservationHistoryItem.fromMap(
+                  r as Map<String, dynamic>,
+                );
+              } catch (e) {
+                debugPrint('[TablesRepo] Error parsing web reservation: $e');
+                return null;
+              }
+            })
+            .whereType<ReservationHistoryItem>()
+            .toList();
+      } catch (e) {
+        debugPrint('[TablesRepo] Web fetchUpcomingReservations error: $e');
+        return [];
+      }
+    }
+
     final rows = await _local.getEntities(
       table: LocalDatabase.tReservations,
       businessId: businessId,
@@ -184,6 +278,36 @@ class TablesRepository {
   }
 
   Future<void> refreshReservationsFromRemote(String businessId) async {
+    // Skip local caching on web — just validate data exists
+    if (kIsWeb) {
+      try {
+        final from = DateTime.now()
+            .subtract(const Duration(days: 1))
+            .toUtc()
+            .toIso8601String();
+        final to = DateTime.now()
+            .add(const Duration(days: 60))
+            .toUtc()
+            .toIso8601String();
+
+        final rows = await _sb
+            .from(_kReservations)
+            .select('*, restaurant_tables(table_number, section)')
+            .eq('business_id', businessId)
+            .inFilter('status', ['active', 'seated'])
+            .gte('reserved_for', from)
+            .lte('reserved_for', to)
+            .order('reserved_for', ascending: true);
+
+        log(
+          '[TablesRepo] Web refresh reservations OK: ${(rows as List).length} reservations',
+        );
+      } catch (e) {
+        debugPrint('[TablesRepo] Web refresh reservations error: $e');
+      }
+      return;
+    }
+
     try {
       final from = DateTime.now()
           .subtract(const Duration(days: 1))

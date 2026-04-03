@@ -2,6 +2,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -41,15 +42,24 @@ Future<void> main() async {
     anonKey: AppConfig.supabaseAnonKey,
   );
 
-  // ✅ Initialize Local Notifications
-  await ReservationNotificationService().initialize();
+  // ✅ Initialize Local Notifications (native platforms only)
+  if (!kIsWeb) {
+    await ReservationNotificationService().initialize();
+  }
 
-  await BackgroundTaskService.initialize();
+  // ✅ Initialize Background Tasks (native platforms only)
+  if (!kIsWeb) {
+    await BackgroundTaskService.initialize();
+  }
 
-  // ✅ Initialize Offline-First Core Services
-  await LocalDatabase.instance.init();
+  // ✅ Initialize Offline-First Core Services (native platforms only)
+  if (!kIsWeb) {
+    await LocalDatabase.instance.init();
+    OfflineSyncService.instance.start();
+  }
+
+  // ✅ Connectivity can work on web
   await ConnectivityService.instance.init();
-  OfflineSyncService.instance.start();
 
   // await FcmService.initialize();
 
@@ -93,9 +103,9 @@ class MyApp extends StatelessWidget {
                 builder: (context, child) {
                   // Keep MediaQuery wrapper for correct safe area padding.
                   return MediaQuery(
-                    data: MediaQuery.of(context).copyWith(
-                      padding: MediaQuery.of(context).padding,
-                    ),
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(padding: MediaQuery.of(context).padding),
                     child: child!,
                   );
                 },

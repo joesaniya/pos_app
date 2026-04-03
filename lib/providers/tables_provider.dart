@@ -1344,7 +1344,7 @@ class TablesProvider extends ChangeNotifier {
 
       List<ReservationHistoryItem> items = [];
 
-      if (ConnectivityService.instance.isOnline) {
+      if (kIsWeb || ConnectivityService.instance.isOnline) {
         final rows = await _sb
             .from(_kReservations)
             .select('*, restaurant_tables(table_number, section)')

@@ -239,6 +239,9 @@ class OfflineSyncService {
 
   // ── Process the queue ─────────────────────────────────────────────────────
   Future<void> processPendingQueue() async {
+    // Web platform doesn't use offline sync
+    if (kIsWeb) return;
+
     if (_isSyncing) return;
     if (!await _connectivity.checkNow()) return;
 

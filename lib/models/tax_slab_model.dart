@@ -54,6 +54,7 @@ class TaxSlab {
   final double percentage; // percentage value (5, 12, 18 etc.)
   final TaxType type; // inclusive or exclusive
   final String? description;
+  final String? taxNumber; // Tax ID/License Number for the business (mandatory)
   final bool isActive;
   final int sortOrder;
 
@@ -77,6 +78,7 @@ class TaxSlab {
     required this.percentage,
     required this.type,
     this.description,
+    this.taxNumber,
     this.isActive = true,
     this.sortOrder = 0,
     required this.createdByUid,
@@ -102,6 +104,7 @@ class TaxSlab {
       percentage: (json['percentage'] as num?)?.toDouble() ?? 0.0,
       type: TaxTypeExt.fromString((json['type'] as String?) ?? 'exclusive'),
       description: json['description'] as String?,
+      taxNumber: json['tax_number'] as String?,
       isActive: (json['is_active'] as bool?) ?? true,
       sortOrder: (json['sort_order'] as int?) ?? 0,
       createdByUid: (json['created_by_uid'] as String?) ?? '',
@@ -131,6 +134,7 @@ class TaxSlab {
     'percentage': percentage,
     'type': type.dbValue,
     'description': description,
+    'tax_number': taxNumber,
     'is_active': isActive,
     'sort_order': sortOrder,
     'created_by_uid': createdByUid,
@@ -155,6 +159,7 @@ class TaxSlab {
     double? percentage,
     TaxType? type,
     String? description,
+    String? taxNumber,
     bool? isActive,
     int? sortOrder,
     String? createdByUid,
@@ -174,6 +179,7 @@ class TaxSlab {
       percentage: percentage ?? this.percentage,
       type: type ?? this.type,
       description: description ?? this.description,
+      taxNumber: taxNumber ?? this.taxNumber,
       isActive: isActive ?? this.isActive,
       sortOrder: sortOrder ?? this.sortOrder,
       createdByUid: createdByUid ?? this.createdByUid,

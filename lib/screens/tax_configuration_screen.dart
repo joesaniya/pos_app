@@ -5,10 +5,57 @@ import 'package:provider/provider.dart';
 import 'package:pos_app/models/tax_slab_model.dart';
 import 'package:pos_app/providers/tax_provider.dart';
 import 'package:pos_app/services/storage_service.dart';
-import 'package:pos_app/theme/app_colors.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CUSTOM SNACKBAR HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+void showCustomSnackBar(
+  BuildContext context, {
+  required String message,
+  required bool isSuccess,
+}) {
+  // Remove any existing snackbar
+  ScaffoldMessenger.of(context).removeCurrentSnackBar();
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Row(
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: Icon(
+              isSuccess ? Icons.check_circle : Icons.error_outline,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: isSuccess ? Colors.green.shade600 : Colors.red.shade600,
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      duration: const Duration(seconds: 4),
+      elevation: 6,
+    ),
+  );
+}
 
 class TaxConfigurationScreen extends StatefulWidget {
-  const TaxConfigurationScreen({Key? key}) : super(key: key);
+  const TaxConfigurationScreen({super.key});
 
   @override
   State<TaxConfigurationScreen> createState() => _TaxConfigurationScreenState();
@@ -17,7 +64,6 @@ class TaxConfigurationScreen extends StatefulWidget {
 class _TaxConfigurationScreenState extends State<TaxConfigurationScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  bool _showInactive = false;
   String _userRole = '';
 
   @override
@@ -138,105 +184,167 @@ class _TaxConfigurationScreenState extends State<TaxConfigurationScreen>
 
   void _showCreateDialog(BuildContext context) {
     log('Opening create tax slab dialog');
-    showDialog(
-      context: context,
-      builder: (dialogContext) => _TaxSlabFormDialog(
-        taxSlab: null,
-        onSave: (name, percentage, type, description) =>
-            _createTaxSlab(context, name, percentage, type, description),
-      ),
-    );
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => _TaxSlabFormDialog(
+          taxSlab: null,
+          onSave: (name, percentage, type, description, taxNumber) =>
+              _createTaxSlab(
+                dialogContext,
+                name,
+                percentage,
+                type,
+                description,
+                taxNumber,
+              ),
+        ),
+      );
+    }
   }
 
   void _showEditDialog(BuildContext context, TaxSlab taxSlab) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => _TaxSlabFormDialog(
-        taxSlab: taxSlab,
-        onSave: (name, percentage, type, description) => _updateTaxSlab(
-          context,
-          taxSlab,
-          name,
-          percentage,
-          type,
-          description,
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => _TaxSlabFormDialog(
+          taxSlab: taxSlab,
+          onSave: (name, percentage, type, description, taxNumber) =>
+              _updateTaxSlab(
+                dialogContext,
+                taxSlab,
+                name,
+                percentage,
+                type,
+                description,
+                taxNumber,
+              ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   Future<void> _createTaxSlab(
-    BuildContext context,
+    BuildContext dialogContext,
     String name,
     double percentage,
     TaxType type,
     String? description,
+    String taxNumber,
   ) async {
-    // Close dialog first
-    Navigator.of(context).pop();
+    // Get screen context for snackbar (not dialog context)
+    final screenContext = context;
+    final provider = screenContext.read<TaxProvider>();
 
-    final provider = context.read<TaxProvider>();
-    final created = await provider.createTaxSlab(
-      name: name,
-      percentage: percentage,
-      type: type,
-      description: description,
-    );
+    try {
+      final created = await provider.createTaxSlab(
+        name: name,
+        percentage: percentage,
+        type: type,
+        description: description,
+        taxNumber: taxNumber,
+      );
 
-    if (mounted) {
+      if (!mounted) return;
+
       if (created != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tax slab "$name" created successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else if (provider.error != null) {
-        log('Error creating tax slab: ${provider.error}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${provider.error}'),
-            backgroundColor: Colors.red,
-          ),
+        // Success: close dialog then show snackbar
+        if (dialogContext.mounted) {
+          Navigator.of(dialogContext).pop();
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            showCustomSnackBar(
+              screenContext,
+              message: 'Tax slab "$name" created successfully',
+              isSuccess: true,
+            );
+          }
+        });
+      } else {
+        // Error: keep dialog open, show error snackbar
+        final errorMsg = provider.error ?? 'Failed to create tax slab';
+        log('Error creating tax slab: $errorMsg');
+        if (mounted) {
+          showCustomSnackBar(
+            screenContext,
+            message: errorMsg,
+            isSuccess: false,
+          );
+        }
+      }
+    } catch (e) {
+      log('Exception creating tax slab: $e');
+      if (mounted) {
+        showCustomSnackBar(
+          screenContext,
+          message: 'An error occurred: $e',
+          isSuccess: false,
         );
       }
     }
   }
 
   Future<void> _updateTaxSlab(
-    BuildContext context,
+    BuildContext dialogContext,
     TaxSlab taxSlab,
     String name,
     double percentage,
     TaxType type,
     String? description,
+    String taxNumber,
   ) async {
-    // Close dialog first
-    Navigator.of(context).pop();
+    // Get screen context for snackbar (not dialog context)
+    final screenContext = context;
+    final provider = screenContext.read<TaxProvider>();
 
-    final provider = context.read<TaxProvider>();
-    final updated = await provider.updateTaxSlab(
-      taxSlab: taxSlab,
-      name: name,
-      percentage: percentage,
-      type: type,
-      description: description,
-    );
+    try {
+      final updated = await provider.updateTaxSlab(
+        taxSlab: taxSlab,
+        name: name,
+        percentage: percentage,
+        type: type,
+        description: description,
+        taxNumber: taxNumber,
+      );
 
-    if (mounted) {
+      if (!mounted) return;
+
       if (updated != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tax slab "$name" updated successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else if (provider.error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${provider.error}'),
-            backgroundColor: Colors.red,
-          ),
+        // Success: close dialog then show snackbar
+        if (dialogContext.mounted) {
+          Navigator.of(dialogContext).pop();
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            showCustomSnackBar(
+              screenContext,
+              message: 'Tax slab "$name" updated successfully',
+              isSuccess: true,
+            );
+          }
+        });
+      } else {
+        // Error: keep dialog open, show error snackbar
+        final errorMsg = provider.error ?? 'Failed to update tax slab';
+        log('Error updating tax slab: $errorMsg');
+        if (mounted) {
+          showCustomSnackBar(
+            screenContext,
+            message: errorMsg,
+            isSuccess: false,
+          );
+        }
+      }
+    } catch (e) {
+      log('Exception updating tax slab: $e');
+      if (mounted) {
+        showCustomSnackBar(
+          screenContext,
+          message: 'An error occurred: $e',
+          isSuccess: false,
         );
       }
     }
@@ -313,8 +421,8 @@ class _TaxSlabCard extends StatelessWidget {
           height: 50,
           decoration: BoxDecoration(
             color: taxSlab.isActive
-                ? Colors.green.withOpacity(0.1)
-                : Colors.grey.withOpacity(0.1),
+                ? Colors.green.withValues(alpha: 0.1)
+                : Colors.grey.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Center(
@@ -343,7 +451,7 @@ class _TaxSlabCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
+                  color: Colors.orange.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: const Text(
@@ -424,7 +532,7 @@ class _TaxTypeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
+        color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
@@ -445,7 +553,7 @@ class _TaxTypeBadge extends StatelessWidget {
 
 class _TaxSlabFormDialog extends StatefulWidget {
   final TaxSlab? taxSlab;
-  final Function(String, double, TaxType, String?) onSave;
+  final Function(String, double, TaxType, String?, String) onSave;
 
   const _TaxSlabFormDialog({required this.taxSlab, required this.onSave});
 
@@ -457,6 +565,7 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
   late TextEditingController _nameController;
   late TextEditingController _percentageController;
   late TextEditingController _descriptionController;
+  late TextEditingController _taxNumberController;
   late TaxType _selectedType;
   late GlobalKey<FormState> _formKey;
 
@@ -471,6 +580,9 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
     _descriptionController = TextEditingController(
       text: widget.taxSlab?.description ?? '',
     );
+    _taxNumberController = TextEditingController(
+      text: widget.taxSlab?.taxNumber ?? '',
+    );
     _selectedType = widget.taxSlab?.type ?? TaxType.exclusive;
   }
 
@@ -479,13 +591,21 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
     _nameController.dispose();
     _percentageController.dispose();
     _descriptionController.dispose();
+    _taxNumberController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.taxSlab == null ? 'Create Tax Slab' : 'Edit Tax Slab'),
+      title: Text(
+        widget.taxSlab == null ? 'Create Tax Slab' : 'Edit Tax Slab',
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       content: Form(
         key: _formKey,
         child: Column(
@@ -536,7 +656,7 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
 
             // Tax Type dropdown
             DropdownButtonFormField<TaxType>(
-              value: _selectedType,
+              initialValue: _selectedType,
               decoration: const InputDecoration(
                 labelText: 'Tax Type',
                 border: OutlineInputBorder(),
@@ -557,7 +677,7 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
+                color: Colors.blue.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -566,6 +686,23 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
                     : 'Tax is already included in the item price',
                 style: const TextStyle(fontSize: 12),
               ),
+            ),
+            const SizedBox(height: 16),
+
+            // Tax Number/License field
+            TextFormField(
+              controller: _taxNumberController,
+              decoration: const InputDecoration(
+                labelText: 'Tax ID/License Number',
+                hintText: 'e.g., GST123456789',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                if (value?.isEmpty ?? true) {
+                  return 'Tax ID/License Number is required';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 16),
 
@@ -583,13 +720,23 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        TextButton.icon(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          icon: const Icon(Icons.close, size: 18),
+          label: const Text('Cancel'),
         ),
-        ElevatedButton(
+        ElevatedButton.icon(
           onPressed: _submit,
-          child: Text(widget.taxSlab == null ? 'Create' : 'Update'),
+          icon: const Icon(Icons.check, size: 18),
+          label: Text(widget.taxSlab == null ? 'Create' : 'Update'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue.shade600,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
         ),
       ],
     );
@@ -603,9 +750,11 @@ class _TaxSlabFormDialogState extends State<_TaxSlabFormDialog> {
       final description = _descriptionController.text.trim().isEmpty
           ? null
           : _descriptionController.text.trim();
+      final taxNumber = _taxNumberController.text.trim();
 
-      widget.onSave(name, percentage, type, description);
-      Navigator.pop(context);
+      // Call the async onSave callback
+      // The dialog will be closed only on success by the callback
+      widget.onSave(name, percentage, type, description, taxNumber);
     }
   }
 }

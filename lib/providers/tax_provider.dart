@@ -133,6 +133,7 @@ class TaxProvider extends ChangeNotifier {
     required double percentage,
     required TaxType type,
     String? description,
+    String? taxNumber,
   }) async {
     // Permission check
     if (!_canModifyTax()) {
@@ -155,6 +156,7 @@ class TaxProvider extends ChangeNotifier {
         percentage: percentage,
         type: type,
         description: description,
+        taxNumber: taxNumber,
         createdByUid: _uid,
         createdByName: _name,
         createdByEmail: _email,
@@ -187,6 +189,7 @@ class TaxProvider extends ChangeNotifier {
     double? percentage,
     TaxType? type,
     String? description,
+    String? taxNumber,
     bool? isActive,
   }) async {
     // Permission check
@@ -204,6 +207,7 @@ class TaxProvider extends ChangeNotifier {
         percentage: percentage,
         type: type,
         description: description,
+        taxNumber: taxNumber,
         isActive: isActive,
       );
 

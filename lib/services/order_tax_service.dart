@@ -154,14 +154,10 @@ class OrderTaxService {
 
       final List<AppliedTax> appliedToItem = [];
 
-      // Get tax slab for this item if specified
-      final taxSlabId = itemTaxSlabIds?[item.menuItemId];
-
-      if (taxSlabId != null && taxSlabId.isNotEmpty) {
-        try {
-          final taxSlab = await _taxRepository.getTaxSlabById(taxSlabId);
-
-          if (taxSlab != null && taxSlab.isActive) {
+      // ✅ APPLY ALL ACTIVE BUSINESS TAXES TO THIS ITEM
+      if (applicableTaxes.isNotEmpty) {
+        for (final taxSlab in applicableTaxes) {
+          try {
             // Calculate tax for this slab
             final calc = TaxCalculation(
               taxSlab: taxSlab,
@@ -191,18 +187,37 @@ class OrderTaxService {
             // Track tax by name
             taxByName[taxSlab.name] =
                 (taxByName[taxSlab.name] ?? 0) + itemTaxAmount;
-          } else {
+
             log(
-              '[OrderTaxService] Tax slab is inactive or not found: $taxSlabId',
+              '[OrderTaxService] Applied ${taxSlab.name} to ${item.itemName}: ₹${itemTaxAmount.toStringAsFixed(2)}',
             );
+          } catch (e) {
+            log('[OrderTaxService] Error applying tax slab ${taxSlab.id}: $e');
           }
-        } catch (e) {
-          log('[OrderTaxService] Error fetching tax slab $taxSlabId: $e');
         }
       }
 
-      // Also apply default/global taxes if configured
-      // For now, we only apply per-item taxes
+      // If no active taxes configured, apply default 5% fallback
+      if (appliedToItem.isEmpty) {
+        log(
+          '[OrderTaxService] No active taxes found. Applying default 5% tax to ${item.itemName}',
+        );
+        final defaultTaxAmount = itemSubtotal * 0.05; // Default 5% tax
+        final appliedTax = AppliedTax(
+          taxSlabId: 'default_5pct',
+          taxName: 'Default Tax (5%)',
+          taxPercentage: 5.0,
+          taxType: TaxType.exclusive,
+          baseAmount: itemSubtotal,
+          taxAmount: defaultTaxAmount,
+          totalAmount: itemSubtotal + defaultTaxAmount,
+        );
+        appliedToItem.add(appliedTax);
+        totalTaxAmount += defaultTaxAmount;
+        taxByName['Default Tax (5%)'] =
+            (taxByName['Default Tax (5%)'] ?? 0) + defaultTaxAmount;
+      }
+
       itemTaxes[item.menuItemId] = appliedToItem;
     }
 

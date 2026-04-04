@@ -352,33 +352,86 @@ class _TaxConfigurationScreenState extends State<TaxConfigurationScreen>
 
   void _toggleTaxStatus(BuildContext context, TaxSlab taxSlab) {
     final provider = context.read<TaxProvider>();
+    final newStatus = !taxSlab.isActive;
+    
+    // Immediately update UI optimistically
     provider.toggleTaxSlabStatus(
       taxSlabId: taxSlab.id,
-      isActive: !taxSlab.isActive,
-    );
+      isActive: newStatus,
+    ).then((_) {
+      // Show feedback after update completes
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Tax slab "${taxSlab.name}" ${newStatus ? 'enabled' : 'disabled'}',
+            ),
+            backgroundColor: newStatus ? Colors.green.shade600 : Colors.orange.shade600,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }).catchError((e) {
+      // Show error feedback if toggle fails
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update tax slab: $e'),
+            backgroundColor: Colors.red.shade600,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
   }
 
   void _showDeleteConfirmation(BuildContext context, TaxSlab taxSlab) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Delete Tax Slab'),
         content: Text('Are you sure you want to delete "${taxSlab.name}"?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              context.read<TaxProvider>().deleteTaxSlab(taxSlab.id);
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Tax slab deleted'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
+            onPressed: () async {
+              try {
+                // ✅ Await the deletion to complete
+                await context.read<TaxProvider>().deleteTaxSlab(taxSlab.id);
+                
+                // ✅ Close dialog only after deletion completes
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                
+                // ✅ Show success feedback
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Tax slab "${taxSlab.name}" deleted successfully'),
+                      backgroundColor: Colors.green.shade600,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+              } catch (e) {
+                // ✅ Handle errors gracefully
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to delete tax slab: $e'),
+                      backgroundColor: Colors.red.shade600,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              }
             },
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),

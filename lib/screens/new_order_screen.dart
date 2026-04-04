@@ -12,6 +12,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pos_app/models/order_modal.dart';
 import 'package:pos_app/services/order_service.dart';
+import 'package:pos_app/services/order_tax_service.dart';
+import 'package:pos_app/services/tax_calculation_helper.dart';
 import 'package:pos_app/utils/ist_utils.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -117,10 +119,21 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       []; // Original items for reference
   bool _hasCheckedForExistingOrder = false; // Prevent duplicate checks
 
+  // ── Tax Calculation ───────────────────────────────────────
+  OrderTaxResult? _currentTaxResult; // Dynamic tax calculation for cart
+  bool _taxCalculationError = false; // Flag if tax calculation fails
+
   // ── Computed ──────────────────────────────────────────────
   List<CartItem> get cartItems => _cart.values.toList();
   double get cartSubtotal => cartItems.fold(0.0, (s, i) => s + i.subtotal);
-  double get cartTax => cartSubtotal * 0.05;
+  double get cartTax {
+    if (_currentTaxResult != null) {
+      return _currentTaxResult!.summary.totalTaxAmount;
+    }
+    // Fallback: if tax calculation fails, use default 5%
+    return _taxCalculationError ? 0 : cartSubtotal * 0.05;
+  }
+
   double get cartTotal => cartSubtotal + cartTax;
   int get cartCount => cartItems.fold(0, (s, i) => s + i.quantity);
 
@@ -982,6 +995,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
           quantity: adjustedQuantity,
         );
       });
+      await _calculateTaxForCart();
 
       _snack('✅ Added $adjustedQuantity $itemName to cart (stock limited)');
       return;
@@ -1002,6 +1016,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         );
       }
     });
+    await _calculateTaxForCart();
 
     _snack('✅ Added to cart');
   }
@@ -1033,7 +1048,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     });
   }
 
-  void _removeItem(String id) {
+  Future<void> _removeItem(String id) async {
     setState(() {
       if (!_cart.containsKey(id)) return;
       if (_cart[id]!.quantity <= 1) {
@@ -1042,6 +1057,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
         _cart[id] = _cart[id]!.copyWith(quantity: _cart[id]!.quantity - 1);
       }
     });
+    await _calculateTaxForCart();
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1378,6 +1394,14 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
             ? '➕ Adding items to existing order ${_existingOrder!.id}...'
             : '📝 Creating new order...',
       );
+      log('taxxx:$_currentTaxResult');
+      // ✓ Ensure tax is calculated before placing order
+      if (_currentTaxResult == null && cartItems.isNotEmpty) {
+        await _calculateTaxForCart();
+      }
+
+      final effectiveTaxRate =
+          _currentTaxResult?.summary.effectiveTaxRate ?? 5.0;
 
       final prov = context.read<OrdersProvider>();
       final order = _isContinuingExistingOrder && _existingOrder != null
@@ -1403,6 +1427,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
               notes: _noteCtrl.text.trim().isEmpty
                   ? null
                   : _noteCtrl.text.trim(),
+              taxRate: effectiveTaxRate,
             );
 
       if (!mounted) return;
@@ -1500,6 +1525,48 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       debugPrint('❌ Order placement error: $e');
     } finally {
       if (mounted) setState(() => _placing = false);
+    }
+  }
+
+  /// Calculate taxes dynamically based on OrderTaxService
+  Future<void> _calculateTaxForCart() async {
+    log('Calculating tax for cart items: ${cartItems.length} items');
+    if (cartItems.isEmpty) {
+      setState(() {
+        _currentTaxResult = null;
+        _taxCalculationError = false;
+      });
+      return;
+    }
+
+    try {
+      final taxService = OrderTaxService.instance;
+      debugPrint(
+        '📊 Calling tax calculation service for businessId: $_businessId',
+      );
+      final result = await taxService.calculateOrderTaxes(
+        cartItems: cartItems,
+        businessId: _businessId,
+      );
+
+      debugPrint(
+        '✅ Tax calculated: ₹${result.summary.totalTaxAmount.toStringAsFixed(2)} (rate: ${result.summary.effectiveTaxRate.toStringAsFixed(2)}%)',
+      );
+
+      if (mounted) {
+        setState(() {
+          _currentTaxResult = result;
+          _taxCalculationError = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Tax calculation error: $e');
+      if (mounted) {
+        setState(() {
+          _currentTaxResult = null;
+          _taxCalculationError = false; // Allow fallback tax (5%) to be used
+        });
+      }
     }
   }
 
@@ -2330,6 +2397,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
       cartSubtotal: cartSubtotal,
       cartTax: cartTax,
       cartTotal: cartTotal,
+      taxResult: _currentTaxResult,
       orderType: _orderType,
       customerCtrl: _customerCtrl,
       phoneCtrl: _phoneCtrl,
@@ -4243,6 +4311,7 @@ class _OrderPreviewView extends StatelessWidget {
   final List<Map<String, dynamic>> tables;
   final List<CartItem> cartItems;
   final double cartSubtotal, cartTax, cartTotal;
+  final OrderTaxResult? taxResult;
   final OrderType orderType;
   final TextEditingController customerCtrl, phoneCtrl, noteCtrl;
   final bool placing;
@@ -4267,6 +4336,7 @@ class _OrderPreviewView extends StatelessWidget {
     required this.onTypeChanged,
     required this.onPlaceOrder,
     required this.onBack,
+    this.taxResult,
   }) : super(key: key);
 
   @override
@@ -4496,7 +4566,63 @@ class _OrderPreviewView extends StatelessWidget {
                   children: [
                     _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
                     const SizedBox(height: 8),
-                    _BillRow('Tax', '₹${cartTax.toStringAsFixed(0)}'),
+
+                    if (taxResult != null &&
+                        taxResult!.summary.totalTaxAmount > 0) ...[
+                      // Show expanded tax breakdown if available
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tax Breakdown',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _C.textPri,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            ...taxResult!.summary.taxByName.entries.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      entry.key,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: _C.textSec,
+                                      ),
+                                    ),
+                                    Text(
+                                      '₹${entry.value.toStringAsFixed(0)}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: _C.textPri,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      _BillRow('Tax', '₹${cartTax.toStringAsFixed(0)}'),
+                    ],
                     const Divider(color: _C.border, height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,

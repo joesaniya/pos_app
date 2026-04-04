@@ -261,6 +261,7 @@ class OrdersProvider extends ChangeNotifier {
     String? customerName,
     String? customerPhone,
     String? notes,
+    double taxRate = 5.0,
   }) async {
     if (_businessId.isEmpty || _uid.isEmpty) await _loadUserFromFirestore();
 
@@ -292,6 +293,7 @@ class OrdersProvider extends ChangeNotifier {
       customerName: customerName,
       customerPhone: customerPhone,
       notes: notes,
+      taxRate: taxRate,
     );
 
     // Mark this ID so the realtime callback skips the INSERT event for it

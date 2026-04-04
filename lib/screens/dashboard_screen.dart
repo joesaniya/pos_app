@@ -3,6 +3,7 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:pos_app/screens/report_screen.dart';
 import 'package:pos_app/screens/revenue_analytics_screen.dart';
+import 'package:pos_app/widgets/tax_analytics_card.dart';
 import 'package:provider/provider.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../providers/analytics_provider.dart';
@@ -1434,6 +1435,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 isLoading: prov.isLoading,
                               ),
                               const SizedBox(height: 20),
+                              // ── Tax Analytics Card ──
+                              if (!prov.isLoading) ...[
+                                TaxAnalyticsCard(
+                                  businessId: prov.businessId,
+                                  isLoading: prov.isLoading,
+                                ),
+                                const SizedBox(height: 20),
+                              ],
+                              if (prov.isLoading) ...[
+                                Container(
+                                  height: 300,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[300],
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                              ],
                               if (!prov.isLoading && prov.isAdminLevel) ...[
                                 _buildTableStats(prov),
                                 const SizedBox(height: 20),

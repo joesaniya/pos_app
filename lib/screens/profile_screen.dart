@@ -10,6 +10,7 @@ import 'package:pos_app/screens/edit_profile_Screen.dart';
 import 'package:pos_app/screens/login_screen.dart';
 import 'package:pos_app/screens/promo_code_management_screen.dart';
 import 'package:pos_app/screens/qr_code_upload_screen.dart';
+import 'package:pos_app/screens/tax_configuration_screen.dart';
 import 'package:pos_app/screens/tables_screen/widgets/team_member_quick_Action_card_widget.dart';
 import 'package:pos_app/screens/utils/user_profile.dart';
 import 'package:pos_app/utils/promo_code_access_control.dart';
@@ -2593,6 +2594,11 @@ class _ActionsGrid extends StatelessWidget {
     return PromoCodeAccessControl.canManagePromoCodes(p.role.label);
   }
 
+  bool get _canManageTax {
+    final r = p.role.label.toLowerCase();
+    return r == 'owner' || r == 'admin' || r == 'system';
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -2642,17 +2648,16 @@ class _ActionsGrid extends StatelessWidget {
           children: [
             Expanded(
               child: _ACard(
-                icon: Icons.qr_code_2_rounded,
-                lbl: 'Payment\nQR Code',
-                sub: _canCreate ? 'Billing QR' : 'No permission',
-                c: _canCreate ? _C.teal : _C.muted,
-                disabled: !_canCreate,
-                onTap: _canCreate
+                icon: Icons.receipt_long,
+                lbl: 'Tax\nConfiguration',
+                sub: _canManageTax ? 'Manage tax slabs' : 'No permission',
+                c: _canManageTax ? _C.indigo : _C.muted,
+                disabled: !_canManageTax,
+                onTap: _canManageTax
                     ? () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              QrCodeUploadScreen(businessId: p.businessId),
+                          builder: (_) => const TaxConfigurationScreen(),
                         ),
                       )
                     : null,
@@ -2661,47 +2666,19 @@ class _ActionsGrid extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _ACard(
-                icon: Icons.discount_rounded,
-                lbl: 'Promo Codes',
-                sub: _canManagePromos ? 'Manage discounts' : 'No permission',
-                c: _canManagePromos ? _C.violet : _C.muted,
-                disabled: !_canManagePromos,
-                onTap: _canManagePromos
-                    ? () {
-                        PromoCodeAccessControl.logAccessAttempt(
-                          p.role.label,
-                          'navigate_to_promo_management',
-                          true,
-                        );
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => PromoCodeManagementScreen(
-                              businessId: p.businessId,
-                              userId: p.id,
-                              userRole: p.role.label,
-                            ),
-                          ),
-                        );
-                      }
-                    : () {
-                        PromoCodeAccessControl.logAccessAttempt(
-                          p.role.label,
-                          'promo_management_denied',
-                          false,
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              PromoCodeAccessControl.getAccessDeniedReason(
-                                p.role.label,
-                              ),
-                            ),
-                            backgroundColor: _C.rose,
-                            duration: const Duration(seconds: 4),
-                          ),
-                        );
-                      },
+                icon: Icons.trending_up_rounded,
+                lbl: 'Analytics',
+                sub: 'View reports',
+                c: _C.green,
+                onTap: () {
+                  // Placeholder for future analytics feature
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Analytics feature coming soon'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
               ),
             ),
           ],

@@ -16,6 +16,7 @@ import 'package:pos_app/providers/splash_provider.dart';
 import 'package:pos_app/providers/supabase_menu_provider.dart';
 import 'package:pos_app/providers/qr_code_provider.dart';
 import 'package:pos_app/providers/tables_provider.dart';
+import 'package:pos_app/providers/tax_provider.dart';
 import 'package:pos_app/theme/theme_provider.dart';
 import 'package:pos_app/providers/network_sync_provider.dart';
 import 'package:pos_app/services/connectivity_service.dart';
@@ -56,6 +57,7 @@ class ProviderHelperClass {
     ChangeNotifierProvider(create: (_) => CreateAccountProvider()),
     ChangeNotifierProvider(create: (_) => QrCodeProvider()),
     ChangeNotifierProvider(create: (_) => PromoCodeProvider()),
+    ChangeNotifierProvider(create: (_) => TaxProvider()),
     ChangeNotifierProvider(create: (_) => NetworkSyncProvider()),
   ];
 }

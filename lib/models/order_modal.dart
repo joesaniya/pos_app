@@ -501,6 +501,7 @@ class Order {
   final double roundOff;
   final double totalAmount;
   final double taxRate;
+  final Map<String, double>? taxBreakdown; // e.g., {'GST 18%': 1800, 'CGST 9%': 900}
 
   // Items
   final List<OrderItem> items;
@@ -552,6 +553,7 @@ class Order {
     this.roundOff = 0,
     required this.totalAmount,
     this.taxRate = 5.0,
+    this.taxBreakdown,
     this.items = const [],
     this.notes,
     required this.businessId,
@@ -676,6 +678,9 @@ class Order {
       roundOff: (j['round_off'] as num? ?? 0).toDouble(),
       totalAmount: (j['total_amount'] as num? ?? 0).toDouble(),
       taxRate: (j['tax_rate'] as num? ?? 5).toDouble(),
+      taxBreakdown: j['tax_breakdown'] is Map
+          ? (j['tax_breakdown'] as Map).cast<String, double>()
+          : null,
       items: items,
       notes: j['notes'] as String?,
       businessId: j['business_id'] as String? ?? '',
@@ -723,6 +728,7 @@ class Order {
     DateTime? readyAt,
     DateTime? completedAt,
     DateTime? cancelledAt,
+    Map<String, double>? taxBreakdown,
   }) => Order(
     id: id,
     orderNumber: orderNumber,

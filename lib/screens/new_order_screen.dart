@@ -2366,6 +2366,8 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                   // ✨ NEW: Pass existing order context
                   existingOrder: _existingOrder,
                   isContinuingExistingOrder: _isContinuingExistingOrder,
+                  // ✨ TAX BREAKDOWN: Pass tax result for display
+                  taxResult: _currentTaxResult,
                 )
               : _MenuView(
                   key: const ValueKey('menu_in_menu_step'),
@@ -3072,6 +3074,8 @@ class _CartView extends StatelessWidget {
   // ✨ NEW: Seamless order continuation context
   final Order? existingOrder;
   final bool isContinuingExistingOrder;
+  // ✨ TAX BREAKDOWN: Display all taxes in cart bill
+  final OrderTaxResult? taxResult;
 
   const _CartView({
     Key? key,
@@ -3099,6 +3103,8 @@ class _CartView extends StatelessWidget {
     // ✨ NEW: Optional existing order parameters
     this.existingOrder,
     this.isContinuingExistingOrder = false,
+    // ✨ TAX BREAKDOWN: Optional tax result
+    this.taxResult,
   }) : super(key: key);
 
   @override
@@ -4137,8 +4143,60 @@ class _CartView extends StatelessWidget {
             children: [
               _BillRow('Subtotal', '₹${cartSubtotal.toStringAsFixed(0)}'),
               const SizedBox(height: 6),
-              // _BillRow('Tax (5%)', '₹${cartTax.toStringAsFixed(0)}'),
-              _BillRow('Tax', '₹${cartTax.toStringAsFixed(0)}'),
+
+              if (taxResult != null &&
+                  taxResult!.summary.totalTaxAmount > 0) ...[
+                // Show expanded tax breakdown if available
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Tax Breakdown',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _C.textPri,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ...taxResult!.summary.taxByName.entries.map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                entry.key,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: _C.textSec,
+                                ),
+                              ),
+                              Text(
+                                '₹${entry.value.toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: _C.textPri,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                _BillRow('Tax', '₹${cartTax.toStringAsFixed(0)}'),
+              ],
               const Divider(color: _C.border, height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
